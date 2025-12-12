@@ -307,6 +307,7 @@ serve(async (req) => {
         
         const msgId = payload.messageId;
         const status = payload.status; // DELIVERY, READ, PLAYED
+        const contactPhone = payload.chat?.id?.replace(/\D/g, "") || "";
         
         let statusText = "sent";
         if (status === "DELIVERY" || status === "delivered") statusText = "delivered";
@@ -314,15 +315,59 @@ serve(async (req) => {
         if (status === "PLAYED" || status === "played") statusText = "read";
 
         if (msgId) {
-          const { error } = await supabase
+          // Update message status in database
+          const { data: updatedMessage, error } = await supabase
             .from("messages")
             .update({ status: statusText })
-            .eq("whatsapp_message_id", msgId);
+            .eq("whatsapp_message_id", msgId)
+            .select("metadata")
+            .maybeSingle();
           
           if (error) {
             console.error("Error updating message status:", error);
           } else {
             console.log(`Message ${msgId} status updated to: ${statusText}`);
+
+            // Sync status to Bitrix24 if integration is active
+            if (statusText === "delivered" || statusText === "read") {
+              try {
+                const { data: bitrixIntegration } = await supabase
+                  .from("integrations")
+                  .select("*")
+                  .eq("workspace_id", instance.workspace_id)
+                  .eq("type", "bitrix24")
+                  .eq("is_active", true)
+                  .maybeSingle();
+
+                if (bitrixIntegration) {
+                  // Get the Bitrix24 message ID from metadata if available
+                  const bitrixMessageId = updatedMessage?.metadata?.bitrix24_message_id;
+                  
+                  if (bitrixMessageId) {
+                    console.log(`Syncing ${statusText} status to Bitrix24 for message:`, bitrixMessageId);
+                    
+                    const statusResponse = await fetch(`${supabaseUrl}/functions/v1/bitrix24-status`, {
+                      method: "POST",
+                      headers: {
+                        "Content-Type": "application/json",
+                        Authorization: `Bearer ${supabaseServiceKey}`,
+                      },
+                      body: JSON.stringify({
+                        type: statusText === "delivered" ? "delivery" : "reading",
+                        integration_id: bitrixIntegration.id,
+                        contact_phone: contactPhone,
+                        message_ids: [bitrixMessageId],
+                      }),
+                    });
+
+                    const statusResult = await statusResponse.json();
+                    console.log("Bitrix24 status sync result:", statusResult);
+                  }
+                }
+              } catch (bitrixErr) {
+                console.error("Error syncing status to Bitrix24:", bitrixErr);
+              }
+            }
           }
         }
         break;

@@ -22,6 +22,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useWorkspace } from "@/hooks/useWorkspace";
@@ -37,6 +43,9 @@ import {
   Building2,
   CheckCircle2,
   XCircle,
+  Copy,
+  Star,
+  ChevronRight,
 } from "lucide-react";
 
 interface Integration {
@@ -116,6 +125,12 @@ const integrationTypes = [
   },
 ];
 
+// Bitrix24 App URLs
+const BITRIX24_HANDLER_URL = "https://ybqwwipwimnkonnebbys.supabase.co/functions/v1/bitrix24-install";
+const BITRIX24_INITIAL_INSTALL_URL = typeof window !== "undefined" 
+  ? `${window.location.origin}/bitrix24-setup`
+  : "https://seu-dominio.lovable.app/bitrix24-setup";
+
 export default function Integrations() {
   const [integrations, setIntegrations] = useState<Integration[]>([]);
   const [instances, setInstances] = useState<Instance[]>([]);
@@ -131,6 +146,7 @@ export default function Integrations() {
   const [bitrixConnectorId, setBitrixConnectorId] = useState("thoth_whatsapp");
   const [bitrixInstanceId, setBitrixInstanceId] = useState("");
   const [registeringBitrix, setRegisteringBitrix] = useState(false);
+  const [bitrixConfigMode, setBitrixConfigMode] = useState<"webhook" | "app">("app");
 
   useEffect(() => {
     if (workspace) {
@@ -165,6 +181,10 @@ export default function Integrations() {
         setBitrixWebhookUrl((bitrixIntegration.config.webhook_url as string) || "");
         setBitrixConnectorId((bitrixIntegration.config.connector_id as string) || "thoth_whatsapp");
         setBitrixInstanceId((bitrixIntegration.config.instance_id as string) || "");
+        // If has member_id, it was installed via internal app
+        if (bitrixIntegration.config.member_id) {
+          setBitrixConfigMode("app");
+        }
       }
     } catch (error) {
       console.error("Error fetching integrations:", error);
@@ -292,6 +312,11 @@ export default function Integrations() {
     }
   };
 
+  const copyToClipboard = (text: string, label: string) => {
+    navigator.clipboard.writeText(text);
+    toast.success(`${label} copiado!`);
+  };
+
   const bitrixIntegration = getIntegrationStatus("bitrix24");
   const bitrixConfig = bitrixIntegration?.config || {};
 
@@ -389,7 +414,7 @@ export default function Integrations() {
           </TabsContent>
 
           {/* Bitrix24 CRM Tab */}
-          <TabsContent value="crm" className="mt-6">
+          <TabsContent value="crm" className="mt-6 space-y-4">
             <Card>
               <CardHeader>
                 <div className="flex items-center justify-between">
@@ -425,120 +450,310 @@ export default function Integrations() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-6">
-                {/* Instructions */}
-                <div className="bg-muted/50 rounded-lg p-4 text-sm space-y-3">
-                  <div className="flex items-start gap-2">
-                    <AlertCircle className="h-5 w-5 text-sky-500 shrink-0 mt-0.5" />
-                    <div>
-                      <p className="font-medium">Como configurar o Bitrix24:</p>
-                      <ol className="list-decimal list-inside text-muted-foreground mt-2 space-y-1">
-                        <li>Acesse seu Bitrix24 → Aplicativos → Webhooks</li>
-                        <li>Crie um webhook de saída com permissões: <code className="bg-muted px-1 rounded">imopenlines, imconnector, im, crm</code></li>
-                        <li>Copie a URL do webhook e cole abaixo</li>
-                        <li>Clique em "Registrar Conector"</li>
-                        <li>No Bitrix24, vá em Open Channels → Adicionar canal → Escolha "Thoth WhatsApp"</li>
-                      </ol>
+                {/* Config Mode Tabs */}
+                <div className="flex gap-2">
+                  <Button
+                    variant={bitrixConfigMode === "app" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setBitrixConfigMode("app")}
+                    className="gap-2"
+                  >
+                    <Star className="h-4 w-4" />
+                    App Interno (Recomendado)
+                  </Button>
+                  <Button
+                    variant={bitrixConfigMode === "webhook" ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setBitrixConfigMode("webhook")}
+                  >
+                    Webhook Manual
+                  </Button>
+                </div>
+
+                {/* App Interno Mode */}
+                {bitrixConfigMode === "app" && (
+                  <div className="space-y-6">
+                    {/* Benefits */}
+                    <div className="bg-sky-500/5 border border-sky-500/20 rounded-lg p-4">
+                      <div className="flex items-start gap-3">
+                        <Star className="h-5 w-5 text-sky-500 shrink-0 mt-0.5" />
+                        <div>
+                          <p className="font-medium text-sky-600 dark:text-sky-400">Vantagens do App Interno</p>
+                          <ul className="text-sm text-muted-foreground mt-1 space-y-1">
+                            <li>✓ Detecção automática do domínio Bitrix24</li>
+                            <li>✓ Tokens OAuth gerenciados automaticamente</li>
+                            <li>✓ Renovação automática de credenciais</li>
+                            <li>✓ Não precisa copiar URLs manualmente</li>
+                          </ul>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                </div>
 
-                {/* Config Form */}
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="bitrix-webhook">Webhook URL do Bitrix24</Label>
-                    <Input
-                      id="bitrix-webhook"
-                      placeholder="https://seudominio.bitrix24.com.br/rest/1/xxxxx/"
-                      value={bitrixWebhookUrl}
-                      onChange={(e) => setBitrixWebhookUrl(e.target.value)}
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Ex: https://seudominio.bitrix24.com.br/rest/1/abcd1234efgh5678/
-                    </p>
-                  </div>
+                    {/* Step-by-step Instructions */}
+                    <Accordion type="single" collapsible defaultValue="step1">
+                      <AccordionItem value="step1">
+                        <AccordionTrigger className="text-sm">
+                          <div className="flex items-center gap-3">
+                            <div className="h-6 w-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold">1</div>
+                            Criar Aplicativo Local no Bitrix24
+                          </div>
+                        </AccordionTrigger>
+                        <AccordionContent className="text-sm text-muted-foreground pl-9">
+                          <ol className="list-decimal list-inside space-y-2">
+                            <li>Acesse seu Bitrix24</li>
+                            <li>Vá em <strong>Aplicativos</strong> → <strong>Marketplace</strong></li>
+                            <li>Clique em <strong>Aplicativos Locais</strong> (menu à esquerda)</li>
+                            <li>Clique em <strong>Adicionar</strong></li>
+                            <li>Selecione <strong>"Aplicativo do servidor"</strong></li>
+                          </ol>
+                        </AccordionContent>
+                      </AccordionItem>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="bitrix-connector">ID do Conector</Label>
-                    <Input
-                      id="bitrix-connector"
-                      placeholder="thoth_whatsapp"
-                      value={bitrixConnectorId}
-                      onChange={(e) => setBitrixConnectorId(e.target.value)}
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Identificador único do seu conector (use letras e underscores)
-                    </p>
-                  </div>
+                      <AccordionItem value="step2">
+                        <AccordionTrigger className="text-sm">
+                          <div className="flex items-center gap-3">
+                            <div className="h-6 w-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold">2</div>
+                            Configurar URLs do Aplicativo
+                          </div>
+                        </AccordionTrigger>
+                        <AccordionContent className="space-y-4 pl-9">
+                          <p className="text-sm text-muted-foreground">
+                            Copie estas URLs para os campos correspondentes:
+                          </p>
+                          
+                          <div className="space-y-3">
+                            <div className="space-y-1.5">
+                              <Label className="text-xs text-muted-foreground">Handler URL (URL do manipulador)</Label>
+                              <div className="flex gap-2">
+                                <Input
+                                  readOnly
+                                  value={BITRIX24_HANDLER_URL}
+                                  className="font-mono text-xs bg-muted"
+                                />
+                                <Button
+                                  variant="outline"
+                                  size="icon"
+                                  onClick={() => copyToClipboard(BITRIX24_HANDLER_URL, "Handler URL")}
+                                >
+                                  <Copy className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="bitrix-instance">Instância W-API</Label>
-                    <Select value={bitrixInstanceId} onValueChange={setBitrixInstanceId}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Selecione uma instância" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {instances.map((inst) => (
-                          <SelectItem key={inst.id} value={inst.id}>
-                            {inst.name} {inst.phone_number ? `(${inst.phone_number})` : ""} 
-                            {inst.status === "connected" && " ✓"}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <p className="text-xs text-muted-foreground">
-                      Qual número WhatsApp será usado para este Open Channel
-                    </p>
-                  </div>
-                </div>
+                            <div className="space-y-1.5">
+                              <Label className="text-xs text-muted-foreground">Initial Install URL (URL de instalação inicial)</Label>
+                              <div className="flex gap-2">
+                                <Input
+                                  readOnly
+                                  value={BITRIX24_INITIAL_INSTALL_URL}
+                                  className="font-mono text-xs bg-muted"
+                                />
+                                <Button
+                                  variant="outline"
+                                  size="icon"
+                                  onClick={() => copyToClipboard(BITRIX24_INITIAL_INSTALL_URL, "Initial Install URL")}
+                                >
+                                  <Copy className="h-4 w-4" />
+                                </Button>
+                              </div>
+                            </div>
+                          </div>
+                        </AccordionContent>
+                      </AccordionItem>
 
-                {/* Status */}
-                {bitrixIntegration?.config && (
-                  <div className="bg-muted/30 rounded-lg p-4 space-y-2">
-                    <p className="text-sm font-medium">Status do Conector:</p>
-                    <div className="flex flex-wrap gap-3 text-sm">
-                      <div className="flex items-center gap-1.5">
-                        {bitrixConfig.registered ? (
-                          <CheckCircle2 className="h-4 w-4 text-green-500" />
-                        ) : (
-                          <XCircle className="h-4 w-4 text-muted-foreground" />
-                        )}
-                        Registrado
+                      <AccordionItem value="step3">
+                        <AccordionTrigger className="text-sm">
+                          <div className="flex items-center gap-3">
+                            <div className="h-6 w-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold">3</div>
+                            Selecionar Permissões
+                          </div>
+                        </AccordionTrigger>
+                        <AccordionContent className="pl-9">
+                          <p className="text-sm text-muted-foreground mb-3">
+                            Marque as seguintes permissões:
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            <Badge variant="secondary" className="font-mono">imopenlines</Badge>
+                            <Badge variant="secondary" className="font-mono">imconnector</Badge>
+                            <Badge variant="secondary" className="font-mono">im</Badge>
+                            <Badge variant="secondary" className="font-mono">crm</Badge>
+                          </div>
+                        </AccordionContent>
+                      </AccordionItem>
+
+                      <AccordionItem value="step4">
+                        <AccordionTrigger className="text-sm">
+                          <div className="flex items-center gap-3">
+                            <div className="h-6 w-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold">4</div>
+                            Instalar e Configurar
+                          </div>
+                        </AccordionTrigger>
+                        <AccordionContent className="text-sm text-muted-foreground pl-9">
+                          <ol className="list-decimal list-inside space-y-2">
+                            <li>Clique em <strong>Salvar</strong> para criar o aplicativo</li>
+                            <li>Clique em <strong>Instalar</strong></li>
+                            <li>A tela do Thoth abrirá dentro do Bitrix24</li>
+                            <li>Escolha a instância W-API para conectar</li>
+                            <li>Clique em <strong>Ativar Conector</strong></li>
+                          </ol>
+                        </AccordionContent>
+                      </AccordionItem>
+
+                      <AccordionItem value="step5">
+                        <AccordionTrigger className="text-sm">
+                          <div className="flex items-center gap-3">
+                            <div className="h-6 w-6 rounded-full bg-primary/10 text-primary flex items-center justify-center text-xs font-bold">5</div>
+                            Adicionar Canal no Open Channels
+                          </div>
+                        </AccordionTrigger>
+                        <AccordionContent className="text-sm text-muted-foreground pl-9">
+                          <ol className="list-decimal list-inside space-y-2">
+                            <li>No Bitrix24, vá em <strong>Open Channels</strong> → <strong>Adicionar canal</strong></li>
+                            <li>Escolha <strong>Thoth WhatsApp</strong> na lista</li>
+                            <li>Configure as opções do canal (horário, equipe, etc.)</li>
+                            <li>Pronto! As mensagens do WhatsApp chegarão no Bitrix24</li>
+                          </ol>
+                        </AccordionContent>
+                      </AccordionItem>
+                    </Accordion>
+
+                    {/* Status if installed via app */}
+                    {bitrixConfig.member_id && (
+                      <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-4">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="h-5 w-5 text-green-500" />
+                          <span className="font-medium text-green-600 dark:text-green-400">
+                            App instalado em: {String(bitrixConfig.domain || "")}
+                          </span>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-1.5">
-                        {bitrixConfig.events_url ? (
-                          <CheckCircle2 className="h-4 w-4 text-green-500" />
-                        ) : (
-                          <XCircle className="h-4 w-4 text-muted-foreground" />
-                        )}
-                        Eventos vinculados
+                    )}
+                  </div>
+                )}
+
+                {/* Webhook Manual Mode */}
+                {bitrixConfigMode === "webhook" && (
+                  <div className="space-y-6">
+                    {/* Instructions */}
+                    <div className="bg-muted/50 rounded-lg p-4 text-sm space-y-3">
+                      <div className="flex items-start gap-2">
+                        <AlertCircle className="h-5 w-5 text-sky-500 shrink-0 mt-0.5" />
+                        <div>
+                          <p className="font-medium">Como configurar o Bitrix24:</p>
+                          <ol className="list-decimal list-inside text-muted-foreground mt-2 space-y-1">
+                            <li>Acesse seu Bitrix24 → Aplicativos → Webhooks</li>
+                            <li>Crie um webhook de saída com permissões: <code className="bg-muted px-1 rounded">imopenlines, imconnector, im, crm</code></li>
+                            <li>Copie a URL do webhook e cole abaixo</li>
+                            <li>Clique em "Registrar Conector"</li>
+                            <li>No Bitrix24, vá em Open Channels → Adicionar canal → Escolha "Thoth WhatsApp"</li>
+                          </ol>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-1.5">
-                        {bitrixConfig.instance_id ? (
-                          <CheckCircle2 className="h-4 w-4 text-green-500" />
-                        ) : (
-                          <XCircle className="h-4 w-4 text-muted-foreground" />
-                        )}
-                        Instância configurada
+                    </div>
+
+                    {/* Config Form */}
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="bitrix-webhook">Webhook URL do Bitrix24</Label>
+                        <Input
+                          id="bitrix-webhook"
+                          placeholder="https://seudominio.bitrix24.com.br/rest/1/xxxxx/"
+                          value={bitrixWebhookUrl}
+                          onChange={(e) => setBitrixWebhookUrl(e.target.value)}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Ex: https://seudominio.bitrix24.com.br/rest/1/abcd1234efgh5678/
+                        </p>
                       </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="bitrix-connector">ID do Conector</Label>
+                        <Input
+                          id="bitrix-connector"
+                          placeholder="thoth_whatsapp"
+                          value={bitrixConnectorId}
+                          onChange={(e) => setBitrixConnectorId(e.target.value)}
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Identificador único do seu conector (use letras e underscores)
+                        </p>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="bitrix-instance">Instância W-API</Label>
+                        <Select value={bitrixInstanceId} onValueChange={setBitrixInstanceId}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecione uma instância" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {instances.map((inst) => (
+                              <SelectItem key={inst.id} value={inst.id}>
+                                {inst.name} {inst.phone_number ? `(${inst.phone_number})` : ""} 
+                                {inst.status === "connected" && " ✓"}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">
+                          Qual número WhatsApp será usado para este Open Channel
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Status */}
+                    {bitrixIntegration?.config && !bitrixConfig.member_id && (
+                      <div className="bg-muted/30 rounded-lg p-4 space-y-2">
+                        <p className="text-sm font-medium">Status do Conector:</p>
+                        <div className="flex flex-wrap gap-3 text-sm">
+                          <div className="flex items-center gap-1.5">
+                            {bitrixConfig.registered ? (
+                              <CheckCircle2 className="h-4 w-4 text-green-500" />
+                            ) : (
+                              <XCircle className="h-4 w-4 text-muted-foreground" />
+                            )}
+                            Registrado
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            {bitrixConfig.events_url ? (
+                              <CheckCircle2 className="h-4 w-4 text-green-500" />
+                            ) : (
+                              <XCircle className="h-4 w-4 text-muted-foreground" />
+                            )}
+                            Eventos vinculados
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            {bitrixConfig.instance_id ? (
+                              <CheckCircle2 className="h-4 w-4 text-green-500" />
+                            ) : (
+                              <XCircle className="h-4 w-4 text-muted-foreground" />
+                            )}
+                            Instância configurada
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Actions */}
+                    <div className="flex gap-3">
+                      <Button onClick={handleRegisterBitrix24} disabled={registeringBitrix}>
+                        {registeringBitrix ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Registrando...
+                          </>
+                        ) : (
+                          <>
+                            <Building2 className="h-4 w-4 mr-2" />
+                            {bitrixIntegration ? "Atualizar Conector" : "Registrar Conector"}
+                          </>
+                        )}
+                      </Button>
                     </div>
                   </div>
                 )}
 
-                {/* Actions */}
-                <div className="flex gap-3">
-                  <Button onClick={handleRegisterBitrix24} disabled={registeringBitrix}>
-                    {registeringBitrix ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Registrando...
-                      </>
-                    ) : (
-                      <>
-                        <Building2 className="h-4 w-4 mr-2" />
-                        {bitrixIntegration ? "Atualizar Conector" : "Registrar Conector"}
-                      </>
-                    )}
-                  </Button>
+                {/* Documentation Link */}
+                <div className="pt-4 border-t">
                   <Button variant="outline" asChild>
                     <a href="https://apidocs.bitrix24.com/api-reference/imopenlines/index.html" target="_blank" rel="noopener noreferrer">
                       <ExternalLink className="h-4 w-4 mr-2" />
