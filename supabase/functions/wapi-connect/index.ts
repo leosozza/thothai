@@ -6,7 +6,7 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// W-API base URL
+// W-API base URL - Usando a URL correta da documentação
 const WAPI_BASE_URL = "https://api.w-api.app";
 
 serve(async (req) => {
@@ -119,152 +119,45 @@ serve(async (req) => {
     const webhookUrl = `${supabaseUrl}/functions/v1/wapi-webhook?instance_id=${instanceId}`;
     console.log("Configuring webhook URL:", webhookUrl);
 
-    // Update webhook on W-API
-    try {
-      const webhookResponse = await fetch(
-        `${WAPI_BASE_URL}/v1/config/update-webhook-global?instanceId=${wapiInstanceId}`,
-        {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${wapiApiKey}`,
-          },
-          body: JSON.stringify({ 
-            webhookUrl: webhookUrl,
-            webhookEvents: ["messages", "qr", "authenticated", "disconnected", "message_ack"]
-          }),
-        }
-      );
-      
-      if (webhookResponse.ok) {
-        console.log("Webhook configured successfully");
-      } else {
-        const webhookError = await webhookResponse.text();
-        console.warn("Failed to configure webhook:", webhookError);
-      }
-    } catch (e) {
-      console.warn("Error configuring webhook:", e);
-    }
+    // Update webhooks usando os endpoints corretos da W-API
+    const webhookEndpoints = [
+      { endpoint: "update-webhook-messages", name: "messages" },
+      { endpoint: "update-webhook-connected", name: "connected" },
+      { endpoint: "update-webhook-disconnected", name: "disconnected" },
+      { endpoint: "update-webhook-qr-code", name: "qr-code" },
+      { endpoint: "update-webhook-message-status", name: "message-status" },
+    ];
 
-    // Request connection / QR Code
-    console.log("Requesting connection...");
-    
-    const connectResponse = await fetch(
-      `${WAPI_BASE_URL}/v1/instance/connect?instanceId=${wapiInstanceId}`,
-      {
-        method: "GET",
-        headers: {
-          "Authorization": `Bearer ${wapiApiKey}`,
-        },
-      }
-    );
-
-    console.log("Connect response status:", connectResponse.status);
-    
-    if (!connectResponse.ok) {
-      const errorText = await connectResponse.text();
-      console.error("W-API connect error:", errorText);
-      
-      // Try to get QR code directly with different endpoint
-      const qrResponse = await fetch(
-        `${WAPI_BASE_URL}/v1/instance/qr-code/image?instanceId=${wapiInstanceId}`,
-        {
-          method: "GET",
-          headers: {
-            "Authorization": `Bearer ${wapiApiKey}`,
-          },
-        }
-      );
-
-      console.log("QR response status:", qrResponse.status);
-
-      if (qrResponse.ok) {
-        const qrData = await qrResponse.json();
-        console.log("QR data:", qrData);
+    for (const wh of webhookEndpoints) {
+      try {
+        const webhookResponse = await fetch(
+          `${WAPI_BASE_URL}/v1/webhook/${wh.endpoint}?instanceId=${wapiInstanceId}`,
+          {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${wapiApiKey}`,
+            },
+            body: JSON.stringify({ webhookUrl }),
+          }
+        );
         
-        const qrCode = qrData.qrcode || qrData.qr || qrData.base64 || qrData.data?.qrcode;
-
-        if (qrCode) {
-          await supabaseAdmin
-            .from("instances")
-            .update({ 
-              qr_code: qrCode,
-              status: "qr_pending",
-              updated_at: new Date().toISOString()
-            })
-            .eq("id", instanceId);
-
-          return new Response(JSON.stringify({ 
-            success: true, 
-            qr_code: qrCode,
-            status: "qr_pending"
-          }), {
-            headers: { ...corsHeaders, "Content-Type": "application/json" },
-          });
+        if (webhookResponse.ok) {
+          console.log(`Webhook ${wh.name} configured successfully`);
+        } else {
+          const webhookError = await webhookResponse.text();
+          console.warn(`Failed to configure webhook ${wh.name}:`, webhookError);
         }
+      } catch (e) {
+        console.warn(`Error configuring webhook ${wh.name}:`, e);
       }
-
-      return new Response(JSON.stringify({ 
-        error: "Erro ao conectar na W-API. Verifique se a instância existe e está ativa.",
-        details: errorText
-      }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
     }
 
-    const connectData = await connectResponse.json();
-    console.log("Connect response data:", connectData);
-
-    // Check if already connected
-    if (connectData.status === "connected" || connectData.connected === true) {
-      await supabaseAdmin
-        .from("instances")
-        .update({ 
-          status: "connected",
-          phone_number: connectData.phone || connectData.phoneNumber || instance.phone_number,
-          qr_code: null,
-          updated_at: new Date().toISOString()
-        })
-        .eq("id", instanceId);
-
-      return new Response(JSON.stringify({ 
-        success: true, 
-        status: "connected",
-        phone: connectData.phone || connectData.phoneNumber
-      }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // Get QR Code from response
-    const qrCode = connectData.qrcode || connectData.qr || connectData.base64 || 
-                   connectData.data?.qrcode || connectData.data?.base64;
+    // Get instance status first
+    console.log("Checking instance status...");
     
-    if (qrCode) {
-      await supabaseAdmin
-        .from("instances")
-        .update({ 
-          qr_code: qrCode,
-          status: "qr_pending",
-          updated_at: new Date().toISOString()
-        })
-        .eq("id", instanceId);
-
-      return new Response(JSON.stringify({ 
-        success: true, 
-        qr_code: qrCode,
-        status: "qr_pending"
-      }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // No QR yet, try to get it
-    console.log("No QR in connect response, fetching QR code...");
-    
-    const qrFetchResponse = await fetch(
-      `${WAPI_BASE_URL}/v1/instance/qr-code/image?instanceId=${wapiInstanceId}`,
+    const statusResponse = await fetch(
+      `${WAPI_BASE_URL}/v1/instance/status?instanceId=${wapiInstanceId}`,
       {
         method: "GET",
         headers: {
@@ -273,18 +166,61 @@ serve(async (req) => {
       }
     );
 
-    if (qrFetchResponse.ok) {
-      const qrFetchData = await qrFetchResponse.json();
-      console.log("QR fetch data:", qrFetchData);
-      
-      const fetchedQr = qrFetchData.qrcode || qrFetchData.qr || qrFetchData.base64 || 
-                        qrFetchData.data?.qrcode || qrFetchData.data?.base64;
-      
-      if (fetchedQr) {
+    if (statusResponse.ok) {
+      const statusData = await statusResponse.json();
+      console.log("Instance status:", statusData);
+
+      // Check if already connected
+      if (statusData.status === "CONNECTED" || statusData.connected === true) {
         await supabaseAdmin
           .from("instances")
           .update({ 
-            qr_code: fetchedQr,
+            status: "connected",
+            phone_number: statusData.phone || statusData.phoneNumber || instance.phone_number,
+            qr_code: null,
+            updated_at: new Date().toISOString()
+          })
+          .eq("id", instanceId);
+
+        return new Response(JSON.stringify({ 
+          success: true, 
+          status: "connected",
+          phone: statusData.phone || statusData.phoneNumber
+        }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
+    // Request QR Code
+    console.log("Requesting QR Code...");
+    
+    const qrResponse = await fetch(
+      `${WAPI_BASE_URL}/v1/instance/qrcode?instanceId=${wapiInstanceId}`,
+      {
+        method: "GET",
+        headers: {
+          "Authorization": `Bearer ${wapiApiKey}`,
+        },
+      }
+    );
+
+    console.log("QR response status:", qrResponse.status);
+
+    if (qrResponse.ok) {
+      const qrData = await qrResponse.json();
+      console.log("QR data keys:", Object.keys(qrData));
+      
+      // Try different possible QR code field names
+      const qrCode = qrData.qrcode || qrData.qr || qrData.base64 || 
+                     qrData.qrCode || qrData.qr_code || qrData.data?.qrcode ||
+                     qrData.data?.base64 || qrData.image;
+
+      if (qrCode) {
+        await supabaseAdmin
+          .from("instances")
+          .update({ 
+            qr_code: qrCode,
             status: "qr_pending",
             updated_at: new Date().toISOString()
           })
@@ -292,7 +228,59 @@ serve(async (req) => {
 
         return new Response(JSON.stringify({ 
           success: true, 
-          qr_code: fetchedQr,
+          qr_code: qrCode,
+          status: "qr_pending"
+        }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // If no QR code but we got a response, return the full data for debugging
+      console.log("Full QR response data:", JSON.stringify(qrData));
+      
+      return new Response(JSON.stringify({ 
+        success: true, 
+        status: "connecting",
+        message: "Aguardando QR Code...",
+        debug: qrData
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Try alternative QR endpoint
+    console.log("Trying alternative QR endpoint...");
+    
+    const qrAltResponse = await fetch(
+      `${WAPI_BASE_URL}/v1/instance/qr-code/base64?instanceId=${wapiInstanceId}`,
+      {
+        method: "GET",
+        headers: {
+          "Authorization": `Bearer ${wapiApiKey}`,
+        },
+      }
+    );
+
+    if (qrAltResponse.ok) {
+      const qrAltData = await qrAltResponse.json();
+      console.log("Alt QR data:", qrAltData);
+      
+      const qrCode = qrAltData.qrcode || qrAltData.base64 || qrAltData.qr || 
+                     qrAltData.data?.base64 || qrAltData.image;
+
+      if (qrCode) {
+        await supabaseAdmin
+          .from("instances")
+          .update({ 
+            qr_code: qrCode,
+            status: "qr_pending",
+            updated_at: new Date().toISOString()
+          })
+          .eq("id", instanceId);
+
+        return new Response(JSON.stringify({ 
+          success: true, 
+          qr_code: qrCode,
           status: "qr_pending"
         }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -300,12 +288,14 @@ serve(async (req) => {
       }
     }
 
-    // Return current status
+    const errorText = await qrResponse.text();
+    console.error("QR fetch error:", errorText);
+
     return new Response(JSON.stringify({ 
-      success: true, 
+      success: false, 
       status: "connecting",
-      message: "Aguardando QR Code da W-API...",
-      connectData
+      message: "Aguardando QR Code da W-API. Tente novamente em alguns segundos.",
+      error: errorText
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
