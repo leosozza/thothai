@@ -124,6 +124,63 @@
     --sidebar-border: 225 25% 15%;
     --sidebar-ring: 42 90% 55%;
   }
+
+  /* Thoth24 theme - Dark with cyan accent */
+  .thoth24 {
+    --background: 190 30% 5%;
+    --foreground: 0 0% 98%;
+
+    --card: 190 25% 8%;
+    --card-foreground: 0 0% 98%;
+
+    --popover: 190 25% 8%;
+    --popover-foreground: 0 0% 98%;
+
+    /* Cyan accent - Thoth24 signature */
+    --primary: 175 100% 45%;
+    --primary-foreground: 190 30% 5%;
+
+    --secondary: 190 20% 12%;
+    --secondary-foreground: 0 0% 95%;
+
+    --muted: 190 15% 15%;
+    --muted-foreground: 190 10% 55%;
+
+    --accent: 190 25% 15%;
+    --accent-foreground: 0 0% 98%;
+
+    --destructive: 0 62% 45%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 142 60% 45%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 92% 55%;
+    --warning-foreground: 190 30% 5%;
+
+    --border: 190 20% 15%;
+    --input: 190 20% 15%;
+    --ring: 175 100% 45%;
+
+    /* WhatsApp */
+    --whatsapp: 142 70% 45%;
+    --whatsapp-foreground: 0 0% 100%;
+
+    /* Status colors */
+    --status-connected: 142 60% 50%;
+    --status-disconnected: 0 62% 50%;
+    --status-pending: 38 92% 55%;
+
+    /* Sidebar - Thoth24 dark */
+    --sidebar-background: 190 35% 4%;
+    --sidebar-foreground: 190 10% 70%;
+    --sidebar-primary: 175 100% 45%;
+    --sidebar-primary-foreground: 190 30% 5%;
+    --sidebar-accent: 190 25% 10%;
+    --sidebar-accent-foreground: 0 0% 98%;
+    --sidebar-border: 190 20% 12%;
+    --sidebar-ring: 175 100% 45%;
+  }
 }
 
 @layer base {
@@ -146,8 +203,19 @@
     background: linear-gradient(180deg, hsl(225 25% 11%) 0%, hsl(225 30% 6%) 100%);
   }
 
+  .gradient-cyan {
+    background: linear-gradient(135deg, hsl(175 100% 45%) 0%, hsl(185 90% 35%) 100%);
+  }
+
   .text-gradient-gold {
     background: linear-gradient(135deg, hsl(42 90% 60%) 0%, hsl(32 85% 50%) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .text-gradient-cyan {
+    background: linear-gradient(135deg, hsl(175 100% 50%) 0%, hsl(185 90% 40%) 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
@@ -159,6 +227,14 @@
 
   .glow-gold-sm {
     box-shadow: 0 0 15px hsl(42 90% 55% / 0.2);
+  }
+
+  .glow-cyan {
+    box-shadow: 0 0 30px hsl(175 100% 45% / 0.3);
+  }
+
+  .glow-cyan-sm {
+    box-shadow: 0 0 15px hsl(175 100% 45% / 0.2);
   }
 
   /* Custom scrollbar */

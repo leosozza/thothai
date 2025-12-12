@@ -14,6 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import { useWorkspace } from "@/hooks/useWorkspace";
 import { supabase } from "@/integrations/supabase/client";
+import { useTheme } from "next-themes";
 import { 
   User, 
   Building2, 
@@ -26,7 +27,11 @@ import {
   Eye,
   EyeOff,
   Copy,
-  Check
+  Check,
+  Palette,
+  Sun,
+  Moon,
+  Sparkles
 } from "lucide-react";
 
 interface Profile {
@@ -49,6 +54,7 @@ const Settings = () => {
   const { toast } = useToast();
   const { user, loading: authLoading } = useAuth();
   const { workspace, refreshWorkspaces } = useWorkspace();
+  const { theme, setTheme } = useTheme();
 
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -274,7 +280,7 @@ const Settings = () => {
         </div>
 
         <Tabs defaultValue="profile" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-5 lg:w-auto lg:inline-flex">
+          <TabsList className="grid w-full grid-cols-6 lg:w-auto lg:inline-flex">
             <TabsTrigger value="profile" className="gap-2">
               <User className="h-4 w-4 hidden sm:inline" />
               Perfil
@@ -282,6 +288,10 @@ const Settings = () => {
             <TabsTrigger value="workspace" className="gap-2">
               <Building2 className="h-4 w-4 hidden sm:inline" />
               Workspace
+            </TabsTrigger>
+            <TabsTrigger value="appearance" className="gap-2">
+              <Palette className="h-4 w-4 hidden sm:inline" />
+              Aparência
             </TabsTrigger>
             <TabsTrigger value="notifications" className="gap-2">
               <Bell className="h-4 w-4 hidden sm:inline" />
@@ -467,6 +477,128 @@ const Settings = () => {
                     )}
                     Salvar alterações
                   </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* Appearance Tab */}
+          <TabsContent value="appearance">
+            <Card>
+              <CardHeader>
+                <CardTitle>Aparência</CardTitle>
+                <CardDescription>
+                  Personalize o visual da plataforma
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="space-y-4">
+                  <h3 className="font-medium">Tema</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Escolha o tema que melhor se adapta ao seu estilo
+                  </p>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    {/* Light Theme */}
+                    <button
+                      onClick={() => setTheme("light")}
+                      className={`relative p-4 rounded-lg border-2 transition-all ${
+                        theme === "light"
+                          ? "border-primary bg-primary/5"
+                          : "border-border hover:border-primary/50"
+                      }`}
+                    >
+                      <div className="flex flex-col items-center gap-3">
+                        <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center">
+                          <Sun className="h-6 w-6 text-amber-600" />
+                        </div>
+                        <div className="text-center">
+                          <p className="font-medium">Claro</p>
+                          <p className="text-xs text-muted-foreground">
+                            Tema claro com dourado
+                          </p>
+                        </div>
+                      </div>
+                      {theme === "light" && (
+                        <div className="absolute top-2 right-2">
+                          <Check className="h-4 w-4 text-primary" />
+                        </div>
+                      )}
+                    </button>
+
+                    {/* Dark Theme */}
+                    <button
+                      onClick={() => setTheme("dark")}
+                      className={`relative p-4 rounded-lg border-2 transition-all ${
+                        theme === "dark"
+                          ? "border-primary bg-primary/5"
+                          : "border-border hover:border-primary/50"
+                      }`}
+                    >
+                      <div className="flex flex-col items-center gap-3">
+                        <div className="w-12 h-12 rounded-full bg-slate-800 flex items-center justify-center">
+                          <Moon className="h-6 w-6 text-amber-400" />
+                        </div>
+                        <div className="text-center">
+                          <p className="font-medium">Escuro</p>
+                          <p className="text-xs text-muted-foreground">
+                            Tema escuro com dourado
+                          </p>
+                        </div>
+                      </div>
+                      {theme === "dark" && (
+                        <div className="absolute top-2 right-2">
+                          <Check className="h-4 w-4 text-primary" />
+                        </div>
+                      )}
+                    </button>
+
+                    {/* Thoth24 Theme */}
+                    <button
+                      onClick={() => setTheme("thoth24")}
+                      className={`relative p-4 rounded-lg border-2 transition-all ${
+                        theme === "thoth24"
+                          ? "border-primary bg-primary/5"
+                          : "border-border hover:border-primary/50"
+                      }`}
+                    >
+                      <div className="flex flex-col items-center gap-3">
+                        <div className="w-12 h-12 rounded-full bg-slate-900 flex items-center justify-center">
+                          <Sparkles className="h-6 w-6 text-cyan-400" />
+                        </div>
+                        <div className="text-center">
+                          <p className="font-medium">Thoth24</p>
+                          <p className="text-xs text-muted-foreground">
+                            Tema escuro com ciano
+                          </p>
+                        </div>
+                      </div>
+                      {theme === "thoth24" && (
+                        <div className="absolute top-2 right-2">
+                          <Check className="h-4 w-4 text-primary" />
+                        </div>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                <Separator />
+
+                <div className="space-y-2">
+                  <h3 className="font-medium">Preview do tema</h3>
+                  <div className="p-4 rounded-lg bg-card border border-border">
+                    <div className="flex items-center gap-4">
+                      <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center">
+                        <span className="text-primary-foreground font-bold text-sm">AB</span>
+                      </div>
+                      <div>
+                        <p className="font-medium text-foreground">Cor primária ativa</p>
+                        <p className="text-sm text-muted-foreground">
+                          Este é o visual do seu tema atual
+                        </p>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </CardContent>
             </Card>
