@@ -8,3 +8,18 @@ verify_jwt = true
 
 [functions.wapi-send-message]
 verify_jwt = true
+
+[functions.ai-process-message]
+verify_jwt = true
+
+[functions.flow-engine]
+verify_jwt = true
+
+[functions.elevenlabs-stt]
+verify_jwt = true
+
+[functions.elevenlabs-tts]
+verify_jwt = true
+
+[functions.elevenlabs-agent-token]
+verify_jwt = true
