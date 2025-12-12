@@ -229,6 +229,28 @@ serve(async (req) => {
         if (qrResponse.ok) {
           const qrData = await qrResponse.json();
           console.log(`QR ${qrEndpoint} data keys:`, Object.keys(qrData));
+          console.log(`QR ${qrEndpoint} full data:`, JSON.stringify(qrData));
+          
+          // Check if already connected (W-API returns connected:true when no QR needed)
+          if (qrData.connected === true) {
+            console.log("Instance already connected via QR endpoint response");
+            await supabaseAdmin
+              .from("instances")
+              .update({ 
+                status: "connected",
+                qr_code: null,
+                updated_at: new Date().toISOString()
+              })
+              .eq("id", instanceId);
+
+            return new Response(JSON.stringify({ 
+              success: true, 
+              status: "connected",
+              message: "Instância já conectada!"
+            }), {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+            });
+          }
           
           // Try different possible QR code field names
           const qrCode = qrData.qrcode || qrData.qr || qrData.base64 || 
@@ -254,9 +276,6 @@ serve(async (req) => {
               headers: { ...corsHeaders, "Content-Type": "application/json" },
             });
           }
-
-          // If response has data but no recognized QR field, log it
-          console.log(`QR ${qrEndpoint} full data:`, JSON.stringify(qrData));
         }
       } catch (e) {
         console.warn(`Error with ${qrEndpoint}:`, e);
