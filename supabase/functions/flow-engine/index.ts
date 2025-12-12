@@ -18,6 +18,8 @@ interface FlowNode {
     condition?: string;
     delay?: number;
     action?: string;
+    department?: string;
+    transferMessage?: string;
   };
 }
 
@@ -220,7 +222,67 @@ serve(async (req) => {
         case "action":
           // Execute custom action
           console.log("Executing action:", currentNode.data.action);
-          // TODO: Implement custom actions (tag contact, assign department, etc.)
+          break;
+
+        case "transfer_to_human":
+          // Transfer conversation to human
+          console.log("Transferring to human");
+          await supabase
+            .from("conversations")
+            .update({ 
+              attendance_mode: "human",
+              status: "waiting_human"
+            })
+            .eq("id", conversation_id);
+          
+          // Send transfer message if configured
+          if (currentNode.data.transferMessage) {
+            await sendMessage(supabaseUrl, supabaseKey, {
+              instance_id, contact_id, conversation_id,
+              message: currentNode.data.transferMessage
+            });
+          } else {
+            await sendMessage(supabaseUrl, supabaseKey, {
+              instance_id, contact_id, conversation_id,
+              message: "Estou transferindo você para um atendente humano. Por favor, aguarde um momento..."
+            });
+          }
+          // Stop flow execution after transfer
+          currentNodeId = null;
+          continue;
+
+        case "transfer_to_ai":
+          // Transfer conversation back to AI
+          console.log("Transferring back to AI");
+          await supabase
+            .from("conversations")
+            .update({ 
+              attendance_mode: "ai",
+              assigned_to: null,
+              status: "open"
+            })
+            .eq("id", conversation_id);
+          
+          if (currentNode.data.transferMessage) {
+            await sendMessage(supabaseUrl, supabaseKey, {
+              instance_id, contact_id, conversation_id,
+              message: currentNode.data.transferMessage
+            });
+          }
+          break;
+
+        case "assign_department":
+          // Assign to specific department
+          const department = currentNode.data.department;
+          console.log("Assigning to department:", department);
+          await supabase
+            .from("conversations")
+            .update({ 
+              department,
+              attendance_mode: "human",
+              status: "waiting_human"
+            })
+            .eq("id", conversation_id);
           break;
 
         default:

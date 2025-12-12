@@ -47,6 +47,8 @@ import {
   Loader2,
   Plus,
   RefreshCw,
+  ArrowLeftRight,
+  UserCheck,
 } from "lucide-react";
 
 interface Contact {
@@ -70,6 +72,9 @@ interface Conversation {
   status: string;
   last_message_at: string | null;
   unread_count: number;
+  attendance_mode?: string;
+  assigned_to?: string | null;
+  department?: string | null;
   contact: Contact;
   instance?: Instance;
 }
@@ -98,6 +103,7 @@ export default function Conversations() {
   const [newPhoneNumber, setNewPhoneNumber] = useState("");
   const [selectedInstanceId, setSelectedInstanceId] = useState("");
   const [creatingConversation, setCreatingConversation] = useState(false);
+  const [transferring, setTransferring] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { workspace } = useWorkspace();
 
@@ -480,6 +486,86 @@ export default function Conversations() {
     }
   };
 
+  const handleTransferToHuman = async () => {
+    if (!selectedConversation) return;
+    setTransferring(true);
+    
+    try {
+      const { error } = await supabase
+        .from("conversations")
+        .update({
+          attendance_mode: "human",
+          status: "in_progress",
+        })
+        .eq("id", selectedConversation.id);
+      
+      if (error) throw error;
+      
+      // Update local state
+      setSelectedConversation({
+        ...selectedConversation,
+        attendance_mode: "human",
+        status: "in_progress",
+      });
+      
+      setConversations((prev) =>
+        prev.map((conv) =>
+          conv.id === selectedConversation.id
+            ? { ...conv, attendance_mode: "human", status: "in_progress" }
+            : conv
+        )
+      );
+      
+      toast.success("Atendimento assumido! A IA não responderá mais nesta conversa.");
+    } catch (error) {
+      console.error("Error transferring to human:", error);
+      toast.error("Erro ao assumir atendimento");
+    } finally {
+      setTransferring(false);
+    }
+  };
+
+  const handleTransferToAI = async () => {
+    if (!selectedConversation) return;
+    setTransferring(true);
+    
+    try {
+      const { error } = await supabase
+        .from("conversations")
+        .update({
+          attendance_mode: "ai",
+          assigned_to: null,
+          status: "open",
+        })
+        .eq("id", selectedConversation.id);
+      
+      if (error) throw error;
+      
+      // Update local state
+      setSelectedConversation({
+        ...selectedConversation,
+        attendance_mode: "ai",
+        assigned_to: null,
+        status: "open",
+      });
+      
+      setConversations((prev) =>
+        prev.map((conv) =>
+          conv.id === selectedConversation.id
+            ? { ...conv, attendance_mode: "ai", assigned_to: null, status: "open" }
+            : conv
+        )
+      );
+      
+      toast.success("Conversa devolvida para a IA.");
+    } catch (error) {
+      console.error("Error transferring to AI:", error);
+      toast.error("Erro ao transferir para IA");
+    } finally {
+      setTransferring(false);
+    }
+  };
+
   const getContactName = (contact: Contact) => {
     return contact.name || contact.push_name || contact.phone_number;
   };
@@ -650,12 +736,24 @@ export default function Conversations() {
                     }`}
                   >
                     <div className="flex gap-3">
-                      <Avatar className="h-12 w-12">
-                        <AvatarImage src={conv.contact.profile_picture_url || ""} />
-                        <AvatarFallback className="bg-primary/10 text-primary">
-                          {getContactInitials(conv.contact)}
-                        </AvatarFallback>
-                      </Avatar>
+                      <div className="relative">
+                        <Avatar className="h-12 w-12">
+                          <AvatarImage src={conv.contact.profile_picture_url || ""} />
+                          <AvatarFallback className="bg-primary/10 text-primary">
+                            {getContactInitials(conv.contact)}
+                          </AvatarFallback>
+                        </Avatar>
+                        {/* Attendance mode indicator dot */}
+                        <div className={`absolute -bottom-0.5 -right-0.5 h-4 w-4 rounded-full border-2 border-card flex items-center justify-center ${
+                          conv.attendance_mode === "human" ? "bg-primary" : "bg-muted"
+                        }`}>
+                          {conv.attendance_mode === "human" ? (
+                            <User className="h-2.5 w-2.5 text-primary-foreground" />
+                          ) : (
+                            <Bot className="h-2.5 w-2.5 text-muted-foreground" />
+                          )}
+                        </div>
+                      </div>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-2">
                           <span className="font-medium truncate">
@@ -703,9 +801,28 @@ export default function Conversations() {
                     </AvatarFallback>
                   </Avatar>
                   <div>
-                    <h3 className="font-medium">
-                      {getContactName(selectedConversation.contact)}
-                    </h3>
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-medium">
+                        {getContactName(selectedConversation.contact)}
+                      </h3>
+                      {/* Attendance Mode Badge */}
+                      <Badge 
+                        variant={selectedConversation.attendance_mode === "human" ? "default" : "secondary"}
+                        className="text-xs gap-1"
+                      >
+                        {selectedConversation.attendance_mode === "human" ? (
+                          <>
+                            <User className="h-3 w-3" />
+                            Humano
+                          </>
+                        ) : (
+                          <>
+                            <Bot className="h-3 w-3" />
+                            IA
+                          </>
+                        )}
+                      </Badge>
+                    </div>
                     <p className="text-xs text-muted-foreground">
                       {selectedConversation.contact.phone_number}
                       {selectedConversation.instance && (
@@ -717,11 +834,40 @@ export default function Conversations() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
+                  {/* Transfer Buttons */}
+                  {selectedConversation.attendance_mode === "human" ? (
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      onClick={handleTransferToAI}
+                      disabled={transferring}
+                      className="gap-1.5"
+                    >
+                      {transferring ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Bot className="h-4 w-4" />
+                      )}
+                      Devolver para IA
+                    </Button>
+                  ) : (
+                    <Button 
+                      variant="default" 
+                      size="sm"
+                      onClick={handleTransferToHuman}
+                      disabled={transferring}
+                      className="gap-1.5"
+                    >
+                      {transferring ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <UserCheck className="h-4 w-4" />
+                      )}
+                      Assumir Atendimento
+                    </Button>
+                  )}
                   <Button variant="ghost" size="icon">
                     <Phone className="h-4 w-4" />
-                  </Button>
-                  <Button variant="ghost" size="icon">
-                    <Video className="h-4 w-4" />
                   </Button>
                   <Button variant="ghost" size="icon">
                     <MoreVertical className="h-4 w-4" />
@@ -864,9 +1010,32 @@ export default function Conversations() {
               </div>
 
               <div>
+                <h4 className="text-sm font-medium text-muted-foreground mb-2">Modo de Atendimento</h4>
+                <Badge 
+                  variant={selectedConversation.attendance_mode === "human" ? "default" : "secondary"}
+                  className="gap-1"
+                >
+                  {selectedConversation.attendance_mode === "human" ? (
+                    <>
+                      <User className="h-3 w-3" />
+                      Atendimento Humano
+                    </>
+                  ) : (
+                    <>
+                      <Bot className="h-3 w-3" />
+                      Atendimento IA
+                    </>
+                  )}
+                </Badge>
+              </div>
+
+              <div>
                 <h4 className="text-sm font-medium text-muted-foreground mb-2">Status</h4>
                 <Badge variant="outline" className="capitalize">
-                  {selectedConversation.status}
+                  {selectedConversation.status === "waiting_human" ? "Aguardando Atendente" :
+                   selectedConversation.status === "in_progress" ? "Em Atendimento" :
+                   selectedConversation.status === "open" ? "Aberta" :
+                   selectedConversation.status}
                 </Badge>
               </div>
 
@@ -877,16 +1046,43 @@ export default function Conversations() {
                 </div>
               </div>
 
+              <Separator className="my-2" />
+
+              <div>
+                <h4 className="text-sm font-medium text-muted-foreground mb-2">Transferência</h4>
+                <div className="space-y-2">
+                  {selectedConversation.attendance_mode === "human" ? (
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      className="w-full justify-start gap-2"
+                      onClick={handleTransferToAI}
+                      disabled={transferring}
+                    >
+                      {transferring ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />}
+                      Devolver para IA
+                    </Button>
+                  ) : (
+                    <Button 
+                      variant="default" 
+                      size="sm" 
+                      className="w-full justify-start gap-2"
+                      onClick={handleTransferToHuman}
+                      disabled={transferring}
+                    >
+                      {transferring ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserCheck className="h-4 w-4" />}
+                      Assumir Atendimento
+                    </Button>
+                  )}
+                </div>
+              </div>
+
               <div>
                 <h4 className="text-sm font-medium text-muted-foreground mb-2">Ações</h4>
                 <div className="space-y-2">
                   <Button variant="outline" size="sm" className="w-full justify-start gap-2">
                     <User className="h-4 w-4" />
                     Ver perfil completo
-                  </Button>
-                  <Button variant="outline" size="sm" className="w-full justify-start gap-2">
-                    <Bot className="h-4 w-4" />
-                    Transferir para IA
                   </Button>
                 </div>
               </div>

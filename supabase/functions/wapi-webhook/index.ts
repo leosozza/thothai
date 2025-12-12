@@ -210,37 +210,52 @@ serve(async (req) => {
 
         console.log("Message saved successfully:", messageId);
 
-        // Trigger AI processing for incoming messages (not from me)
+        // Check attendance mode before processing with AI
+        const attendanceMode = conversation.attendance_mode || 'ai';
+        const assignedTo = conversation.assigned_to;
+        
+        // Only trigger AI processing if:
+        // 1. Message is incoming (not from me)
+        // 2. Has content
+        // 3. Attendance mode is 'ai' or 'hybrid'
+        // 4. No human is assigned (or mode is hybrid)
         if (!isFromMe && msgContent) {
-          console.log("Triggering flow-engine for incoming message");
+          const shouldProcessWithAI = attendanceMode === 'ai' || 
+            (attendanceMode === 'hybrid' && !assignedTo);
           
-          try {
-            const flowResponse = await fetch(`${supabaseUrl}/functions/v1/flow-engine`, {
-              method: "POST",
-              headers: {
-                "Content-Type": "application/json",
-                Authorization: `Bearer ${supabaseServiceKey}`,
-              },
-              body: JSON.stringify({
-                message_id: savedMessage.id,
-                conversation_id: conversation.id,
-                instance_id: instanceId,
-                contact_id: contact.id,
-                content: msgContent,
-                workspace_id: instance.workspace_id,
-                is_first_message: isFirstMessage,
-              }),
-            });
+          if (shouldProcessWithAI) {
+            console.log("Triggering flow-engine for incoming message (mode:", attendanceMode, ")");
+            
+            try {
+              const flowResponse = await fetch(`${supabaseUrl}/functions/v1/flow-engine`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${supabaseServiceKey}`,
+                },
+                body: JSON.stringify({
+                  message_id: savedMessage.id,
+                  conversation_id: conversation.id,
+                  instance_id: instanceId,
+                  contact_id: contact.id,
+                  content: msgContent,
+                  workspace_id: instance.workspace_id,
+                  is_first_message: isFirstMessage,
+                }),
+              });
 
-            if (!flowResponse.ok) {
-              const flowError = await flowResponse.text();
-              console.error("Flow engine error:", flowError);
-            } else {
-              const flowResult = await flowResponse.json();
-              console.log("Flow engine result:", flowResult);
+              if (!flowResponse.ok) {
+                const flowError = await flowResponse.text();
+                console.error("Flow engine error:", flowError);
+              } else {
+                const flowResult = await flowResponse.json();
+                console.log("Flow engine result:", flowResult);
+              }
+            } catch (flowErr) {
+              console.error("Error calling flow-engine:", flowErr);
             }
-          } catch (flowErr) {
-            console.error("Error calling flow-engine:", flowErr);
+          } else {
+            console.log("Skipping AI - attendance mode is:", attendanceMode, ", assigned_to:", assignedTo);
           }
         }
         
