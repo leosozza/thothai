@@ -14,12 +14,34 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "@/hooks/use-toast";
 
 const ELEVENLABS_VOICES = [
-  { id: "XrExE9yKIg1WjnnlVkGX", name: "Matilda (Feminino)" },
-  { id: "CwhRBWXzGAHq8TQ4Fs17", name: "Roger (Masculino)" },
-  { id: "IKne3meq5aSn9XLyUdCD", name: "Charlie (Masculino)" },
-  { id: "nPczCjzI2devNBz1zQrb", name: "Brian (Masculino)" },
-  { id: "cgSgspJ2msm6clMCkdW9", name: "Jessica (Feminino)" },
-  { id: "EXAVITQu4vr4xnSDxMaL", name: "Sarah (Feminino)" },
+  // Vozes Femininas
+  { id: "EXAVITQu4vr4xnSDxMaL", name: "Sarah (Feminino - Suave)" },
+  { id: "XrExE9yKIg1WjnnlVkGX", name: "Matilda (Feminino - Natural)" },
+  { id: "cgSgspJ2msm6clMCkdW9", name: "Jessica (Feminino - Expressiva)" },
+  { id: "FGY2WhTYpPnrIDTdsKH5", name: "Laura (Feminino - Profissional)" },
+  { id: "Xb7hH8MSUJpSbSDYk0k2", name: "Alice (Feminino - Britânica)" },
+  { id: "pFZP5JQG7iQjIQuC4Bku", name: "Lily (Feminino - Narradora)" },
+  { id: "SAz9YHcvj6GT2YYXdXww", name: "River (Feminino - Americana)" },
+  
+  // Vozes Masculinas
+  { id: "CwhRBWXzGAHq8TQ4Fs17", name: "Roger (Masculino - Confiante)" },
+  { id: "IKne3meq5aSn9XLyUdCD", name: "Charlie (Masculino - Casual)" },
+  { id: "nPczCjzI2devNBz1zQrb", name: "Brian (Masculino - Narrador)" },
+  { id: "JBFqnCBsd6RMkjVDRZzb", name: "George (Masculino - Britânico)" },
+  { id: "N2lVS1w4EtoT3dr4eOWO", name: "Callum (Masculino - Transatlântico)" },
+  { id: "TX3LPaxmHKxFdv7VOQHJ", name: "Liam (Masculino - Articulado)" },
+  { id: "bIHbv24MWmeRgasZH58o", name: "Will (Masculino - Amigável)" },
+  { id: "cjVigY5qzO86Huf0OWal", name: "Eric (Masculino - Americano)" },
+  { id: "iP95p4xoKVk53GoZ742B", name: "Chris (Masculino - Casual)" },
+  { id: "onwK4e9ZLuTAKqWW03F9", name: "Daniel (Masculino - Profundo)" },
+  { id: "pqHfZKP75CvOlQylNhV4", name: "Bill (Masculino - Documentário)" },
+  
+  // Vozes Especiais
+  { id: "MDLAMJ0jxkpYkjXbmG4t", name: "Santa (Especial)" },
+  { id: "SAhdygBsjizE9aIj39dz", name: "Mrs Claus (Especial)" },
+  { id: "h6u4tPKmcPlxUdZOaVpH", name: "The Reindeer (Especial)" },
+  { id: "e79twtVS2278lVZZQiAD", name: "The Elf (Especial)" },
+  { id: "kPtEHAvRnjUJFv7SK9WI", name: "Glitch (Especial - Robótica)" },
 ];
 
 interface VoiceControlsProps {
