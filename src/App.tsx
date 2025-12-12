@@ -18,6 +18,7 @@ import Personas from "./pages/Personas";
 import Departments from "./pages/Departments";
 import Flows from "./pages/Flows";
 import Integrations from "./pages/Integrations";
+import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -42,8 +43,8 @@ const App = () => (
               <Route path="/departments" element={<Departments />} />
               <Route path="/flows" element={<Flows />} />
               <Route path="/integrations" element={<Integrations />} />
+              <Route path="/settings" element={<Settings />} />
               <Route path="/analytics" element={<Dashboard />} />
-              <Route path="/settings" element={<Dashboard />} />
               {/* Catch-all */}
               <Route path="*" element={<NotFound />} />
             </Routes>
