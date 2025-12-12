@@ -7,6 +7,23 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
 import { useWorkspace } from "@/hooks/useWorkspace";
 import { toast } from "sonner";
@@ -28,6 +45,8 @@ import {
   MessageSquare,
   Filter,
   Loader2,
+  Plus,
+  RefreshCw,
 } from "lucide-react";
 
 interface Contact {
@@ -73,6 +92,11 @@ export default function Conversations() {
   const [searchTerm, setSearchTerm] = useState("");
   const [loading, setLoading] = useState(true);
   const [sendingMessage, setSendingMessage] = useState(false);
+  const [instances, setInstances] = useState<Instance[]>([]);
+  const [newConversationOpen, setNewConversationOpen] = useState(false);
+  const [newPhoneNumber, setNewPhoneNumber] = useState("");
+  const [selectedInstanceId, setSelectedInstanceId] = useState("");
+  const [creatingConversation, setCreatingConversation] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { workspace } = useWorkspace();
 
@@ -169,6 +193,14 @@ export default function Conversations() {
 
       const instanceIds = instances.map((i) => i.id);
       const instanceMap = new Map(instances.map((i) => [i.id, i]));
+      
+      setInstances(instances);
+      
+      // Set default instance for new conversation
+      const connectedInstance = instances.find((i) => i.status === "connected");
+      if (connectedInstance && !selectedInstanceId) {
+        setSelectedInstanceId(connectedInstance.id);
+      }
 
       const { data, error } = await supabase
         .from("conversations")
@@ -206,6 +238,98 @@ export default function Conversations() {
       setMessages(data || []);
     } catch (error) {
       console.error("Error fetching messages:", error);
+    }
+  };
+
+  const handleStartNewConversation = async () => {
+    if (!newPhoneNumber.trim() || !selectedInstanceId || !workspace) return;
+
+    // Clean phone number - only digits
+    const cleanPhone = newPhoneNumber.replace(/\D/g, "");
+    if (cleanPhone.length < 10) {
+      toast.error("Número de telefone inválido");
+      return;
+    }
+
+    setCreatingConversation(true);
+
+    try {
+      // Check if instance is connected
+      const instance = instances.find((i) => i.id === selectedInstanceId);
+      if (!instance || instance.status !== "connected") {
+        toast.error("Selecione uma instância conectada");
+        return;
+      }
+
+      // Check if contact already exists
+      let { data: contact } = await supabase
+        .from("contacts")
+        .select("*")
+        .eq("instance_id", selectedInstanceId)
+        .eq("phone_number", cleanPhone)
+        .single();
+
+      // Create contact if doesn't exist
+      if (!contact) {
+        const { data: newContact, error: contactError } = await supabase
+          .from("contacts")
+          .insert({
+            instance_id: selectedInstanceId,
+            phone_number: cleanPhone,
+          })
+          .select()
+          .single();
+
+        if (contactError) throw contactError;
+        contact = newContact;
+      }
+
+      // Check if conversation already exists
+      let { data: conversation } = await supabase
+        .from("conversations")
+        .select("*, contact:contacts(*)")
+        .eq("instance_id", selectedInstanceId)
+        .eq("contact_id", contact.id)
+        .single();
+
+      // Create conversation if doesn't exist
+      if (!conversation) {
+        const { data: newConversation, error: convError } = await supabase
+          .from("conversations")
+          .insert({
+            instance_id: selectedInstanceId,
+            contact_id: contact.id,
+            status: "open",
+          })
+          .select("*, contact:contacts(*)")
+          .single();
+
+        if (convError) throw convError;
+        conversation = newConversation;
+      }
+
+      // Add instance to conversation
+      const conversationWithInstance = {
+        ...conversation,
+        instance,
+      };
+
+      // Select the conversation
+      setSelectedConversation(conversationWithInstance);
+      
+      // Refresh conversations list
+      await fetchConversations();
+
+      // Close dialog and reset form
+      setNewConversationOpen(false);
+      setNewPhoneNumber("");
+
+      toast.success("Conversa iniciada! Envie uma mensagem para começar.");
+    } catch (error) {
+      console.error("Error creating conversation:", error);
+      toast.error("Erro ao iniciar conversa");
+    } finally {
+      setCreatingConversation(false);
     }
   };
 
@@ -292,17 +416,102 @@ export default function Conversations() {
         <div className="w-80 border-r border-border flex flex-col bg-card">
           {/* Search Header */}
           <div className="p-4 space-y-3">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Buscar conversas..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-9"
-              />
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Buscar conversas..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-9"
+                />
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => fetchConversations()}
+                title="Atualizar"
+              >
+                <RefreshCw className="h-4 w-4" />
+              </Button>
             </div>
             <div className="flex gap-2">
-              <Button variant="outline" size="sm" className="gap-1.5 flex-1">
+              <Dialog open={newConversationOpen} onOpenChange={setNewConversationOpen}>
+                <DialogTrigger asChild>
+                  <Button size="sm" className="gap-1.5 flex-1">
+                    <Plus className="h-3.5 w-3.5" />
+                    Nova Conversa
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Iniciar Nova Conversa</DialogTitle>
+                    <DialogDescription>
+                      Digite o número de telefone com código do país (ex: 5511999999999)
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-4 py-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="phone">Número de Telefone</Label>
+                      <Input
+                        id="phone"
+                        placeholder="5511999999999"
+                        value={newPhoneNumber}
+                        onChange={(e) => setNewPhoneNumber(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="instance">Instância</Label>
+                      <Select
+                        value={selectedInstanceId}
+                        onValueChange={setSelectedInstanceId}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione uma instância" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {instances
+                            .filter((i) => i.status === "connected")
+                            .map((instance) => (
+                              <SelectItem key={instance.id} value={instance.id}>
+                                {instance.name}
+                              </SelectItem>
+                            ))}
+                        </SelectContent>
+                      </Select>
+                      {instances.filter((i) => i.status === "connected").length === 0 && (
+                        <p className="text-xs text-destructive">
+                          Nenhuma instância conectada
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <Button
+                      variant="outline"
+                      onClick={() => setNewConversationOpen(false)}
+                    >
+                      Cancelar
+                    </Button>
+                    <Button
+                      onClick={handleStartNewConversation}
+                      disabled={
+                        creatingConversation ||
+                        !newPhoneNumber.trim() ||
+                        !selectedInstanceId
+                      }
+                    >
+                      {creatingConversation ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <MessageSquare className="h-4 w-4 mr-2" />
+                      )}
+                      Iniciar Conversa
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+              <Button variant="outline" size="sm" className="gap-1.5">
                 <Filter className="h-3.5 w-3.5" />
                 Filtros
               </Button>
