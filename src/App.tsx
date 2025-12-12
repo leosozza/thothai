@@ -20,6 +20,7 @@ import Departments from "./pages/Departments";
 import Flows from "./pages/Flows";
 import Integrations from "./pages/Integrations";
 import Settings from "./pages/Settings";
+import Playground from "./pages/Playground";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -53,6 +54,7 @@ const App = () => (
                 <Route path="/integrations" element={<Integrations />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/analytics" element={<Dashboard />} />
+                <Route path="/playground" element={<Playground />} />
                 {/* Catch-all */}
                 <Route path="*" element={<NotFound />} />
               </Routes>
