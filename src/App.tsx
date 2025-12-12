@@ -21,6 +21,7 @@ import Flows from "./pages/Flows";
 import Integrations from "./pages/Integrations";
 import Settings from "./pages/Settings";
 import Playground from "./pages/Playground";
+import Bitrix24Setup from "./pages/Bitrix24Setup";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -55,6 +56,7 @@ const App = () => (
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/analytics" element={<Dashboard />} />
                 <Route path="/playground" element={<Playground />} />
+                <Route path="/bitrix24-setup" element={<Bitrix24Setup />} />
                 {/* Catch-all */}
                 <Route path="*" element={<NotFound />} />
               </Routes>
