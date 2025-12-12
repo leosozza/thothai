@@ -48,6 +48,7 @@ import {
   Sun,
   Moon,
   Sparkles,
+  TestTube2,
 } from "lucide-react";
 
 const mainNavItems = [
@@ -93,6 +94,11 @@ const aiNavItems = [
     title: "Fluxos",
     url: "/flows",
     icon: Workflow,
+  },
+  {
+    title: "Playground",
+    url: "/playground",
+    icon: TestTube2,
   },
 ];
 
