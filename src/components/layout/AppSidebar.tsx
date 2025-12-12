@@ -2,6 +2,7 @@ import { useLocation } from "react-router-dom";
 import { NavLink } from "@/components/NavLink";
 import { ThothLogo } from "@/components/ThothLogo";
 import { useAuth } from "@/hooks/useAuth";
+import { useTheme } from "next-themes";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -10,6 +11,11 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
 } from "@/components/ui/dropdown-menu";
 import {
   Sidebar,
@@ -38,6 +44,10 @@ import {
   Users,
   Building2,
   Plug,
+  Palette,
+  Sun,
+  Moon,
+  Sparkles,
 } from "lucide-react";
 
 const mainNavItems = [
@@ -109,6 +119,7 @@ export function AppSidebar() {
   const collapsed = state === "collapsed";
   const location = useLocation();
   const { user, signOut } = useAuth();
+  const { theme, setTheme } = useTheme();
 
   const isActive = (path: string) => location.pathname === path;
 
@@ -120,6 +131,19 @@ export function AppSidebar() {
       .join("")
       .toUpperCase()
       .slice(0, 2);
+  };
+
+  const getThemeIcon = () => {
+    switch (theme) {
+      case "light":
+        return <Sun className="h-4 w-4" />;
+      case "dark":
+        return <Moon className="h-4 w-4" />;
+      case "thoth24":
+        return <Sparkles className="h-4 w-4" />;
+      default:
+        return <Palette className="h-4 w-4" />;
+    }
   };
 
   return (
@@ -246,6 +270,28 @@ export function AppSidebar() {
                 Configurações
               </NavLink>
             </DropdownMenuItem>
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                {getThemeIcon()}
+                <span className="ml-2">Tema</span>
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent>
+                <DropdownMenuRadioGroup value={theme} onValueChange={setTheme}>
+                  <DropdownMenuRadioItem value="light">
+                    <Sun className="h-4 w-4 mr-2" />
+                    Claro
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="dark">
+                    <Moon className="h-4 w-4 mr-2" />
+                    Escuro
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="thoth24">
+                    <Sparkles className="h-4 w-4 mr-2" />
+                    Thoth24
+                  </DropdownMenuRadioItem>
+                </DropdownMenuRadioGroup>
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
             <DropdownMenuSeparator />
             <DropdownMenuItem
               onClick={signOut}

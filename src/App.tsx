@@ -3,6 +3,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { ThemeProvider } from "next-themes";
 import { AuthProvider } from "@/hooks/useAuth";
 import { WorkspaceProvider } from "@/hooks/useWorkspace";
 
@@ -24,35 +25,43 @@ import NotFound from "./pages/NotFound";
 const queryClient = new QueryClient();
 
 const App = () => (
-  <QueryClientProvider client={queryClient}>
-    <AuthProvider>
-      <WorkspaceProvider>
-        <TooltipProvider>
-          <Toaster />
-          <Sonner />
-          <BrowserRouter>
-            <Routes>
-              <Route path="/" element={<Index />} />
-              <Route path="/auth" element={<Auth />} />
-              <Route path="/dashboard" element={<Dashboard />} />
-              <Route path="/instances" element={<Instances />} />
-              <Route path="/conversations" element={<Conversations />} />
-              <Route path="/contacts" element={<Contacts />} />
-              <Route path="/training" element={<Training />} />
-              <Route path="/personas" element={<Personas />} />
-              <Route path="/departments" element={<Departments />} />
-              <Route path="/flows" element={<Flows />} />
-              <Route path="/integrations" element={<Integrations />} />
-              <Route path="/settings" element={<Settings />} />
-              <Route path="/analytics" element={<Dashboard />} />
-              {/* Catch-all */}
-              <Route path="*" element={<NotFound />} />
-            </Routes>
-          </BrowserRouter>
-        </TooltipProvider>
-      </WorkspaceProvider>
-    </AuthProvider>
-  </QueryClientProvider>
+  <ThemeProvider
+    attribute="class"
+    defaultTheme="thoth24"
+    themes={["light", "dark", "thoth24"]}
+    enableSystem={false}
+    storageKey="thoth-theme"
+  >
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
+        <WorkspaceProvider>
+          <TooltipProvider>
+            <Toaster />
+            <Sonner />
+            <BrowserRouter>
+              <Routes>
+                <Route path="/" element={<Index />} />
+                <Route path="/auth" element={<Auth />} />
+                <Route path="/dashboard" element={<Dashboard />} />
+                <Route path="/instances" element={<Instances />} />
+                <Route path="/conversations" element={<Conversations />} />
+                <Route path="/contacts" element={<Contacts />} />
+                <Route path="/training" element={<Training />} />
+                <Route path="/personas" element={<Personas />} />
+                <Route path="/departments" element={<Departments />} />
+                <Route path="/flows" element={<Flows />} />
+                <Route path="/integrations" element={<Integrations />} />
+                <Route path="/settings" element={<Settings />} />
+                <Route path="/analytics" element={<Dashboard />} />
+                {/* Catch-all */}
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </BrowserRouter>
+          </TooltipProvider>
+        </WorkspaceProvider>
+      </AuthProvider>
+    </QueryClientProvider>
+  </ThemeProvider>
 );
 
 export default App;
