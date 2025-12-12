@@ -140,8 +140,10 @@ serve(async (req) => {
           .eq("contact_id", contact.id)
           .maybeSingle();
 
+        let isFirstMessage = false;
         if (!conversation) {
           console.log("Creating new conversation for contact:", contact.id);
+          isFirstMessage = true;
           const { data: newConversation, error: convError } = await supabase
             .from("conversations")
             .insert({
@@ -175,7 +177,7 @@ serve(async (req) => {
         }
 
         // Insert message
-        const { error: msgError } = await supabase
+        const { data: savedMessage, error: msgError } = await supabase
           .from("messages")
           .insert({
             instance_id: instanceId,
@@ -187,7 +189,9 @@ serve(async (req) => {
             content: msgContent,
             status: isFromMe ? "sent" : "delivered",
             is_from_bot: false,
-          });
+          })
+          .select()
+          .single();
 
         if (msgError) {
           console.error("Error inserting message:", msgError);
@@ -205,6 +209,41 @@ serve(async (req) => {
           .eq("id", conversation.id);
 
         console.log("Message saved successfully:", messageId);
+
+        // Trigger AI processing for incoming messages (not from me)
+        if (!isFromMe && msgContent) {
+          console.log("Triggering flow-engine for incoming message");
+          
+          try {
+            const flowResponse = await fetch(`${supabaseUrl}/functions/v1/flow-engine`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${supabaseServiceKey}`,
+              },
+              body: JSON.stringify({
+                message_id: savedMessage.id,
+                conversation_id: conversation.id,
+                instance_id: instanceId,
+                contact_id: contact.id,
+                content: msgContent,
+                workspace_id: instance.workspace_id,
+                is_first_message: isFirstMessage,
+              }),
+            });
+
+            if (!flowResponse.ok) {
+              const flowError = await flowResponse.text();
+              console.error("Flow engine error:", flowError);
+            } else {
+              const flowResult = await flowResponse.json();
+              console.log("Flow engine result:", flowResult);
+            }
+          } catch (flowErr) {
+            console.error("Error calling flow-engine:", flowErr);
+          }
+        }
+        
         break;
       }
 
