@@ -37,6 +37,7 @@ import {
   ChevronUp,
   Users,
   Building2,
+  Plug,
 } from "lucide-react";
 
 const mainNavItems = [
@@ -85,7 +86,12 @@ const aiNavItems = [
   },
 ];
 
-const analyticsNavItems = [
+const systemNavItems = [
+  {
+    title: "Integrações",
+    url: "/integrations",
+    icon: Plug,
+  },
   {
     title: "Métricas",
     url: "/analytics",
@@ -177,12 +183,12 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {/* Analytics Section */}
+        {/* System Section */}
         <SidebarGroup>
           <SidebarGroupLabel>Sistema</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {analyticsNavItems.map((item) => (
+              {systemNavItems.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton
                     asChild
