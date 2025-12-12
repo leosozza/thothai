@@ -103,27 +103,28 @@ serve(async (req) => {
       });
     }
 
-    // Format phone number for WhatsApp
+    // Format phone number for WhatsApp (W-API expects just the number)
     const formattedPhone = phoneNumber.replace(/\D/g, "");
-    const chatId = `${formattedPhone}@s.whatsapp.net`;
 
     let endpoint = "message/send-text";
     let body: Record<string, unknown> = {
-      chatId,
-      text: message,
+      phone: formattedPhone,
+      message: message,
     };
 
     // Handle different message types
     if (messageType === "audio" && mediaUrl) {
       endpoint = "message/send-audio";
-      body = { chatId, audioUrl: mediaUrl };
+      body = { phone: formattedPhone, audioUrl: mediaUrl };
     } else if (messageType === "image" && mediaUrl) {
       endpoint = "message/send-image";
-      body = { chatId, imageUrl: mediaUrl, caption: message };
+      body = { phone: formattedPhone, imageUrl: mediaUrl, caption: message };
     } else if (messageType === "document" && mediaUrl) {
       endpoint = "message/send-document";
-      body = { chatId, documentUrl: mediaUrl, fileName: message || "document" };
+      body = { phone: formattedPhone, documentUrl: mediaUrl, fileName: message || "document" };
     }
+
+    console.log("W-API request body:", JSON.stringify(body));
 
     // Send message via W-API
     console.log(`Sending ${messageType} message via W-API...`);
