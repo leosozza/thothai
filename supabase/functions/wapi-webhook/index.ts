@@ -210,6 +210,45 @@ serve(async (req) => {
 
         console.log("Message saved successfully:", messageId);
 
+        // Check if workspace has Bitrix24 integration active - send incoming messages to Bitrix24
+        if (!isFromMe) {
+          try {
+            const { data: bitrixIntegration } = await supabase
+              .from("integrations")
+              .select("*")
+              .eq("workspace_id", instance.workspace_id)
+              .eq("type", "bitrix24")
+              .eq("is_active", true)
+              .maybeSingle();
+
+            if (bitrixIntegration) {
+              console.log("Sending message to Bitrix24...");
+              
+              const bitrixResponse = await fetch(`${supabaseUrl}/functions/v1/bitrix24-send`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${supabaseServiceKey}`,
+                },
+                body: JSON.stringify({
+                  integration_id: bitrixIntegration.id,
+                  contact_phone: contactPhone,
+                  contact_name: pushName || contactPhone,
+                  contact_picture: profilePic,
+                  message: msgContent,
+                  message_type: messageType,
+                  message_id: messageId,
+                }),
+              });
+
+              const bitrixResult = await bitrixResponse.json();
+              console.log("Bitrix24 send result:", bitrixResult);
+            }
+          } catch (bitrixErr) {
+            console.error("Error sending to Bitrix24:", bitrixErr);
+          }
+        }
+
         // Check attendance mode before processing with AI
         const attendanceMode = conversation.attendance_mode || 'ai';
         const assignedTo = conversation.assigned_to;
