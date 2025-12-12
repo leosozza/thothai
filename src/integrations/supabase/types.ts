@@ -190,6 +190,7 @@ export type Database = {
           name: string
           updated_at: string
           user_id: string
+          workspace_id: string | null
         }
         Insert: {
           color?: string | null
@@ -199,6 +200,7 @@ export type Database = {
           name: string
           updated_at?: string
           user_id: string
+          workspace_id?: string | null
         }
         Update: {
           color?: string | null
@@ -208,8 +210,80 @@ export type Database = {
           name?: string
           updated_at?: string
           user_id?: string
+          workspace_id?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "departments_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      flows: {
+        Row: {
+          created_at: string
+          description: string | null
+          edges: Json
+          id: string
+          instance_id: string | null
+          is_active: boolean
+          name: string
+          nodes: Json
+          trigger_type: string
+          trigger_value: string | null
+          updated_at: string
+          variables: Json | null
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          edges?: Json
+          id?: string
+          instance_id?: string | null
+          is_active?: boolean
+          name: string
+          nodes?: Json
+          trigger_type: string
+          trigger_value?: string | null
+          updated_at?: string
+          variables?: Json | null
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          edges?: Json
+          id?: string
+          instance_id?: string | null
+          is_active?: boolean
+          name?: string
+          nodes?: Json
+          trigger_type?: string
+          trigger_value?: string | null
+          updated_at?: string
+          variables?: Json | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "flows_instance_id_fkey"
+            columns: ["instance_id"]
+            isOneToOne: false
+            referencedRelation: "instances"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "flows_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       instances: {
         Row: {
@@ -223,6 +297,7 @@ export type Database = {
           status: string
           updated_at: string
           user_id: string
+          workspace_id: string | null
         }
         Insert: {
           created_at?: string
@@ -235,6 +310,7 @@ export type Database = {
           status?: string
           updated_at?: string
           user_id: string
+          workspace_id?: string | null
         }
         Update: {
           created_at?: string
@@ -247,8 +323,165 @@ export type Database = {
           status?: string
           updated_at?: string
           user_id?: string
+          workspace_id?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "instances_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      integrations: {
+        Row: {
+          config: Json | null
+          created_at: string
+          id: string
+          is_active: boolean
+          last_sync_at: string | null
+          name: string
+          type: string
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          config?: Json | null
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          last_sync_at?: string | null
+          name: string
+          type: string
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          config?: Json | null
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          last_sync_at?: string | null
+          name?: string
+          type?: string
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "integrations_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      knowledge_chunks: {
+        Row: {
+          chunk_index: number
+          content: string
+          created_at: string
+          document_id: string
+          id: string
+          metadata: Json | null
+          tokens_count: number | null
+        }
+        Insert: {
+          chunk_index: number
+          content: string
+          created_at?: string
+          document_id: string
+          id?: string
+          metadata?: Json | null
+          tokens_count?: number | null
+        }
+        Update: {
+          chunk_index?: number
+          content?: string
+          created_at?: string
+          document_id?: string
+          id?: string
+          metadata?: Json | null
+          tokens_count?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "knowledge_chunks_document_id_fkey"
+            columns: ["document_id"]
+            isOneToOne: false
+            referencedRelation: "knowledge_documents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      knowledge_documents: {
+        Row: {
+          chunks_count: number | null
+          content: string | null
+          created_at: string
+          department_id: string | null
+          file_path: string | null
+          file_type: string | null
+          id: string
+          metadata: Json | null
+          source_type: string
+          source_url: string | null
+          status: string
+          title: string
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          chunks_count?: number | null
+          content?: string | null
+          created_at?: string
+          department_id?: string | null
+          file_path?: string | null
+          file_type?: string | null
+          id?: string
+          metadata?: Json | null
+          source_type: string
+          source_url?: string | null
+          status?: string
+          title: string
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          chunks_count?: number | null
+          content?: string | null
+          created_at?: string
+          department_id?: string | null
+          file_path?: string | null
+          file_type?: string | null
+          id?: string
+          metadata?: Json | null
+          source_type?: string
+          source_url?: string | null
+          status?: string
+          title?: string
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "knowledge_documents_department_id_fkey"
+            columns: ["department_id"]
+            isOneToOne: false
+            referencedRelation: "departments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "knowledge_documents_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       messages: {
         Row: {
@@ -326,6 +559,75 @@ export type Database = {
           },
         ]
       }
+      personas: {
+        Row: {
+          avatar_url: string | null
+          created_at: string
+          department_id: string | null
+          description: string | null
+          fallback_message: string | null
+          id: string
+          is_default: boolean | null
+          name: string
+          system_prompt: string
+          temperature: number | null
+          updated_at: string
+          voice_enabled: boolean | null
+          voice_id: string | null
+          welcome_message: string | null
+          workspace_id: string
+        }
+        Insert: {
+          avatar_url?: string | null
+          created_at?: string
+          department_id?: string | null
+          description?: string | null
+          fallback_message?: string | null
+          id?: string
+          is_default?: boolean | null
+          name: string
+          system_prompt: string
+          temperature?: number | null
+          updated_at?: string
+          voice_enabled?: boolean | null
+          voice_id?: string | null
+          welcome_message?: string | null
+          workspace_id: string
+        }
+        Update: {
+          avatar_url?: string | null
+          created_at?: string
+          department_id?: string | null
+          description?: string | null
+          fallback_message?: string | null
+          id?: string
+          is_default?: boolean | null
+          name?: string
+          system_prompt?: string
+          temperature?: number | null
+          updated_at?: string
+          voice_enabled?: boolean | null
+          voice_id?: string | null
+          welcome_message?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "personas_department_id_fkey"
+            columns: ["department_id"]
+            isOneToOne: false
+            referencedRelation: "departments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "personas_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           avatar_url: string | null
@@ -353,6 +655,74 @@ export type Database = {
           id?: string
           updated_at?: string
           user_id?: string
+        }
+        Relationships: []
+      }
+      workspace_members: {
+        Row: {
+          created_at: string
+          id: string
+          role: string
+          user_id: string
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          role?: string
+          user_id: string
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          role?: string
+          user_id?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workspace_members_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      workspaces: {
+        Row: {
+          created_at: string
+          id: string
+          logo_url: string | null
+          name: string
+          owner_id: string
+          plan: string
+          settings: Json | null
+          slug: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          logo_url?: string | null
+          name: string
+          owner_id: string
+          plan?: string
+          settings?: Json | null
+          slug: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          logo_url?: string | null
+          name?: string
+          owner_id?: string
+          plan?: string
+          settings?: Json | null
+          slug?: string
+          updated_at?: string
         }
         Relationships: []
       }
