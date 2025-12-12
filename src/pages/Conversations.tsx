@@ -76,6 +76,7 @@ interface Conversation {
 
 interface Message {
   id: string;
+  conversation_id: string;
   direction: string;
   message_type: string;
   content: string | null;
@@ -100,11 +101,18 @@ export default function Conversations() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { workspace } = useWorkspace();
 
+  // Reference to selected conversation for use in realtime callbacks
+  const selectedConversationRef = useRef<Conversation | null>(null);
+  
+  useEffect(() => {
+    selectedConversationRef.current = selectedConversation;
+  }, [selectedConversation]);
+
   useEffect(() => {
     if (workspace) {
       fetchConversations();
 
-      // Subscribe to new conversations
+      // Subscribe to conversation changes
       const convChannel = supabase
         .channel("conversations-changes")
         .on(
@@ -114,14 +122,137 @@ export default function Conversations() {
             schema: "public",
             table: "conversations",
           },
-          () => {
-            fetchConversations();
+          (payload) => {
+            if (payload.eventType === "INSERT") {
+              fetchConversations();
+            } else if (payload.eventType === "UPDATE") {
+              const updatedConv = payload.new as any;
+              setConversations((prev) =>
+                prev.map((conv) =>
+                  conv.id === updatedConv.id
+                    ? { ...conv, ...updatedConv }
+                    : conv
+                )
+              );
+            }
+          }
+        )
+        .subscribe();
+
+      // Subscribe to new messages globally (for updating conversation list)
+      const messagesGlobalChannel = supabase
+        .channel("messages-global")
+        .on(
+          "postgres_changes",
+          {
+            event: "INSERT",
+            schema: "public",
+            table: "messages",
+          },
+          (payload) => {
+            const newMsg = payload.new as any;
+            
+            // Update conversation's last_message_at and unread_count
+            setConversations((prev) =>
+              prev.map((conv) => {
+                if (conv.id === newMsg.conversation_id) {
+                  const isSelected = selectedConversationRef.current?.id === conv.id;
+                  return {
+                    ...conv,
+                    last_message_at: newMsg.created_at,
+                    unread_count: isSelected 
+                      ? 0 
+                      : (newMsg.direction === 'incoming' ? conv.unread_count + 1 : conv.unread_count),
+                  };
+                }
+                return conv;
+              })
+            );
+
+            // Reorder conversations by last_message_at
+            setConversations((prev) =>
+              [...prev].sort((a, b) => {
+                const dateA = a.last_message_at ? new Date(a.last_message_at).getTime() : 0;
+                const dateB = b.last_message_at ? new Date(b.last_message_at).getTime() : 0;
+                return dateB - dateA;
+              })
+            );
+
+            // Show notification for incoming messages in other conversations
+            if (
+              newMsg.direction === "incoming" &&
+              selectedConversationRef.current?.id !== newMsg.conversation_id
+            ) {
+              toast.info("Nova mensagem recebida!", {
+                description: "Clique em uma conversa para ver",
+                duration: 3000,
+              });
+            }
+
+            // Add message to current conversation if selected
+            if (selectedConversationRef.current?.id === newMsg.conversation_id) {
+              setMessages((prev) => {
+                // Prevent duplicates
+                if (prev.find((m) => m.id === newMsg.id)) return prev;
+                return [...prev, newMsg as Message];
+              });
+            }
+          }
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "UPDATE",
+            schema: "public",
+            table: "messages",
+          },
+          (payload) => {
+            const updatedMsg = payload.new as Message;
+            // Update message status in current conversation
+            if (selectedConversationRef.current?.id === updatedMsg.conversation_id) {
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === updatedMsg.id ? updatedMsg : msg
+                )
+              );
+            }
+          }
+        )
+        .subscribe();
+
+      // Subscribe to contact changes (for name/photo updates)
+      const contactsChannel = supabase
+        .channel("contacts-changes")
+        .on(
+          "postgres_changes",
+          {
+            event: "UPDATE",
+            schema: "public",
+            table: "contacts",
+          },
+          (payload) => {
+            const updatedContact = payload.new as Contact;
+            setConversations((prev) =>
+              prev.map((conv) =>
+                conv.contact_id === updatedContact.id
+                  ? { ...conv, contact: updatedContact }
+                  : conv
+              )
+            );
+            // Update selected conversation contact
+            if (selectedConversationRef.current?.contact_id === updatedContact.id) {
+              setSelectedConversation((prev) =>
+                prev ? { ...prev, contact: updatedContact } : null
+              );
+            }
           }
         )
         .subscribe();
 
       return () => {
         supabase.removeChannel(convChannel);
+        supabase.removeChannel(messagesGlobalChannel);
+        supabase.removeChannel(contactsChannel);
       };
     }
   }, [workspace]);
@@ -136,44 +267,16 @@ export default function Conversations() {
         .update({ unread_count: 0 })
         .eq("id", selectedConversation.id);
 
-      // Subscribe to new messages
-      const channel = supabase
-        .channel(`messages-${selectedConversation.id}`)
-        .on(
-          "postgres_changes",
-          {
-            event: "INSERT",
-            schema: "public",
-            table: "messages",
-            filter: `conversation_id=eq.${selectedConversation.id}`,
-          },
-          (payload) => {
-            setMessages((prev) => [...prev, payload.new as Message]);
-          }
+      // Also update local state
+      setConversations((prev) =>
+        prev.map((conv) =>
+          conv.id === selectedConversation.id
+            ? { ...conv, unread_count: 0 }
+            : conv
         )
-        .on(
-          "postgres_changes",
-          {
-            event: "UPDATE",
-            schema: "public",
-            table: "messages",
-            filter: `conversation_id=eq.${selectedConversation.id}`,
-          },
-          (payload) => {
-            setMessages((prev) =>
-              prev.map((msg) =>
-                msg.id === (payload.new as Message).id ? (payload.new as Message) : msg
-              )
-            );
-          }
-        )
-        .subscribe();
-
-      return () => {
-        supabase.removeChannel(channel);
-      };
+      );
     }
-  }, [selectedConversation]);
+  }, [selectedConversation?.id]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
