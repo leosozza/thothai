@@ -35,3 +35,6 @@ verify_jwt = false
 
 [functions.bitrix24-send]
 verify_jwt = true
+
+[functions.bitrix24-install]
+verify_jwt = false
