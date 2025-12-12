@@ -1,1 +1,10 @@
 project_id = "ybqwwipwimnkonnebbys"
+
+[functions.wapi-webhook]
+verify_jwt = false
+
+[functions.wapi-connect]
+verify_jwt = true
+
+[functions.wapi-send-message]
+verify_jwt = true

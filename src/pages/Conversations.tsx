@@ -9,6 +9,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { supabase } from "@/integrations/supabase/client";
 import { useWorkspace } from "@/hooks/useWorkspace";
+import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import {
@@ -37,6 +38,12 @@ interface Contact {
   profile_picture_url: string | null;
 }
 
+interface Instance {
+  id: string;
+  name: string;
+  status: string;
+}
+
 interface Conversation {
   id: string;
   instance_id: string;
@@ -45,6 +52,7 @@ interface Conversation {
   last_message_at: string | null;
   unread_count: number;
   contact: Contact;
+  instance?: Instance;
 }
 
 interface Message {
@@ -71,12 +79,38 @@ export default function Conversations() {
   useEffect(() => {
     if (workspace) {
       fetchConversations();
+
+      // Subscribe to new conversations
+      const convChannel = supabase
+        .channel("conversations-changes")
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "conversations",
+          },
+          () => {
+            fetchConversations();
+          }
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(convChannel);
+      };
     }
   }, [workspace]);
 
   useEffect(() => {
     if (selectedConversation) {
       fetchMessages(selectedConversation.id);
+
+      // Mark as read
+      supabase
+        .from("conversations")
+        .update({ unread_count: 0 })
+        .eq("id", selectedConversation.id);
 
       // Subscribe to new messages
       const channel = supabase
@@ -91,6 +125,22 @@ export default function Conversations() {
           },
           (payload) => {
             setMessages((prev) => [...prev, payload.new as Message]);
+          }
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "UPDATE",
+            schema: "public",
+            table: "messages",
+            filter: `conversation_id=eq.${selectedConversation.id}`,
+          },
+          (payload) => {
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === (payload.new as Message).id ? (payload.new as Message) : msg
+              )
+            );
           }
         )
         .subscribe();
@@ -109,7 +159,7 @@ export default function Conversations() {
     try {
       const { data: instances } = await supabase
         .from("instances")
-        .select("id")
+        .select("id, name, status")
         .eq("workspace_id", workspace?.id);
 
       if (!instances?.length) {
@@ -118,6 +168,7 @@ export default function Conversations() {
       }
 
       const instanceIds = instances.map((i) => i.id);
+      const instanceMap = new Map(instances.map((i) => [i.id, i]));
 
       const { data, error } = await supabase
         .from("conversations")
@@ -129,7 +180,13 @@ export default function Conversations() {
         .order("last_message_at", { ascending: false, nullsFirst: false });
 
       if (error) throw error;
-      setConversations(data || []);
+
+      const conversationsWithInstance = (data || []).map((conv) => ({
+        ...conv,
+        instance: instanceMap.get(conv.instance_id),
+      }));
+
+      setConversations(conversationsWithInstance);
     } catch (error) {
       console.error("Error fetching conversations:", error);
     } finally {
@@ -153,12 +210,47 @@ export default function Conversations() {
   };
 
   const handleSendMessage = async () => {
-    if (!newMessage.trim() || !selectedConversation) return;
+    if (!newMessage.trim() || !selectedConversation || !workspace) return;
+
+    // Check if instance is connected
+    if (selectedConversation.instance?.status !== "connected") {
+      toast.error("Instância não está conectada");
+      return;
+    }
 
     setSendingMessage(true);
-    // TODO: Implement W-API message sending
-    setSendingMessage(false);
+    const messageContent = newMessage.trim();
     setNewMessage("");
+
+    try {
+      const response = await supabase.functions.invoke("wapi-send-message", {
+        body: {
+          instanceId: selectedConversation.instance_id,
+          conversationId: selectedConversation.id,
+          contactId: selectedConversation.contact_id,
+          phoneNumber: selectedConversation.contact.phone_number,
+          message: messageContent,
+          messageType: "text",
+          workspaceId: workspace.id,
+        },
+      });
+
+      if (response.error) {
+        throw new Error(response.error.message || "Erro ao enviar mensagem");
+      }
+
+      if (response.data?.error) {
+        throw new Error(response.data.error);
+      }
+
+      // Message will appear via realtime subscription
+    } catch (error) {
+      console.error("Error sending message:", error);
+      toast.error(error instanceof Error ? error.message : "Erro ao enviar mensagem");
+      setNewMessage(messageContent); // Restore message on error
+    } finally {
+      setSendingMessage(false);
+    }
   };
 
   const getContactName = (contact: Contact) => {
@@ -231,6 +323,9 @@ export default function Conversations() {
                 <p className="text-sm text-muted-foreground">
                   {searchTerm ? "Nenhuma conversa encontrada" : "Nenhuma conversa ainda"}
                 </p>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Quando alguém enviar mensagem, aparecerá aqui
+                </p>
               </div>
             ) : (
               <div className="divide-y divide-border">
@@ -265,7 +360,7 @@ export default function Conversations() {
                         </div>
                         <div className="flex items-center justify-between gap-2 mt-0.5">
                           <span className="text-sm text-muted-foreground truncate">
-                            {conv.contact.phone_number}
+                            {conv.instance?.name || conv.contact.phone_number}
                           </span>
                           {conv.unread_count > 0 && (
                             <Badge className="h-5 min-w-5 rounded-full px-1.5 bg-primary text-primary-foreground text-xs">
@@ -301,6 +396,11 @@ export default function Conversations() {
                     </h3>
                     <p className="text-xs text-muted-foreground">
                       {selectedConversation.contact.phone_number}
+                      {selectedConversation.instance && (
+                        <span className="ml-2 text-primary">
+                          • {selectedConversation.instance.name}
+                        </span>
+                      )}
                     </p>
                   </div>
                 </div>
@@ -320,39 +420,52 @@ export default function Conversations() {
               {/* Messages Area */}
               <ScrollArea className="flex-1 p-4 bg-muted/30">
                 <div className="space-y-4 max-w-3xl mx-auto">
-                  {messages.map((msg) => (
-                    <div
-                      key={msg.id}
-                      className={`flex ${msg.direction === "outgoing" ? "justify-end" : "justify-start"}`}
-                    >
+                  {messages.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-12 text-center">
+                      <MessageSquare className="h-10 w-10 text-muted-foreground/50 mb-3" />
+                      <p className="text-sm text-muted-foreground">
+                        Nenhuma mensagem ainda
+                      </p>
+                    </div>
+                  ) : (
+                    messages.map((msg) => (
                       <div
-                        className={`max-w-[70%] rounded-2xl px-4 py-2 ${
-                          msg.direction === "outgoing"
-                            ? "bg-primary text-primary-foreground rounded-br-md"
-                            : "bg-card border border-border rounded-bl-md"
-                        }`}
+                        key={msg.id}
+                        className={`flex ${msg.direction === "outgoing" ? "justify-end" : "justify-start"}`}
                       >
-                        {msg.is_from_bot && msg.direction === "outgoing" && (
-                          <div className="flex items-center gap-1 text-xs opacity-70 mb-1">
-                            <Bot className="h-3 w-3" />
-                            <span>thoth.AI</span>
+                        <div
+                          className={`max-w-[70%] rounded-2xl px-4 py-2 ${
+                            msg.direction === "outgoing"
+                              ? "bg-primary text-primary-foreground rounded-br-md"
+                              : "bg-card border border-border rounded-bl-md"
+                          }`}
+                        >
+                          {msg.is_from_bot && msg.direction === "outgoing" && (
+                            <div className="flex items-center gap-1 text-xs opacity-70 mb-1">
+                              <Bot className="h-3 w-3" />
+                              <span>thoth.AI</span>
+                            </div>
+                          )}
+                          <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                          <div
+                            className={`flex items-center justify-end gap-1 mt-1 ${
+                              msg.direction === "outgoing"
+                                ? "text-primary-foreground/70"
+                                : "text-muted-foreground"
+                            }`}
+                          >
+                            <span className="text-xs">
+                              {new Date(msg.created_at).toLocaleTimeString("pt-BR", {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </span>
+                            {msg.direction === "outgoing" && getStatusIcon(msg.status)}
                           </div>
-                        )}
-                        <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
-                        <div className={`flex items-center justify-end gap-1 mt-1 ${
-                          msg.direction === "outgoing" ? "text-primary-foreground/70" : "text-muted-foreground"
-                        }`}>
-                          <span className="text-xs">
-                            {new Date(msg.created_at).toLocaleTimeString("pt-BR", {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
-                          </span>
-                          {msg.direction === "outgoing" && getStatusIcon(msg.status)}
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    ))
+                  )}
                   <div ref={messagesEndRef} />
                 </div>
               </ScrollArea>
@@ -364,11 +477,16 @@ export default function Conversations() {
                     <Paperclip className="h-5 w-5" />
                   </Button>
                   <Input
-                    placeholder="Digite uma mensagem..."
+                    placeholder={
+                      selectedConversation.instance?.status === "connected"
+                        ? "Digite uma mensagem..."
+                        : "Instância desconectada"
+                    }
                     value={newMessage}
                     onChange={(e) => setNewMessage(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && handleSendMessage()}
+                    onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && handleSendMessage()}
                     className="flex-1"
+                    disabled={selectedConversation.instance?.status !== "connected"}
                   />
                   <Button variant="ghost" size="icon">
                     <Mic className="h-5 w-5" />
@@ -376,7 +494,11 @@ export default function Conversations() {
                   <Button
                     size="icon"
                     onClick={handleSendMessage}
-                    disabled={!newMessage.trim() || sendingMessage}
+                    disabled={
+                      !newMessage.trim() ||
+                      sendingMessage ||
+                      selectedConversation.instance?.status !== "connected"
+                    }
                   >
                     {sendingMessage ? (
                       <Loader2 className="h-5 w-5 animate-spin" />
@@ -422,6 +544,13 @@ export default function Conversations() {
             <Separator className="my-4" />
 
             <div className="space-y-4">
+              <div>
+                <h4 className="text-sm font-medium text-muted-foreground mb-2">Instância</h4>
+                <Badge variant="outline">
+                  {selectedConversation.instance?.name || "Não identificada"}
+                </Badge>
+              </div>
+
               <div>
                 <h4 className="text-sm font-medium text-muted-foreground mb-2">Status</h4>
                 <Badge variant="outline" className="capitalize">
