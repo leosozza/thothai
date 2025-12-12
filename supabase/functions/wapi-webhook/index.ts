@@ -185,7 +185,7 @@ serve(async (req) => {
             direction: isFromMe ? "outgoing" : "incoming",
             message_type: messageType,
             content: msgContent,
-            status: isFromMe ? "sent" : "received",
+            status: isFromMe ? "sent" : "delivered",
             is_from_bot: false,
           });
 
@@ -445,7 +445,7 @@ serve(async (req) => {
             direction: isFromMe ? "outgoing" : "incoming",
             message_type: messageType,
             content: msgContent,
-            status: isFromMe ? "sent" : "received",
+            status: isFromMe ? "sent" : "delivered",
             is_from_bot: false,
           });
 
