@@ -6,7 +6,8 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const WAPI_BASE_URL = "https://api.w-api.app/v1";
+// W-API base URL
+const WAPI_BASE_URL = "https://api.w-api.app";
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -55,6 +56,7 @@ serve(async (req) => {
       .single();
 
     if (intError || !integration) {
+      console.error("Integration error:", intError);
       return new Response(JSON.stringify({ 
         error: "W-API não configurada. Vá em Integrações para adicionar sua API Key." 
       }), {
@@ -65,6 +67,7 @@ serve(async (req) => {
 
     const config = integration.config as { api_key?: string; instance_id?: string };
     const wapiApiKey = config?.api_key;
+    const wapiInstanceId = config?.instance_id;
     
     if (!wapiApiKey) {
       return new Response(JSON.stringify({ 
@@ -74,6 +77,17 @@ serve(async (req) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
+    if (!wapiInstanceId) {
+      return new Response(JSON.stringify({ 
+        error: "Instance ID da W-API não encontrado na configuração." 
+      }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    console.log("Using W-API instance:", wapiInstanceId);
 
     // Verify instance belongs to user
     const { data: instance, error: instanceError } = await supabaseAdmin
@@ -90,79 +104,53 @@ serve(async (req) => {
       });
     }
 
+    // Save W-API instance key to our instance
+    await supabaseAdmin
+      .from("instances")
+      .update({ 
+        instance_key: wapiInstanceId,
+        workspace_id: workspaceId,
+        status: "connecting",
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", instanceId);
+
+    // Configure webhook URL
     const webhookUrl = `${supabaseUrl}/functions/v1/wapi-webhook?instance_id=${instanceId}`;
-    let wapiInstanceId = instance.instance_key;
+    console.log("Configuring webhook URL:", webhookUrl);
 
-    // If no W-API instance exists, create one
-    if (!wapiInstanceId) {
-      console.log("Creating new W-API instance...");
-      
-      const createResponse = await fetch(`${WAPI_BASE_URL}/instance/create`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${wapiApiKey}`,
-        },
-        body: JSON.stringify({
-          webhookUrl: webhookUrl,
-          webhookEvents: ["messages", "qr", "authenticated", "disconnected", "message_ack"],
-        }),
-      });
-
-      if (!createResponse.ok) {
-        const errorText = await createResponse.text();
-        console.error("W-API create instance error:", errorText);
-        return new Response(JSON.stringify({ error: "Erro ao criar instância na W-API" }), {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-
-      const createData = await createResponse.json();
-      wapiInstanceId = createData.id || createData.instance_id || createData.instanceId;
-      
-      console.log("W-API instance created:", wapiInstanceId);
-
-      // Save instance_key
-      await supabaseAdmin
-        .from("instances")
-        .update({ 
-          instance_key: wapiInstanceId,
-          status: "connecting",
-          updated_at: new Date().toISOString()
-        })
-        .eq("id", instanceId);
-    }
-
-    // Configure webhooks
-    console.log("Configuring webhooks for instance:", wapiInstanceId);
-    
-    const webhookEndpoints = [
-      "update-webhook-messages",
-      "update-webhook-connection", 
-      "update-webhook-ack",
-    ];
-
-    for (const endpoint of webhookEndpoints) {
-      try {
-        await fetch(`${WAPI_BASE_URL}/webhook/${endpoint}?instanceId=${wapiInstanceId}`, {
+    // Update webhook on W-API
+    try {
+      const webhookResponse = await fetch(
+        `${WAPI_BASE_URL}/v1/config/update-webhook-global?instanceId=${wapiInstanceId}`,
+        {
           method: "PUT",
           headers: {
             "Content-Type": "application/json",
             "Authorization": `Bearer ${wapiApiKey}`,
           },
-          body: JSON.stringify({ webhookUrl }),
-        });
-      } catch (e) {
-        console.warn(`Failed to configure ${endpoint}:`, e);
+          body: JSON.stringify({ 
+            webhookUrl: webhookUrl,
+            webhookEvents: ["messages", "qr", "authenticated", "disconnected", "message_ack"]
+          }),
+        }
+      );
+      
+      if (webhookResponse.ok) {
+        console.log("Webhook configured successfully");
+      } else {
+        const webhookError = await webhookResponse.text();
+        console.warn("Failed to configure webhook:", webhookError);
       }
+    } catch (e) {
+      console.warn("Error configuring webhook:", e);
     }
 
-    // Request QR Code / Connect
-    console.log("Requesting QR Code...");
+    // Request connection / QR Code
+    console.log("Requesting connection...");
     
     const connectResponse = await fetch(
-      `${WAPI_BASE_URL}/instance/connect?instanceId=${wapiInstanceId}`,
+      `${WAPI_BASE_URL}/v1/instance/connect?instanceId=${wapiInstanceId}`,
       {
         method: "GET",
         headers: {
@@ -171,13 +159,15 @@ serve(async (req) => {
       }
     );
 
+    console.log("Connect response status:", connectResponse.status);
+    
     if (!connectResponse.ok) {
       const errorText = await connectResponse.text();
       console.error("W-API connect error:", errorText);
       
-      // Try to get QR code directly
+      // Try to get QR code directly with different endpoint
       const qrResponse = await fetch(
-        `${WAPI_BASE_URL}/instance/qrcode?instanceId=${wapiInstanceId}`,
+        `${WAPI_BASE_URL}/v1/instance/qr-code/image?instanceId=${wapiInstanceId}`,
         {
           method: "GET",
           headers: {
@@ -186,9 +176,13 @@ serve(async (req) => {
         }
       );
 
+      console.log("QR response status:", qrResponse.status);
+
       if (qrResponse.ok) {
         const qrData = await qrResponse.json();
-        const qrCode = qrData.qrcode || qrData.qr || qrData.data?.qrcode;
+        console.log("QR data:", qrData);
+        
+        const qrCode = qrData.qrcode || qrData.qr || qrData.base64 || qrData.data?.qrcode;
 
         if (qrCode) {
           await supabaseAdmin
@@ -210,22 +204,25 @@ serve(async (req) => {
         }
       }
 
-      return new Response(JSON.stringify({ error: "Erro ao conectar na W-API" }), {
+      return new Response(JSON.stringify({ 
+        error: "Erro ao conectar na W-API. Verifique se a instância existe e está ativa.",
+        details: errorText
+      }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
     const connectData = await connectResponse.json();
-    console.log("Connect response:", connectData);
+    console.log("Connect response data:", connectData);
 
     // Check if already connected
-    if (connectData.status === "connected" || connectData.connected) {
+    if (connectData.status === "connected" || connectData.connected === true) {
       await supabaseAdmin
         .from("instances")
         .update({ 
           status: "connected",
-          phone_number: connectData.phone || instance.phone_number,
+          phone_number: connectData.phone || connectData.phoneNumber || instance.phone_number,
           qr_code: null,
           updated_at: new Date().toISOString()
         })
@@ -234,14 +231,15 @@ serve(async (req) => {
       return new Response(JSON.stringify({ 
         success: true, 
         status: "connected",
-        phone: connectData.phone
+        phone: connectData.phone || connectData.phoneNumber
       }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Get QR Code
-    const qrCode = connectData.qrcode || connectData.qr || connectData.data?.qrcode;
+    // Get QR Code from response
+    const qrCode = connectData.qrcode || connectData.qr || connectData.base64 || 
+                   connectData.data?.qrcode || connectData.data?.base64;
     
     if (qrCode) {
       await supabaseAdmin
@@ -262,11 +260,52 @@ serve(async (req) => {
       });
     }
 
-    // No QR yet, return current status
+    // No QR yet, try to get it
+    console.log("No QR in connect response, fetching QR code...");
+    
+    const qrFetchResponse = await fetch(
+      `${WAPI_BASE_URL}/v1/instance/qr-code/image?instanceId=${wapiInstanceId}`,
+      {
+        method: "GET",
+        headers: {
+          "Authorization": `Bearer ${wapiApiKey}`,
+        },
+      }
+    );
+
+    if (qrFetchResponse.ok) {
+      const qrFetchData = await qrFetchResponse.json();
+      console.log("QR fetch data:", qrFetchData);
+      
+      const fetchedQr = qrFetchData.qrcode || qrFetchData.qr || qrFetchData.base64 || 
+                        qrFetchData.data?.qrcode || qrFetchData.data?.base64;
+      
+      if (fetchedQr) {
+        await supabaseAdmin
+          .from("instances")
+          .update({ 
+            qr_code: fetchedQr,
+            status: "qr_pending",
+            updated_at: new Date().toISOString()
+          })
+          .eq("id", instanceId);
+
+        return new Response(JSON.stringify({ 
+          success: true, 
+          qr_code: fetchedQr,
+          status: "qr_pending"
+        }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
+    // Return current status
     return new Response(JSON.stringify({ 
       success: true, 
       status: "connecting",
-      message: "Aguardando QR Code da W-API..."
+      message: "Aguardando QR Code da W-API...",
+      connectData
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
