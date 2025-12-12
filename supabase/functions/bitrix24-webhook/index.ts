@@ -104,6 +104,49 @@ serve(async (req) => {
         break;
       }
 
+      case "ONIMCONNECTORTYPING": {
+        // Operator is typing in Bitrix24 → Send typing indicator to WhatsApp
+        console.log("Bitrix24 operator typing event");
+        
+        const userId = payload.data?.USER_ID || payload.data?.user_id;
+        const line = payload.data?.LINE;
+        
+        // Find the integration
+        const { data: integration } = await supabase
+          .from("integrations")
+          .select("*")
+          .eq("type", "bitrix24")
+          .eq("is_active", true)
+          .maybeSingle();
+
+        if (!integration) {
+          console.log("No active Bitrix24 integration for typing");
+          break;
+        }
+
+        const config = integration.config as Record<string, unknown>;
+        const instanceId = config?.instance_id as string;
+
+        if (!instanceId) {
+          console.log("No instance configured for typing");
+          break;
+        }
+
+        // Find the contact
+        const { data: contact } = await supabase
+          .from("contacts")
+          .select("*")
+          .eq("instance_id", instanceId)
+          .contains("metadata", { bitrix24_user_id: userId })
+          .maybeSingle();
+
+        if (contact) {
+          // TODO: Send typing indicator to WhatsApp if W-API supports it
+          console.log("Would send typing indicator to WhatsApp for:", contact.phone_number);
+        }
+        break;
+      }
+
       case "ONIMCONNECTORDIALOGFINISH": {
         // Conversation closed in Bitrix24
         const dialogId = payload.data?.DIALOG_ID;
