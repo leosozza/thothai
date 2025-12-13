@@ -46,6 +46,9 @@ import {
   Copy,
   Star,
   ChevronRight,
+  Users,
+  RefreshCw,
+  ArrowLeftRight,
 } from "lucide-react";
 
 interface Integration {
@@ -147,6 +150,8 @@ export default function Integrations() {
   const [bitrixInstanceId, setBitrixInstanceId] = useState("");
   const [registeringBitrix, setRegisteringBitrix] = useState(false);
   const [bitrixConfigMode, setBitrixConfigMode] = useState<"webhook" | "app">("app");
+  const [syncingContacts, setSyncingContacts] = useState(false);
+  const [syncDirection, setSyncDirection] = useState<"both" | "to_bitrix" | "from_bitrix">("both");
 
   useEffect(() => {
     if (workspace) {
@@ -315,6 +320,48 @@ export default function Integrations() {
   const copyToClipboard = (text: string, label: string) => {
     navigator.clipboard.writeText(text);
     toast.success(`${label} copiado!`);
+  };
+
+  const handleSyncContacts = async () => {
+    if (!workspace?.id) {
+      toast.error("Workspace não encontrado");
+      return;
+    }
+
+    const bitrix = integrations.find((i) => i.type === "bitrix24");
+    if (!bitrix || !bitrix.is_active) {
+      toast.error("Integração Bitrix24 não está ativa");
+      return;
+    }
+
+    setSyncingContacts(true);
+    try {
+      const response = await supabase.functions.invoke("bitrix24-sync-contacts", {
+        body: {
+          workspace_id: workspace.id,
+          instance_id: bitrixInstanceId || (bitrix.config?.instance_id as string) || null,
+          direction: syncDirection,
+        },
+      });
+
+      if (response.error) {
+        throw new Error(response.error.message || "Erro ao sincronizar contatos");
+      }
+
+      const stats = response.data?.stats;
+      if (stats) {
+        toast.success(
+          `Sincronização concluída: ${stats.synced_from_bitrix} importados, ${stats.synced_to_bitrix} exportados, ${stats.updated} atualizados`
+        );
+      } else {
+        toast.success("Contatos sincronizados com sucesso!");
+      }
+    } catch (error) {
+      console.error("Error syncing contacts:", error);
+      toast.error(error instanceof Error ? error.message : "Erro ao sincronizar contatos");
+    } finally {
+      setSyncingContacts(false);
+    }
   };
 
   const bitrixIntegration = getIntegrationStatus("bitrix24");
@@ -763,6 +810,89 @@ export default function Integrations() {
                 </div>
               </CardContent>
             </Card>
+
+            {/* Contact Sync Card */}
+            {bitrixIntegration?.is_active && (
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="h-12 w-12 rounded-xl bg-emerald-500/10 flex items-center justify-center">
+                        <Users className="h-6 w-6 text-emerald-500" />
+                      </div>
+                      <div>
+                        <CardTitle>Sincronização de Contatos</CardTitle>
+                        <CardDescription>
+                          Sincronize contatos entre WhatsApp e Bitrix24 CRM
+                        </CardDescription>
+                      </div>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="bg-muted/50 rounded-lg p-4 text-sm">
+                    <div className="flex items-start gap-2">
+                      <ArrowLeftRight className="h-5 w-5 text-emerald-500 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-medium">Sincronização bidirecional:</p>
+                        <ul className="text-muted-foreground mt-1 space-y-1">
+                          <li>• <strong>Do Bitrix24:</strong> Importa contatos do CRM para o WhatsApp</li>
+                          <li>• <strong>Para o Bitrix24:</strong> Exporta contatos do WhatsApp para o CRM</li>
+                          <li>• <strong>Ambos:</strong> Sincroniza em ambas as direções</li>
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <Label>Direção da Sincronização</Label>
+                      <Select value={syncDirection} onValueChange={(v) => setSyncDirection(v as typeof syncDirection)}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="both">Bidirecional (recomendado)</SelectItem>
+                          <SelectItem value="from_bitrix">Importar do Bitrix24</SelectItem>
+                          <SelectItem value="to_bitrix">Exportar para o Bitrix24</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Instância WhatsApp</Label>
+                      <Select value={bitrixInstanceId} onValueChange={setBitrixInstanceId}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Usar instância configurada" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="">Usar instância configurada</SelectItem>
+                          {instances.map((inst) => (
+                            <SelectItem key={inst.id} value={inst.id}>
+                              {inst.name} {inst.phone_number ? `(${inst.phone_number})` : ""}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <Button onClick={handleSyncContacts} disabled={syncingContacts} className="gap-2">
+                    {syncingContacts ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Sincronizando...
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="h-4 w-4" />
+                        Sincronizar Contatos
+                      </>
+                    )}
+                  </Button>
+                </CardContent>
+              </Card>
+            )}
           </TabsContent>
 
           <TabsContent value="ai" className="mt-6 space-y-4">
