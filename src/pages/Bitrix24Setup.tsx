@@ -430,9 +430,14 @@ const [loading, setLoading] = useState(true);
     try {
       setRegistering(true);
 
+      // Sanitize connector_id: remove dots, spaces, and special characters (Bitrix24 requirement)
+      const sanitizedId = (memberId || domain || "local")
+        .replace(/[^a-zA-Z0-9_]/g, '')
+        .substring(0, 12);
+
       const payload: any = {
         instance_id: selectedInstance,
-        connector_id: `thoth_whatsapp_${(memberId || domain || "local").substring(0, 8)}`,
+        connector_id: `thoth_whatsapp_${sanitizedId}`,
       };
 
       // Usar webhook_url se disponível, senão usar member_id
