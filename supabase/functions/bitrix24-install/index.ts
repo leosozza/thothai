@@ -24,6 +24,98 @@ serve(async (req) => {
       console.log("Full URL:", req.url);
       console.log("Search params string:", url.searchParams.toString());
       
+      // Check for OAuth callback first
+      const oauthCode = url.searchParams.get("code");
+      const oauthState = url.searchParams.get("state");
+      
+      if (oauthCode && oauthState) {
+        console.log("OAuth callback received:", { hasCode: !!oauthCode, state: oauthState });
+        
+        const domain = oauthState;
+
+        // Find integration with OAuth credentials
+        const { data: integration } = await supabase
+          .from("integrations")
+          .select("*")
+          .eq("type", "bitrix24")
+          .or(`config->>member_id.eq.${domain},config->>domain.eq.${domain}`)
+          .maybeSingle();
+
+        if (!integration || !integration.config?.client_id || !integration.config?.client_secret) {
+          console.error("Integration not found for OAuth callback:", domain);
+          return new Response(
+            `<html><body><h1>Erro</h1><p>Integração OAuth não encontrada. Por favor, configure novamente.</p></body></html>`,
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "text/html" } }
+          );
+        }
+
+        const clientId = integration.config.client_id;
+        const clientSecret = integration.config.client_secret;
+
+        // Exchange code for tokens
+        const tokenUrl = `https://${domain}/oauth/token/`;
+        console.log("Exchanging code for tokens at:", tokenUrl);
+        
+        const tokenResponse = await fetch(tokenUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            grant_type: "authorization_code",
+            client_id: clientId,
+            client_secret: clientSecret,
+            code: oauthCode,
+          }),
+        });
+
+        const tokenData = await tokenResponse.json();
+        console.log("OAuth token response:", { hasAccessToken: !!tokenData.access_token, error: tokenData.error });
+
+        if (!tokenData.access_token) {
+          console.error("Failed to get access token:", tokenData);
+          return new Response(
+            `<html><body><h1>Erro</h1><p>Falha ao obter token: ${tokenData.error_description || tokenData.error}</p></body></html>`,
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "text/html" } }
+          );
+        }
+
+        // Calculate expiration
+        const expiresIn = parseInt(tokenData.expires_in || "3600", 10);
+        const tokenExpiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
+
+        // Update integration with tokens
+        const updatedConfig = {
+          ...integration.config,
+          access_token: tokenData.access_token,
+          refresh_token: tokenData.refresh_token,
+          token_expires_at: tokenExpiresAt,
+          member_id: tokenData.member_id || integration.config.member_id,
+          client_endpoint: tokenData.client_endpoint || `https://${domain}/rest/`,
+          oauth_pending: false,
+        };
+
+        await supabase
+          .from("integrations")
+          .update({
+            config: updatedConfig,
+            is_active: true,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", integration.id);
+
+        console.log("OAuth tokens saved successfully for:", domain);
+
+        // Redirect back to setup page with success
+        const setupUrl = `https://chat.thoth24.com/bitrix24-setup?member_id=${encodeURIComponent(tokenData.member_id || domain)}&oauth=success`;
+        
+        return new Response(null, {
+          status: 302,
+          headers: {
+            ...corsHeaders,
+            "Location": setupUrl,
+          },
+        });
+      }
+      
       const queryMemberId = url.searchParams.get("member_id");
       const queryDomain = url.searchParams.get("domain") || url.searchParams.get("DOMAIN");
       const includeInstances = url.searchParams.get("include_instances") === "true";
@@ -63,6 +155,7 @@ serve(async (req) => {
               is_active: integration.is_active,
               workspace_id: integration.workspace_id,
               instances: instances,
+              has_access_token: !!integration.config?.access_token,
             }),
             { headers: { ...corsHeaders, "Content-Type": "application/json" } }
           );
@@ -202,6 +295,183 @@ serve(async (req) => {
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
+    }
+
+    // ✅ HANDLE OAUTH EXCHANGE (manual OAuth setup)
+    if (body.action === "oauth_exchange") {
+      const clientId = body.client_id;
+      const clientSecret = body.client_secret;
+      const memberId = body.member_id;
+      const domain = body.domain;
+
+      console.log("OAuth exchange request:", { clientId, hasDomain: !!domain, memberId });
+
+      if (!clientId || !clientSecret) {
+        return new Response(
+          JSON.stringify({ error: "Client ID e Client Secret são obrigatórios" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Extract domain from memberId if needed
+      const bitrixDomain = domain || memberId;
+      if (!bitrixDomain) {
+        return new Response(
+          JSON.stringify({ error: "Domínio do Bitrix24 não identificado" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Normalize domain
+      const normalizedDomain = bitrixDomain.replace(/^https?:\/\//, "").replace(/\/$/, "");
+
+      // Save OAuth credentials and create/update integration
+      const { data: existingIntegration } = await supabase
+        .from("integrations")
+        .select("*")
+        .eq("type", "bitrix24")
+        .or(`config->>member_id.eq.${memberId || normalizedDomain},config->>domain.eq.${normalizedDomain}`)
+        .maybeSingle();
+
+      const oauthConfig = {
+        member_id: memberId || normalizedDomain,
+        domain: normalizedDomain,
+        client_id: clientId,
+        client_secret: clientSecret,
+        oauth_pending: true,
+        installed: true,
+        installed_at: new Date().toISOString(),
+      };
+
+      if (existingIntegration) {
+        await supabase
+          .from("integrations")
+          .update({
+            config: { ...existingIntegration.config, ...oauthConfig },
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", existingIntegration.id);
+      } else {
+        await supabase
+          .from("integrations")
+          .insert({
+            type: "bitrix24",
+            name: `Bitrix24 OAuth - ${normalizedDomain}`,
+            config: oauthConfig,
+            is_active: true,
+          });
+      }
+
+      // Generate OAuth authorization URL
+      const redirectUri = `${supabaseUrl}/functions/v1/bitrix24-install`;
+      const authUrl = `https://${normalizedDomain}/oauth/authorize/?client_id=${clientId}&response_type=code&redirect_uri=${encodeURIComponent(redirectUri)}&state=${encodeURIComponent(normalizedDomain)}`;
+
+      console.log("OAuth auth URL generated:", authUrl);
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          auth_url: authUrl,
+          message: "Redirecionando para autorização OAuth",
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // ✅ HANDLE OAUTH CALLBACK (authorization code exchange)
+    if (body.code || (req.method === "GET" && new URL(req.url).searchParams.has("code"))) {
+      const url = new URL(req.url);
+      const code = body.code || url.searchParams.get("code");
+      const state = body.state || url.searchParams.get("state"); // state contains domain
+
+      console.log("OAuth callback received:", { hasCode: !!code, state });
+
+      if (!code || !state) {
+        return new Response(
+          JSON.stringify({ error: "Código de autorização ou estado inválido" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const domain = state;
+
+      // Find integration with OAuth credentials
+      const { data: integration } = await supabase
+        .from("integrations")
+        .select("*")
+        .eq("type", "bitrix24")
+        .or(`config->>member_id.eq.${domain},config->>domain.eq.${domain}`)
+        .maybeSingle();
+
+      if (!integration || !integration.config?.client_id || !integration.config?.client_secret) {
+        return new Response(
+          JSON.stringify({ error: "Integração OAuth não encontrada" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const clientId = integration.config.client_id;
+      const clientSecret = integration.config.client_secret;
+
+      // Exchange code for tokens
+      const tokenUrl = `https://${domain}/oauth/token/`;
+      const tokenResponse = await fetch(tokenUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          client_id: clientId,
+          client_secret: clientSecret,
+          code: code,
+        }),
+      });
+
+      const tokenData = await tokenResponse.json();
+      console.log("OAuth token response:", { hasAccessToken: !!tokenData.access_token, error: tokenData.error });
+
+      if (!tokenData.access_token) {
+        return new Response(
+          JSON.stringify({ error: "Falha ao obter token de acesso", details: tokenData.error_description || tokenData.error }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Calculate expiration
+      const expiresIn = parseInt(tokenData.expires_in || "3600", 10);
+      const tokenExpiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
+
+      // Update integration with tokens
+      const updatedConfig = {
+        ...integration.config,
+        access_token: tokenData.access_token,
+        refresh_token: tokenData.refresh_token,
+        token_expires_at: tokenExpiresAt,
+        member_id: tokenData.member_id || integration.config.member_id,
+        client_endpoint: tokenData.client_endpoint || `https://${domain}/rest/`,
+        oauth_pending: false,
+      };
+
+      await supabase
+        .from("integrations")
+        .update({
+          config: updatedConfig,
+          is_active: true,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", integration.id);
+
+      console.log("OAuth tokens saved successfully for:", domain);
+
+      // Redirect back to setup page
+      const setupUrl = `https://chat.thoth24.com/bitrix24-setup?member_id=${encodeURIComponent(tokenData.member_id || domain)}&oauth=success`;
+      
+      return new Response(null, {
+        status: 302,
+        headers: {
+          ...corsHeaders,
+          "Location": setupUrl,
+        },
+      });
     }
 
     // ✅ HANDLE TOKEN VALIDATION
