@@ -116,23 +116,58 @@ serve(async (req) => {
       console.log("=== OAUTH MODE (Marketplace App) ===");
       console.log("Looking for integration with member_id:", member_id);
       
-      const { data: existingIntegration, error: lookupError } = await supabase
+      // Try multiple search strategies (same as bitrix24-install)
+      let existingIntegration = null;
+      
+      // Strategy 1: Search by config->>member_id
+      console.log("Strategy 1: Searching by config->>member_id...");
+      const { data: byMemberId } = await supabase
         .from("integrations")
         .select("*")
         .eq("type", "bitrix24")
-        .filter("config->>member_id", "eq", member_id)
+        .eq("config->>member_id", member_id)
         .maybeSingle();
-
-      if (lookupError) {
-        console.error("Error looking up integration:", lookupError);
-        return new Response(
-          JSON.stringify({ error: "Erro ao buscar integração" }),
-          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+      
+      if (byMemberId) {
+        existingIntegration = byMemberId;
+        console.log("Found by member_id:", byMemberId.id);
+      }
+      
+      // Strategy 2: Search by config->>domain
+      if (!existingIntegration) {
+        console.log("Strategy 2: Searching by config->>domain...");
+        const { data: byDomain } = await supabase
+          .from("integrations")
+          .select("*")
+          .eq("type", "bitrix24")
+          .eq("config->>domain", member_id)
+          .maybeSingle();
+        
+        if (byDomain) {
+          existingIntegration = byDomain;
+          console.log("Found by domain:", byDomain.id);
+        }
+      }
+      
+      // Strategy 3: Search with LIKE for partial match
+      if (!existingIntegration) {
+        console.log("Strategy 3: Searching with LIKE pattern...");
+        const { data: byLike } = await supabase
+          .from("integrations")
+          .select("*")
+          .eq("type", "bitrix24")
+          .or(`config->>member_id.ilike.%${member_id}%,config->>domain.ilike.%${member_id}%`)
+          .maybeSingle();
+        
+        if (byLike) {
+          existingIntegration = byLike;
+          console.log("Found by LIKE pattern:", byLike.id);
+        }
       }
 
       if (!existingIntegration) {
         console.error("No integration found for member_id:", member_id);
+        console.log("Searched: member_id, domain, and LIKE patterns");
         return new Response(
           JSON.stringify({ error: "Integração Bitrix24 não encontrada. Por favor, reinstale o aplicativo." }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -140,6 +175,7 @@ serve(async (req) => {
       }
 
       console.log("Found integration:", existingIntegration.id, "workspace:", existingIntegration.workspace_id);
+      console.log("Integration config keys:", Object.keys(existingIntegration.config || {}));
       integration = existingIntegration;
 
       // Check if this is a local app with webhook_url
