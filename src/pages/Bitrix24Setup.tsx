@@ -1,11 +1,12 @@
 import { useState, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { CheckCircle, Loader2, MessageSquare, Phone, AlertCircle, Plug } from "lucide-react";
 import { toast } from "sonner";
+
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 
 interface Instance {
   id: string;
@@ -20,6 +21,7 @@ interface BitrixStatus {
   registered?: boolean;
   instance_id?: string;
   is_active?: boolean;
+  instances?: Instance[];
 }
 
 export default function Bitrix24Setup() {
@@ -33,92 +35,79 @@ export default function Bitrix24Setup() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Extract member_id from URL params (provided by Bitrix24 iframe)
+    // Extract params from URL (provided by Bitrix24 iframe)
     const params = new URLSearchParams(window.location.search);
-    const memberIdParam = params.get("member_id") || params.get("DOMAIN");
+    const memberIdParam = params.get("member_id");
     const domainParam = params.get("DOMAIN");
+
+    console.log("Bitrix24Setup: URL params", { memberIdParam, domainParam });
 
     if (memberIdParam) {
       setMemberId(memberIdParam);
     }
     if (domainParam) {
       setDomain(domainParam);
+      // If we have domain but no member_id, try to use domain as identifier
+      if (!memberIdParam) {
+        setMemberId(domainParam);
+      }
     }
 
-    // Also try to get from parent frame placement data
+    // Try to get from Bitrix24 JS SDK
+    initBitrix24SDK();
+  }, []);
+
+  const initBitrix24SDK = () => {
     try {
       // @ts-ignore - Bitrix24 JS SDK
       if (window.BX24) {
+        console.log("Bitrix24 SDK found, initializing...");
         // @ts-ignore
         window.BX24.init(() => {
-          // @ts-ignore
-          const placement = window.BX24.placement.info();
-          console.log("Bitrix24 placement info:", placement);
+          console.log("Bitrix24 SDK initialized");
           
           // @ts-ignore
           window.BX24.callMethod("app.info", {}, (result: any) => {
-            console.log("Bitrix24 app.info:", result.data());
             const appInfo = result.data();
+            console.log("Bitrix24 app.info:", appInfo);
+            
             if (appInfo?.member_id) {
               setMemberId(appInfo.member_id);
             }
+            if (appInfo?.DOMAIN) {
+              setDomain(appInfo.DOMAIN);
+            }
           });
         });
+      } else {
+        console.log("Bitrix24 SDK not found, using URL params only");
+        // Load data after a short delay to ensure URL params are set
+        setTimeout(() => loadData(), 100);
       }
     } catch (e) {
-      console.log("Not running in Bitrix24 context");
-    }
-
-    loadData();
-  }, []);
-
-  const loadData = async () => {
-    try {
-      setLoading(true);
-      
-      // Load instances for selection
-      const { data: instancesData } = await supabase
-        .from("instances")
-        .select("id, name, phone_number, status")
-        .eq("status", "connected");
-
-      if (instancesData) {
-        setInstances(instancesData);
-      }
-
-      // Check Bitrix24 installation status
-      if (memberId) {
-        await checkBitrixStatus();
-      }
-    } catch (err) {
-      console.error("Error loading data:", err);
-      setError("Erro ao carregar dados");
-    } finally {
-      setLoading(false);
+      console.log("Error initializing Bitrix24 SDK:", e);
+      setTimeout(() => loadData(), 100);
     }
   };
 
   useEffect(() => {
     if (memberId) {
-      checkBitrixStatus();
+      console.log("Member ID set, loading data:", memberId);
+      loadData();
     }
   }, [memberId]);
 
-  const checkBitrixStatus = async () => {
-    if (!memberId) return;
-
+  const loadData = async () => {
     try {
-      const { data, error } = await supabase.functions.invoke("bitrix24-install", {
-        method: "GET",
-        body: null,
-        headers: {
-          "Content-Type": "application/json",
-        },
-      });
-
-      // Try direct fetch for GET request
+      setLoading(true);
+      setError(null);
+      
+      // Fetch status and instances from Edge Function
+      const currentMemberId = memberId || domain;
+      console.log("Fetching Bitrix24 status for:", currentMemberId);
+      
       const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/bitrix24-install?member_id=${memberId}`,
+        `${SUPABASE_URL}/functions/v1/bitrix24-install?member_id=${encodeURIComponent(currentMemberId || "")}&include_instances=true`,
         {
           method: "GET",
           headers: {
@@ -127,43 +116,65 @@ export default function Bitrix24Setup() {
         }
       );
 
-      const statusData = await response.json();
-      console.log("Bitrix24 status:", statusData);
-      
-      setStatus(statusData);
-      if (statusData.domain) {
-        setDomain(statusData.domain);
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
       }
-      if (statusData.instance_id) {
-        setSelectedInstance(statusData.instance_id);
+
+      const data: BitrixStatus = await response.json();
+      console.log("Bitrix24 status response:", data);
+      
+      setStatus(data);
+      
+      if (data.domain) {
+        setDomain(data.domain);
+      }
+      if (data.instance_id) {
+        setSelectedInstance(data.instance_id);
+      }
+      if (data.instances) {
+        setInstances(data.instances);
       }
     } catch (err) {
-      console.error("Error checking Bitrix24 status:", err);
+      console.error("Error loading data:", err);
+      setError("Erro ao carregar dados. Verifique se o aplicativo foi instalado corretamente.");
+    } finally {
+      setLoading(false);
     }
   };
 
   const handleRegisterConnector = async () => {
     if (!memberId || !selectedInstance) {
-      toast.error("Selecione uma instância W-API");
+      toast.error("Selecione uma instância WhatsApp");
       return;
     }
 
     try {
       setRegistering(true);
 
-      const { data, error } = await supabase.functions.invoke("bitrix24-register", {
-        body: {
-          member_id: memberId,
-          instance_id: selectedInstance,
-          connector_id: `thoth_whatsapp_${memberId.substring(0, 8)}`,
-        },
-      });
+      const response = await fetch(
+        `${SUPABASE_URL}/functions/v1/bitrix24-register`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            member_id: memberId,
+            instance_id: selectedInstance,
+            connector_id: `thoth_whatsapp_${memberId.substring(0, 8)}`,
+          }),
+        }
+      );
 
-      if (error) throw error;
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error || "Erro ao registrar conector");
+      }
 
       if (data?.success) {
         toast.success("Conector WhatsApp ativado com sucesso!");
-        await checkBitrixStatus();
+        await loadData();
       } else {
         throw new Error(data?.error || "Erro ao registrar conector");
       }
@@ -178,7 +189,10 @@ export default function Bitrix24Setup() {
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <div className="text-center space-y-4">
+          <Loader2 className="h-8 w-8 animate-spin text-primary mx-auto" />
+          <p className="text-muted-foreground">Carregando configurações...</p>
+        </div>
       </div>
     );
   }
@@ -212,6 +226,17 @@ export default function Bitrix24Setup() {
             Conecte seu WhatsApp ao Bitrix24 Open Channels
           </p>
         </div>
+
+        {/* Debug Info (only in development) */}
+        {import.meta.env.DEV && (
+          <Card className="bg-muted/50">
+            <CardContent className="pt-4 text-xs font-mono">
+              <p>member_id: {memberId || "null"}</p>
+              <p>domain: {domain || "null"}</p>
+              <p>status.found: {String(status?.found)}</p>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Connection Status */}
         <Card>
@@ -275,6 +300,13 @@ export default function Bitrix24Setup() {
                 <p className="text-muted-foreground text-sm">
                   Configure uma instância no painel Thoth primeiro.
                 </p>
+                <Button 
+                  variant="link" 
+                  className="mt-2"
+                  onClick={() => window.open("https://chat.thoth24.com/instances", "_blank")}
+                >
+                  Abrir Painel Thoth
+                </Button>
               </div>
             ) : (
               <>

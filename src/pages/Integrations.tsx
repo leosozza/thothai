@@ -130,9 +130,7 @@ const integrationTypes = [
 
 // Bitrix24 App URLs
 const BITRIX24_HANDLER_URL = "https://ybqwwipwimnkonnebbys.supabase.co/functions/v1/bitrix24-install";
-const BITRIX24_INITIAL_INSTALL_URL = typeof window !== "undefined" 
-  ? `${window.location.origin}/bitrix24-setup`
-  : "https://seu-dominio.lovable.app/bitrix24-setup";
+const BITRIX24_INITIAL_INSTALL_URL = "https://chat.thoth24.com/bitrix24-setup";
 
 export default function Integrations() {
   const [integrations, setIntegrations] = useState<Integration[]>([]);

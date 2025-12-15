@@ -154,14 +154,44 @@ serve(async (req) => {
     if (req.method === "GET") {
       const url = new URL(req.url);
       const queryMemberId = url.searchParams.get("member_id");
+      const includeInstances = url.searchParams.get("include_instances") === "true";
+
+      console.log("GET request - member_id:", queryMemberId, "include_instances:", includeInstances);
 
       if (queryMemberId) {
+        // Try to find integration by member_id or domain
         const { data: integration } = await supabase
           .from("integrations")
           .select("*")
           .eq("type", "bitrix24")
-          .filter("config->>member_id", "eq", queryMemberId)
+          .or(`config->>member_id.eq.${queryMemberId},config->>domain.eq.${queryMemberId}`)
           .maybeSingle();
+
+        let instances: any[] = [];
+        
+        // If include_instances is true, fetch available instances
+        if (includeInstances) {
+          // Get instances from the workspace associated with this integration
+          if (integration?.workspace_id) {
+            const { data: workspaceInstances } = await supabase
+              .from("instances")
+              .select("id, name, phone_number, status")
+              .eq("workspace_id", integration.workspace_id)
+              .eq("status", "connected");
+            
+            instances = workspaceInstances || [];
+          } else {
+            // If no integration found, get all connected instances
+            // This is a fallback for first-time setup
+            const { data: allInstances } = await supabase
+              .from("instances")
+              .select("id, name, phone_number, status")
+              .eq("status", "connected")
+              .limit(20);
+            
+            instances = allInstances || [];
+          }
+        }
 
         if (integration) {
           return new Response(
@@ -171,10 +201,21 @@ serve(async (req) => {
               registered: integration.config?.registered || false,
               instance_id: integration.config?.instance_id,
               is_active: integration.is_active,
+              workspace_id: integration.workspace_id,
+              instances: includeInstances ? instances : undefined,
             }),
             { headers: { ...corsHeaders, "Content-Type": "application/json" } }
           );
         }
+
+        // Integration not found but return instances if requested
+        return new Response(
+          JSON.stringify({ 
+            found: false,
+            instances: includeInstances ? instances : undefined,
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
       }
 
       return new Response(

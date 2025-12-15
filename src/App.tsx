@@ -35,35 +35,44 @@ const App = () => (
     storageKey="thoth-theme"
   >
     <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <WorkspaceProvider>
-          <TooltipProvider>
-            <Toaster />
-            <Sonner />
-            <BrowserRouter>
-              <Routes>
-                <Route path="/" element={<Index />} />
-                <Route path="/auth" element={<Auth />} />
-                <Route path="/dashboard" element={<Dashboard />} />
-                <Route path="/instances" element={<Instances />} />
-                <Route path="/conversations" element={<Conversations />} />
-                <Route path="/contacts" element={<Contacts />} />
-                <Route path="/training" element={<Training />} />
-                <Route path="/personas" element={<Personas />} />
-                <Route path="/departments" element={<Departments />} />
-                <Route path="/flows" element={<Flows />} />
-                <Route path="/integrations" element={<Integrations />} />
-                <Route path="/settings" element={<Settings />} />
-                <Route path="/analytics" element={<Dashboard />} />
-                <Route path="/playground" element={<Playground />} />
-                <Route path="/bitrix24-setup" element={<Bitrix24Setup />} />
-                {/* Catch-all */}
-                <Route path="*" element={<NotFound />} />
-              </Routes>
-            </BrowserRouter>
-          </TooltipProvider>
-        </WorkspaceProvider>
-      </AuthProvider>
+      <TooltipProvider>
+        <Toaster />
+        <Sonner />
+        <BrowserRouter>
+          <Routes>
+            {/* Rota pública para iframe Bitrix24 - fora dos providers de auth */}
+            <Route path="/bitrix24-setup" element={<Bitrix24Setup />} />
+            
+            {/* Rotas protegidas com autenticação */}
+            <Route
+              path="/*"
+              element={
+                <AuthProvider>
+                  <WorkspaceProvider>
+                    <Routes>
+                      <Route path="/" element={<Index />} />
+                      <Route path="/auth" element={<Auth />} />
+                      <Route path="/dashboard" element={<Dashboard />} />
+                      <Route path="/instances" element={<Instances />} />
+                      <Route path="/conversations" element={<Conversations />} />
+                      <Route path="/contacts" element={<Contacts />} />
+                      <Route path="/training" element={<Training />} />
+                      <Route path="/personas" element={<Personas />} />
+                      <Route path="/departments" element={<Departments />} />
+                      <Route path="/flows" element={<Flows />} />
+                      <Route path="/integrations" element={<Integrations />} />
+                      <Route path="/settings" element={<Settings />} />
+                      <Route path="/analytics" element={<Dashboard />} />
+                      <Route path="/playground" element={<Playground />} />
+                      <Route path="*" element={<NotFound />} />
+                    </Routes>
+                  </WorkspaceProvider>
+                </AuthProvider>
+              }
+            />
+          </Routes>
+        </BrowserRouter>
+      </TooltipProvider>
     </QueryClientProvider>
   </ThemeProvider>
 );
