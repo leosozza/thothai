@@ -3,7 +3,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { CheckCircle, Loader2, MessageSquare, Phone, AlertCircle, Plug } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { CheckCircle, Loader2, MessageSquare, Phone, AlertCircle, Plug, Key } from "lucide-react";
 import { toast } from "sonner";
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
@@ -22,17 +24,24 @@ interface BitrixStatus {
   instance_id?: string;
   is_active?: boolean;
   instances?: Instance[];
+  requires_token?: boolean;
+  workspace_id?: string;
 }
 
 export default function Bitrix24Setup() {
   const [loading, setLoading] = useState(true);
   const [registering, setRegistering] = useState(false);
+  const [validatingToken, setValidatingToken] = useState(false);
   const [memberId, setMemberId] = useState<string | null>(null);
   const [domain, setDomain] = useState<string | null>(null);
   const [status, setStatus] = useState<BitrixStatus | null>(null);
   const [instances, setInstances] = useState<Instance[]>([]);
   const [selectedInstance, setSelectedInstance] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
+  
+  // Token de vinculação
+  const [linkingToken, setLinkingToken] = useState<string>("");
+  const [tokenValidated, setTokenValidated] = useState(false);
 
   useEffect(() => {
     // Extract params from URL (provided by Bitrix24 iframe)
@@ -131,14 +140,73 @@ export default function Bitrix24Setup() {
       if (data.instance_id) {
         setSelectedInstance(data.instance_id);
       }
-      if (data.instances) {
+      if (data.instances && data.instances.length > 0) {
         setInstances(data.instances);
+        setTokenValidated(true); // Se temos instâncias, o workspace já está vinculado
+      }
+      if (data.workspace_id) {
+        setTokenValidated(true);
       }
     } catch (err) {
       console.error("Error loading data:", err);
       setError("Erro ao carregar dados. Verifique se o aplicativo foi instalado corretamente.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleValidateToken = async () => {
+    if (!linkingToken.trim()) {
+      toast.error("Digite o token de vinculação");
+      return;
+    }
+
+    if (!memberId && !domain) {
+      toast.error("Identificação do Bitrix24 não encontrada");
+      return;
+    }
+
+    try {
+      setValidatingToken(true);
+
+      const response = await fetch(
+        `${SUPABASE_URL}/functions/v1/bitrix24-install`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            action: "validate_token",
+            token: linkingToken.trim().toUpperCase(),
+            member_id: memberId,
+            domain: domain,
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error || "Token inválido ou expirado");
+      }
+
+      if (data?.success) {
+        toast.success("Token validado! Workspace vinculado com sucesso.");
+        setTokenValidated(true);
+        if (data.instances) {
+          setInstances(data.instances);
+        }
+        // Reload data to get updated status
+        await loadData();
+      } else {
+        throw new Error(data?.error || "Token inválido");
+      }
+    } catch (err: any) {
+      console.error("Error validating token:", err);
+      toast.error(err.message || "Erro ao validar token");
+    } finally {
+      setValidatingToken(false);
     }
   };
 
@@ -213,6 +281,9 @@ export default function Bitrix24Setup() {
     );
   }
 
+  // Mostrar tela de vinculação de token se não tiver workspace vinculado
+  const showTokenInput = !status?.found && !status?.workspace_id && !tokenValidated && instances.length === 0;
+
   return (
     <div className="min-h-screen bg-background p-4">
       <div className="max-w-lg mx-auto space-y-6">
@@ -234,125 +305,202 @@ export default function Bitrix24Setup() {
               <p>member_id: {memberId || "null"}</p>
               <p>domain: {domain || "null"}</p>
               <p>status.found: {String(status?.found)}</p>
+              <p>tokenValidated: {String(tokenValidated)}</p>
+              <p>instances: {instances.length}</p>
             </CardContent>
           </Card>
         )}
 
-        {/* Connection Status */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2">
-              <Plug className="h-5 w-5" />
-              Status da Conexão
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {domain && (
+        {/* Token Validation Card - Mostrar quando não há workspace vinculado */}
+        {showTokenInput && (
+          <Card className="border-primary/50">
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Key className="h-5 w-5" />
+                Vincular ao Workspace
+              </CardTitle>
+              <CardDescription>
+                Cole o token de vinculação gerado no painel Thoth para associar esta instalação ao seu workspace.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="linking-token">Token de Vinculação</Label>
+                <Input
+                  id="linking-token"
+                  placeholder="ABCD1234EFGH5678"
+                  value={linkingToken}
+                  onChange={(e) => setLinkingToken(e.target.value.toUpperCase())}
+                  className="font-mono text-center text-lg tracking-wider"
+                  maxLength={16}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Acesse o painel Thoth → Integrações → Bitrix24 → Gerar Token
+                </p>
+              </div>
+
+              <Button
+                className="w-full"
+                onClick={handleValidateToken}
+                disabled={!linkingToken.trim() || validatingToken}
+              >
+                {validatingToken ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Validando...
+                  </>
+                ) : (
+                  <>
+                    <Key className="h-4 w-4 mr-2" />
+                    Validar Token
+                  </>
+                )}
+              </Button>
+
+              <div className="bg-muted/50 rounded-lg p-3 text-sm text-muted-foreground">
+                <p className="font-medium mb-1">Como obter o token:</p>
+                <ol className="list-decimal list-inside space-y-1 text-xs">
+                  <li>Acesse o painel Thoth (chat.thoth24.com)</li>
+                  <li>Vá em Integrações → CRM</li>
+                  <li>Clique em "Gerar Token de Vinculação"</li>
+                  <li>Copie e cole o token aqui</li>
+                </ol>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Connection Status - Mostrar quando token foi validado ou já há integração */}
+        {(tokenValidated || status?.found) && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Plug className="h-5 w-5" />
+                Status da Conexão
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {domain && (
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Portal Bitrix24</span>
+                  <Badge variant="outline">{domain}</Badge>
+                </div>
+              )}
+              
               <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">Portal Bitrix24</span>
-                <Badge variant="outline">{domain}</Badge>
+                <span className="text-muted-foreground">App Instalado</span>
+                {status?.found ? (
+                  <Badge variant="default" className="bg-green-500">
+                    <CheckCircle className="h-3 w-3 mr-1" />
+                    Sim
+                  </Badge>
+                ) : (
+                  <Badge variant="secondary">Pendente</Badge>
+                )}
               </div>
-            )}
-            
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">App Instalado</span>
-              {status?.found ? (
-                <Badge variant="default" className="bg-green-500">
-                  <CheckCircle className="h-3 w-3 mr-1" />
-                  Sim
-                </Badge>
-              ) : (
-                <Badge variant="secondary">Pendente</Badge>
-              )}
-            </div>
 
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Conector Registrado</span>
-              {status?.registered ? (
-                <Badge variant="default" className="bg-green-500">
-                  <CheckCircle className="h-3 w-3 mr-1" />
-                  Ativo
-                </Badge>
-              ) : (
-                <Badge variant="secondary">Não configurado</Badge>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Instance Selection */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-lg flex items-center gap-2">
-              <Phone className="h-5 w-5" />
-              Instância WhatsApp
-            </CardTitle>
-            <CardDescription>
-              Selecione qual número WhatsApp será conectado ao Bitrix24
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {instances.length === 0 ? (
-              <div className="text-center py-4">
-                <p className="text-muted-foreground text-sm">
-                  Nenhuma instância WhatsApp conectada.
-                </p>
-                <p className="text-muted-foreground text-sm">
-                  Configure uma instância no painel Thoth primeiro.
-                </p>
-                <Button 
-                  variant="link" 
-                  className="mt-2"
-                  onClick={() => window.open("https://chat.thoth24.com/instances", "_blank")}
-                >
-                  Abrir Painel Thoth
-                </Button>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Workspace Vinculado</span>
+                {tokenValidated || status?.workspace_id ? (
+                  <Badge variant="default" className="bg-green-500">
+                    <CheckCircle className="h-3 w-3 mr-1" />
+                    Sim
+                  </Badge>
+                ) : (
+                  <Badge variant="secondary">Não vinculado</Badge>
+                )}
               </div>
-            ) : (
-              <>
-                <Select value={selectedInstance} onValueChange={setSelectedInstance}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecione uma instância" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {instances.map((instance) => (
-                      <SelectItem key={instance.id} value={instance.id}>
-                        <div className="flex items-center gap-2">
-                          <span>{instance.name}</span>
-                          {instance.phone_number && (
-                            <span className="text-muted-foreground text-sm">
-                              ({instance.phone_number})
-                            </span>
-                          )}
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
 
-                <Button
-                  className="w-full"
-                  onClick={handleRegisterConnector}
-                  disabled={!selectedInstance || registering || status?.registered}
-                >
-                  {registering ? (
-                    <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      Ativando...
-                    </>
-                  ) : status?.registered ? (
-                    <>
-                      <CheckCircle className="h-4 w-4 mr-2" />
-                      Conector Ativo
-                    </>
-                  ) : (
-                    "Ativar Conector WhatsApp"
-                  )}
-                </Button>
-              </>
-            )}
-          </CardContent>
-        </Card>
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Conector Registrado</span>
+                {status?.registered ? (
+                  <Badge variant="default" className="bg-green-500">
+                    <CheckCircle className="h-3 w-3 mr-1" />
+                    Ativo
+                  </Badge>
+                ) : (
+                  <Badge variant="secondary">Não configurado</Badge>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Instance Selection - Mostrar quando tem instâncias disponíveis */}
+        {(tokenValidated || status?.found) && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Phone className="h-5 w-5" />
+                Instância WhatsApp
+              </CardTitle>
+              <CardDescription>
+                Selecione qual número WhatsApp será conectado ao Bitrix24
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {instances.length === 0 ? (
+                <div className="text-center py-4">
+                  <p className="text-muted-foreground text-sm">
+                    Nenhuma instância WhatsApp conectada.
+                  </p>
+                  <p className="text-muted-foreground text-sm">
+                    Configure uma instância no painel Thoth primeiro.
+                  </p>
+                  <Button 
+                    variant="link" 
+                    className="mt-2"
+                    onClick={() => window.open("https://chat.thoth24.com/instances", "_blank")}
+                  >
+                    Abrir Painel Thoth
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  <Select value={selectedInstance} onValueChange={setSelectedInstance}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione uma instância" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {instances.map((instance) => (
+                        <SelectItem key={instance.id} value={instance.id}>
+                          <div className="flex items-center gap-2">
+                            <span>{instance.name}</span>
+                            {instance.phone_number && (
+                              <span className="text-muted-foreground text-sm">
+                                ({instance.phone_number})
+                              </span>
+                            )}
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <Button
+                    className="w-full"
+                    onClick={handleRegisterConnector}
+                    disabled={!selectedInstance || registering || status?.registered}
+                  >
+                    {registering ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Ativando...
+                      </>
+                    ) : status?.registered ? (
+                      <>
+                        <CheckCircle className="h-4 w-4 mr-2" />
+                        Conector Ativo
+                      </>
+                    ) : (
+                      "Ativar Conector WhatsApp"
+                    )}
+                  </Button>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         {/* Help */}
         <Card>
