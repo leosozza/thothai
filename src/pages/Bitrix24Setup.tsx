@@ -217,13 +217,13 @@ const [loading, setLoading] = useState(true);
 
   const handleSaveWebhook = async () => {
     if (!webhookUrl.trim()) {
-      toast.error("Digite a URL do webhook de saída");
+      toast.error("Digite a URL do webhook de entrada");
       return;
     }
 
-    // Validar formato da URL
-    if (!webhookUrl.includes("/rest/") || !webhookUrl.includes(".bitrix24.")) {
-      toast.error("URL inválida. A URL deve ser do Bitrix24 e conter /rest/");
+    // Validar formato da URL de webhook de entrada (inbound)
+    if (!webhookUrl.includes("/rest/") || !webhookUrl.includes("bitrix24")) {
+      toast.error("URL inválida. A URL deve ser um webhook de entrada do Bitrix24 (formato: https://xxx.bitrix24.com/rest/1/xxxxx/)");
       return;
     }
 
@@ -398,12 +398,12 @@ const [loading, setLoading] = useState(true);
                 Aplicação Local do Bitrix24
               </CardTitle>
               <CardDescription>
-                Cole a URL do webhook de saída fornecida na configuração da aplicação local no Bitrix24.
+                Cole a URL do webhook de entrada (Inbound Webhook) para permitir que o Thoth se comunique com seu Bitrix24.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="webhook-url">URL do Webhook de Saída</Label>
+                <Label htmlFor="webhook-url">URL do Webhook de Entrada (REST)</Label>
                 <Input
                   id="webhook-url"
                   placeholder="https://seudominio.bitrix24.com.br/rest/1/abc123xyz/"
@@ -412,7 +412,7 @@ const [loading, setLoading] = useState(true);
                   className="font-mono text-sm"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Encontre esta URL em: Bitrix24 → Aplicativos → Webhooks de Saída
+                  Esta URL permite chamar a API REST do Bitrix24
                 </p>
               </div>
 
@@ -436,13 +436,13 @@ const [loading, setLoading] = useState(true);
               </Button>
 
               <div className="bg-muted/50 rounded-lg p-3 text-sm text-muted-foreground">
-                <p className="font-medium mb-1">Como obter a URL do webhook:</p>
+                <p className="font-medium mb-1">Como criar o webhook de entrada:</p>
                 <ol className="list-decimal list-inside space-y-1 text-xs">
                   <li>Acesse seu portal Bitrix24</li>
-                  <li>Vá em Aplicativos → Webhooks</li>
-                  <li>Crie um novo Webhook de Saída (REST)</li>
-                  <li>Permissões: imconnector, imopenlines, crm, user</li>
-                  <li>Copie a URL gerada e cole aqui</li>
+                  <li>Vá em: Desenvolvedor → Integrações → Outro → Inbound webhook</li>
+                  <li>Ou: Aplicativos → Webhooks → Adicionar webhook de entrada</li>
+                  <li>Selecione as permissões: imconnector, imopenlines, crm, user</li>
+                  <li>Copie a URL REST gerada (formato: https://xxx.bitrix24.com/rest/1/xxxxx/)</li>
                 </ol>
               </div>
             </CardContent>
