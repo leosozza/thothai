@@ -155,6 +155,12 @@ export default function Integrations() {
   const [linkingToken, setLinkingToken] = useState<string | null>(null);
   const [generatingToken, setGeneratingToken] = useState(false);
 
+  // OAuth Manual Bitrix24
+  const [oauthClientId, setOauthClientId] = useState("");
+  const [oauthClientSecret, setOauthClientSecret] = useState("");
+  const [oauthDomain, setOauthDomain] = useState("");
+  const [savingOAuth, setSavingOAuth] = useState(false);
+
   useEffect(() => {
     if (workspace) {
       fetchIntegrations();
@@ -384,6 +390,43 @@ export default function Integrations() {
       fetchExistingToken();
     }
   }, [workspace]);
+
+  const handleSaveOAuthManual = async () => {
+    if (!oauthDomain || !oauthClientId || !oauthClientSecret) {
+      toast.error("Preencha todos os campos: Domínio, Client ID e Client Secret");
+      return;
+    }
+
+    setSavingOAuth(true);
+    try {
+      const response = await supabase.functions.invoke("bitrix24-install", {
+        body: {
+          action: "oauth_exchange",
+          domain: oauthDomain.replace(/^https?:\/\//, "").replace(/\/$/, ""),
+          client_id: oauthClientId,
+          client_secret: oauthClientSecret,
+          workspace_id: workspace?.id,
+        },
+      });
+
+      if (response.error) {
+        throw new Error(response.error.message || "Erro ao iniciar OAuth");
+      }
+
+      const data = response.data;
+      if (data?.authorization_url) {
+        toast.info("Redirecionando para autorização no Bitrix24...");
+        window.location.href = data.authorization_url;
+      } else {
+        throw new Error("URL de autorização não retornada");
+      }
+    } catch (error) {
+      console.error("Error initiating OAuth:", error);
+      toast.error(error instanceof Error ? error.message : "Erro ao iniciar OAuth");
+    } finally {
+      setSavingOAuth(false);
+    }
+  };
 
   const handleSyncContacts = async () => {
     if (!workspace?.id) {
@@ -797,6 +840,66 @@ export default function Integrations() {
                           Gerar Token de Vinculação
                         </Button>
                       )}
+                    </div>
+
+                    {/* Configuração OAuth Manual */}
+                    <div className="border rounded-lg p-4 space-y-4">
+                      <div className="flex items-start gap-3">
+                        <Key className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
+                        <div>
+                          <p className="font-medium">Configuração OAuth Manual</p>
+                          <p className="text-sm text-muted-foreground">
+                            Use esta opção se o ONAPPINSTALL não funcionar automaticamente
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        <div className="space-y-1.5">
+                          <Label className="text-xs text-muted-foreground">Domínio Bitrix24</Label>
+                          <Input
+                            placeholder="seudominio.bitrix24.com.br"
+                            value={oauthDomain}
+                            onChange={(e) => setOauthDomain(e.target.value)}
+                          />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <Label className="text-xs text-muted-foreground">ID do Aplicativo (client_id)</Label>
+                          <Input
+                            placeholder="local.xxxxxxxx.xxxxxxxx"
+                            value={oauthClientId}
+                            onChange={(e) => setOauthClientId(e.target.value)}
+                          />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <Label className="text-xs text-muted-foreground">Chave do Aplicativo (client_secret)</Label>
+                          <Input
+                            type="password"
+                            placeholder="Chave secreta do aplicativo"
+                            value={oauthClientSecret}
+                            onChange={(e) => setOauthClientSecret(e.target.value)}
+                          />
+                        </div>
+
+                        <Button
+                          onClick={handleSaveOAuthManual}
+                          disabled={savingOAuth || !oauthDomain || !oauthClientId || !oauthClientSecret}
+                          className="w-full"
+                        >
+                          {savingOAuth ? (
+                            <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                          ) : (
+                            <ExternalLink className="h-4 w-4 mr-2" />
+                          )}
+                          Autorizar OAuth
+                        </Button>
+
+                        <p className="text-xs text-muted-foreground">
+                          Após clicar, você será redirecionado para o Bitrix24 para autorizar. O token será salvo automaticamente.
+                        </p>
+                      </div>
                     </div>
 
                     {/* Status if installed via app */}
