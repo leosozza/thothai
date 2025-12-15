@@ -53,25 +53,53 @@ async function refreshBitrixToken(integration: any, supabase: any): Promise<stri
   return null;
 }
 
-// Get Bitrix24 API endpoint
+// Small URL helpers
+function ensureTrailingSlash(url: string): string {
+  return url.endsWith("/") ? url : `${url}/`;
+}
+
+// Get Bitrix24 API endpoint (OAuth mode base)
 function getBitrixEndpoint(integration: any): string {
   const config = integration.config as Record<string, any>;
-  return config?.client_endpoint || `https://${config?.domain}/rest/`;
+  const endpoint = config?.client_endpoint || `https://${config?.domain}/rest/`;
+  return ensureTrailingSlash(endpoint);
+}
+
+function buildBitrixMethodUrl(
+  endpoint: string,
+  method: string,
+  accessToken: string | null,
+  query: string
+): string {
+  const base = ensureTrailingSlash(endpoint);
+  const qs = accessToken
+    ? `auth=${encodeURIComponent(accessToken)}${query ? `&${query}` : ""}`
+    : query;
+
+  return `${base}${method}${qs ? `?${qs}` : ""}`;
 }
 
 // Fetch contacts from Bitrix24 CRM
-async function fetchBitrixContacts(accessToken: string, endpoint: string, start: number = 0): Promise<any> {
-  const url = `${endpoint}crm.contact.list?auth=${accessToken}&start=${start}&select[]=ID&select[]=NAME&select[]=LAST_NAME&select[]=PHONE&select[]=EMAIL&select[]=PHOTO`;
-  
-  console.log("Fetching Bitrix24 contacts from:", url.replace(accessToken, "***"));
-  
+async function fetchBitrixContacts(
+  accessToken: string | null,
+  endpoint: string,
+  start: number = 0
+): Promise<any> {
+  const query = `start=${start}&select[]=ID&select[]=NAME&select[]=LAST_NAME&select[]=PHONE&select[]=EMAIL&select[]=PHOTO`;
+  const url = buildBitrixMethodUrl(endpoint, "crm.contact.list", accessToken, query);
+
+  console.log(
+    "Fetching Bitrix24 contacts from:",
+    accessToken ? url.replace(accessToken, "***") : url
+  );
+
   const response = await fetch(url);
   const data = await response.json();
-  
+
   if (data.error) {
     throw new Error(`Bitrix24 API error: ${data.error_description || data.error}`);
   }
-  
+
   return data;
 }
 
@@ -129,16 +157,29 @@ serve(async (req) => {
       );
     }
 
-    // Refresh token if needed
-    const accessToken = await refreshBitrixToken(integration, supabase);
-    if (!accessToken) {
-      return new Response(
-        JSON.stringify({ error: "Failed to get Bitrix24 access token" }),
-        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
+    // Resolve Bitrix24 API auth mode
+    let accessToken: string | null = null;
+    let endpoint: string;
 
-    const endpoint = getBitrixEndpoint(integration);
+    if (config?.webhook_url) {
+      // Webhook mode (local/inbound webhook) - auth is embedded in the URL
+      endpoint = ensureTrailingSlash(config.webhook_url);
+      console.log("Using Bitrix24 webhook mode for contact sync");
+    } else {
+      // OAuth mode
+      accessToken = await refreshBitrixToken(integration, supabase);
+      if (!accessToken) {
+        return new Response(
+          JSON.stringify({
+            error: "Failed to get Bitrix24 access token",
+            hint: "Para Bitrix24 local, configure um Webhook de Entrada (REST) e salve a URL na integração.",
+          }),
+          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      endpoint = getBitrixEndpoint(integration);
+    }
     const stats = {
       synced_to_bitrix: 0,
       synced_from_bitrix: 0,
@@ -270,7 +311,12 @@ serve(async (req) => {
       for (const contact of unsyncedContacts || []) {
         try {
           // Check if contact already exists in Bitrix24 by phone
-          const searchUrl = `${endpoint}crm.contact.list?auth=${accessToken}&filter[PHONE]=${encodeURIComponent(contact.phone_number)}`;
+          const searchUrl = buildBitrixMethodUrl(
+            endpoint,
+            "crm.contact.list",
+            accessToken,
+            `filter[PHONE]=${encodeURIComponent(contact.phone_number)}`
+          );
           const searchResponse = await fetch(searchUrl);
           const searchResult = await searchResponse.json();
 
@@ -297,7 +343,7 @@ serve(async (req) => {
             const firstName = nameParts[0] || "Contato";
             const lastName = nameParts.slice(1).join(" ") || "";
 
-            const createUrl = `${endpoint}crm.contact.add?auth=${accessToken}`;
+            const createUrl = buildBitrixMethodUrl(endpoint, "crm.contact.add", accessToken, "");
             const createResponse = await fetch(createUrl, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
