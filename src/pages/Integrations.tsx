@@ -985,12 +985,15 @@ export default function Integrations() {
 
                     <div className="space-y-2">
                       <Label>Instância WhatsApp</Label>
-                      <Select value={bitrixInstanceId} onValueChange={setBitrixInstanceId}>
+                      <Select 
+                        value={bitrixInstanceId || "__default__"} 
+                        onValueChange={(val) => setBitrixInstanceId(val === "__default__" ? "" : val)}
+                      >
                         <SelectTrigger>
                           <SelectValue placeholder="Usar instância configurada" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="">Usar instância configurada</SelectItem>
+                          <SelectItem value="__default__">Usar instância configurada</SelectItem>
                           {instances.map((inst) => (
                             <SelectItem key={inst.id} value={inst.id}>
                               {inst.name} {inst.phone_number ? `(${inst.phone_number})` : ""}
