@@ -33,13 +33,26 @@ serve(async (req) => {
         
         const domain = oauthState;
 
-        // Find integration with OAuth credentials
-        const { data: integration } = await supabase
+        // Find integration with OAuth credentials (two sequential queries for JSONB)
+        let integration = null;
+        const { data: byMemberId1 } = await supabase
           .from("integrations")
           .select("*")
           .eq("type", "bitrix24")
-          .or(`config->>member_id.eq.${domain},config->>domain.eq.${domain}`)
+          .eq("config->>member_id", domain)
           .maybeSingle();
+        
+        if (byMemberId1) {
+          integration = byMemberId1;
+        } else {
+          const { data: byDomain1 } = await supabase
+            .from("integrations")
+            .select("*")
+            .eq("type", "bitrix24")
+            .eq("config->>domain", domain)
+            .maybeSingle();
+          integration = byDomain1;
+        }
 
         if (!integration || !integration.config?.client_id || !integration.config?.client_secret) {
           console.error("Integration not found for OAuth callback:", domain);
@@ -125,13 +138,26 @@ serve(async (req) => {
       const searchValue = queryMemberId || queryDomain;
 
       if (searchValue) {
-        // Try to find integration by member_id or domain
-        const { data: integration } = await supabase
+        // Try to find integration by member_id or domain (two sequential queries for JSONB)
+        let integration = null;
+        const { data: byMemberId2 } = await supabase
           .from("integrations")
           .select("*")
           .eq("type", "bitrix24")
-          .or(`config->>member_id.eq.${searchValue},config->>domain.eq.${searchValue}`)
+          .eq("config->>member_id", searchValue)
           .maybeSingle();
+        
+        if (byMemberId2) {
+          integration = byMemberId2;
+        } else {
+          const { data: byDomain2 } = await supabase
+            .from("integrations")
+            .select("*")
+            .eq("type", "bitrix24")
+            .eq("config->>domain", searchValue)
+            .maybeSingle();
+          integration = byDomain2;
+        }
 
         let instances: any[] = [];
         
@@ -227,13 +253,26 @@ serve(async (req) => {
         );
       }
 
-      // Check if integration already exists
-      const { data: existingIntegration } = await supabase
+      // Check if integration already exists (two sequential queries for JSONB)
+      let existingIntegration = null;
+      const { data: byMemberId3 } = await supabase
         .from("integrations")
         .select("*")
         .eq("type", "bitrix24")
-        .or(`config->>member_id.eq.${identifier},config->>domain.eq.${urlDomain}`)
+        .eq("config->>member_id", identifier)
         .maybeSingle();
+      
+      if (byMemberId3) {
+        existingIntegration = byMemberId3;
+      } else {
+        const { data: byDomain3 } = await supabase
+          .from("integrations")
+          .select("*")
+          .eq("type", "bitrix24")
+          .eq("config->>domain", urlDomain)
+          .maybeSingle();
+        existingIntegration = byDomain3;
+      }
 
       const configData = {
         member_id: memberId || urlDomain,
@@ -325,13 +364,26 @@ serve(async (req) => {
       // Normalize domain
       const normalizedDomain = bitrixDomain.replace(/^https?:\/\//, "").replace(/\/$/, "");
 
-      // Save OAuth credentials and create/update integration
-      const { data: existingIntegration } = await supabase
+      // Save OAuth credentials and create/update integration (two sequential queries for JSONB)
+      let existingIntegration = null;
+      const { data: byMemberId4 } = await supabase
         .from("integrations")
         .select("*")
         .eq("type", "bitrix24")
-        .or(`config->>member_id.eq.${memberId || normalizedDomain},config->>domain.eq.${normalizedDomain}`)
+        .eq("config->>member_id", memberId || normalizedDomain)
         .maybeSingle();
+      
+      if (byMemberId4) {
+        existingIntegration = byMemberId4;
+      } else {
+        const { data: byDomain4 } = await supabase
+          .from("integrations")
+          .select("*")
+          .eq("type", "bitrix24")
+          .eq("config->>domain", normalizedDomain)
+          .maybeSingle();
+        existingIntegration = byDomain4;
+      }
 
       const oauthConfig = {
         member_id: memberId || normalizedDomain,
@@ -395,13 +447,26 @@ serve(async (req) => {
 
       const domain = state;
 
-      // Find integration with OAuth credentials
-      const { data: integration } = await supabase
+      // Find integration with OAuth credentials (two sequential queries for JSONB)
+      let integration = null;
+      const { data: byMemberId5 } = await supabase
         .from("integrations")
         .select("*")
         .eq("type", "bitrix24")
-        .or(`config->>member_id.eq.${domain},config->>domain.eq.${domain}`)
+        .eq("config->>member_id", domain)
         .maybeSingle();
+      
+      if (byMemberId5) {
+        integration = byMemberId5;
+      } else {
+        const { data: byDomain5 } = await supabase
+          .from("integrations")
+          .select("*")
+          .eq("type", "bitrix24")
+          .eq("config->>domain", domain)
+          .maybeSingle();
+        integration = byDomain5;
+      }
 
       if (!integration || !integration.config?.client_id || !integration.config?.client_secret) {
         return new Response(
@@ -518,13 +583,29 @@ serve(async (req) => {
       const workspaceId = tokenData.workspace_id;
       console.log("Token valid, workspace_id:", workspaceId);
 
-      // Check if integration already exists
-      const { data: existingIntegration } = await supabase
+      // Check if integration already exists (two sequential queries for JSONB)
+      let existingIntegration = null;
+      const searchMemberId = memberId || domain;
+      const searchDomain = domain || memberId;
+      
+      const { data: byMemberId6 } = await supabase
         .from("integrations")
         .select("*")
         .eq("type", "bitrix24")
-        .or(`config->>member_id.eq.${memberId || domain},config->>domain.eq.${domain || memberId}`)
+        .eq("config->>member_id", searchMemberId)
         .maybeSingle();
+      
+      if (byMemberId6) {
+        existingIntegration = byMemberId6;
+      } else {
+        const { data: byDomain6 } = await supabase
+          .from("integrations")
+          .select("*")
+          .eq("type", "bitrix24")
+          .eq("config->>domain", searchDomain)
+          .maybeSingle();
+        existingIntegration = byDomain6;
+      }
 
       if (existingIntegration) {
         // Update existing integration with workspace_id
