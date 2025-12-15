@@ -181,6 +181,62 @@ serve(async (req) => {
     const finalConnectorId = connector_id || `thoth_whatsapp_${member_id?.substring(0, 8) || "default"}`;
     console.log("Final connector ID:", finalConnectorId);
 
+    // For webhook mode (local apps), we skip imconnector.register as it requires OAuth app permissions
+    // Webhooks are meant for direct API access, not for registering connectors
+    if (useWebhookMode) {
+      console.log("=== WEBHOOK MODE: Skipping imconnector.register (not supported) ===");
+      console.log("Webhooks cannot register connectors - saving configuration only");
+
+      // Just update/save the integration configuration
+      const configUpdate = {
+        webhook_url: webhook_url,
+        connector_id: finalConnectorId,
+        instance_id: instance_id || null,
+        registered: true, // Mark as configured (not registered in Bitrix24 sense)
+        is_local_app: true,
+        webhook_configured: true,
+      };
+
+      if (integration_id || integration?.id) {
+        const idToUpdate = integration_id || integration.id;
+        const { data: currentIntegration } = await supabase
+          .from("integrations")
+          .select("config")
+          .eq("id", idToUpdate)
+          .single();
+
+        await supabase
+          .from("integrations")
+          .update({ 
+            config: { ...currentIntegration?.config, ...configUpdate }, 
+            is_active: true 
+          })
+          .eq("id", idToUpdate);
+      } else if (workspace_id) {
+        await supabase.from("integrations").insert({
+          workspace_id,
+          type: "bitrix24",
+          name: "Bitrix24",
+          config: configUpdate,
+          is_active: true,
+        });
+      }
+
+      return new Response(
+        JSON.stringify({ 
+          success: true, 
+          message: "Webhook configurado com sucesso. Mensagens serão enviadas diretamente via API REST.",
+          connector_id: finalConnectorId,
+          mode: "webhook",
+          note: "Para integrações via webhook, o envio de mensagens funciona diretamente pela API crm.* - o imconnector não é utilizado.",
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // OAuth mode - can register connector
+    console.log("=== OAUTH MODE: Registering imconnector ===");
+
     // 1. Register connector in Bitrix24
     const registerPayload = {
       ID: finalConnectorId,
@@ -192,19 +248,8 @@ serve(async (req) => {
     };
 
     console.log("Calling imconnector.register with:", JSON.stringify(registerPayload));
-    console.log("useWebhookMode:", useWebhookMode);
 
-    // Build the API call URL based on auth mode
-    let registerUrl: string;
-    if (useWebhookMode) {
-      // Webhook mode - URL already contains auth
-      registerUrl = `${bitrixApiUrl}imconnector.register`;
-    } else if (integration?.config?.access_token) {
-      // OAuth mode - append auth token
-      registerUrl = `${bitrixApiUrl}imconnector.register?auth=${integration.config.access_token}`;
-    } else {
-      registerUrl = `${bitrixApiUrl}imconnector.register`;
-    }
+    const registerUrl = `${bitrixApiUrl}imconnector.register?auth=${integration.config.access_token}`;
 
     const registerResponse = await fetch(registerUrl, {
       method: "POST",
@@ -223,14 +268,7 @@ serve(async (req) => {
     }
 
     // 2. Activate the connector
-    let activateUrl: string;
-    if (useWebhookMode) {
-      activateUrl = `${bitrixApiUrl}imconnector.activate`;
-    } else if (integration?.config?.access_token) {
-      activateUrl = `${bitrixApiUrl}imconnector.activate?auth=${integration.config.access_token}`;
-    } else {
-      activateUrl = `${bitrixApiUrl}imconnector.activate`;
-    }
+    const activateUrl = `${bitrixApiUrl}imconnector.activate?auth=${integration.config.access_token}`;
 
     const activateResponse = await fetch(activateUrl, {
       method: "POST",
@@ -256,14 +294,7 @@ serve(async (req) => {
     ];
 
     for (const event of events) {
-      let bindUrl: string;
-      if (useWebhookMode) {
-        bindUrl = `${bitrixApiUrl}event.bind`;
-      } else if (integration?.config?.access_token) {
-        bindUrl = `${bitrixApiUrl}event.bind?auth=${integration.config.access_token}`;
-      } else {
-        bindUrl = `${bitrixApiUrl}event.bind`;
-      }
+      const bindUrl = `${bitrixApiUrl}event.bind?auth=${integration.config.access_token}`;
 
       const bindResponse = await fetch(bindUrl, {
         method: "POST",
@@ -279,7 +310,6 @@ serve(async (req) => {
 
     // 4. Update integration in database with registration details
     const configUpdate = {
-      webhook_url: webhook_url || null,
       connector_id: finalConnectorId,
       instance_id: instance_id || null,
       registered: true,
@@ -318,6 +348,7 @@ serve(async (req) => {
         message: "Connector registered successfully",
         connector_id: finalConnectorId,
         events_url: webhookEndpoint,
+        mode: "oauth",
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
