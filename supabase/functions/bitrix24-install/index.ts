@@ -152,16 +152,6 @@ serve(async (req) => {
       const workspaceId = tokenData.workspace_id;
       console.log("Token valid, workspace_id:", workspaceId);
 
-      // Mark token as used
-      await supabase
-        .from("workspace_tokens")
-        .update({
-          is_used: true,
-          used_at: new Date().toISOString(),
-          used_by_member_id: memberId || domain,
-        })
-        .eq("id", tokenData.id);
-
       // Check if integration already exists
       const { data: existingIntegration } = await supabase
         .from("integrations")
@@ -172,7 +162,7 @@ serve(async (req) => {
 
       if (existingIntegration) {
         // Update existing integration with workspace_id
-        await supabase
+        const { error: updateError } = await supabase
           .from("integrations")
           .update({
             workspace_id: workspaceId,
@@ -180,6 +170,14 @@ serve(async (req) => {
             updated_at: new Date().toISOString(),
           })
           .eq("id", existingIntegration.id);
+
+        if (updateError) {
+          console.error("Error updating integration:", updateError);
+          return new Response(
+            JSON.stringify({ error: "Erro ao atualizar integração" }),
+            { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
 
         console.log("Updated existing integration with workspace_id");
       } else {
@@ -209,6 +207,21 @@ serve(async (req) => {
         }
 
         console.log("Created new integration");
+      }
+
+      // Mark token as used ONLY AFTER integration is successfully created/updated
+      const { error: tokenUpdateError } = await supabase
+        .from("workspace_tokens")
+        .update({
+          is_used: true,
+          used_at: new Date().toISOString(),
+          used_by_member_id: memberId || domain,
+        })
+        .eq("id", tokenData.id);
+
+      if (tokenUpdateError) {
+        console.error("Error marking token as used:", tokenUpdateError);
+        // Don't fail here - integration was already created successfully
       }
 
       // Fetch instances from the linked workspace
