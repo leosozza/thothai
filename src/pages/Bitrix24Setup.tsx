@@ -103,12 +103,11 @@ const [loading, setLoading] = useState(true);
         });
       } else {
         console.log("Bitrix24 SDK not found, using URL params only");
-        // Load data after a short delay to ensure URL params are set
-        setTimeout(() => loadData(), 100);
+        // Don't call loadData here - let useEffect handle it when memberId is set
       }
     } catch (e) {
       console.log("Error initializing Bitrix24 SDK:", e);
-      setTimeout(() => loadData(), 100);
+      // Don't call loadData here - let useEffect handle it when memberId is set
     }
   };
 
@@ -116,8 +115,17 @@ const [loading, setLoading] = useState(true);
     if (memberId) {
       console.log("Member ID set, loading data:", memberId);
       loadData();
+    } else {
+      // If no memberId after initial load, wait and show error
+      const timer = setTimeout(() => {
+        if (!memberId && !domain) {
+          setError("Identificação do Bitrix24 não encontrada. Acesse esta página a partir do Bitrix24 ou use o link correto.");
+          setLoading(false);
+        }
+      }, 1000);
+      return () => clearTimeout(timer);
     }
-  }, [memberId]);
+  }, [memberId, domain]);
 
   const loadData = async () => {
     try {
