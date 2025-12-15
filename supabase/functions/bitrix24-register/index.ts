@@ -234,10 +234,19 @@ serve(async (req) => {
       );
     }
 
-    // OAuth mode - can register connector
-    console.log("=== OAUTH MODE: Registering imconnector ===");
+    // OAuth mode - can register connector in Contact Center
+    console.log("=== OAUTH MODE: Registering imconnector for Contact Center ===");
 
-    // 1. Register connector in Bitrix24
+    // Get access token
+    const accessToken = integration.config.access_token;
+    if (!accessToken) {
+      return new Response(
+        JSON.stringify({ error: "Token de acesso não encontrado. Reinstale o aplicativo." }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // 1. Register connector in Bitrix24 (this makes it appear in Contact Center)
     const registerPayload = {
       ID: finalConnectorId,
       NAME: "Thoth WhatsApp",
@@ -249,7 +258,7 @@ serve(async (req) => {
 
     console.log("Calling imconnector.register with:", JSON.stringify(registerPayload));
 
-    const registerUrl = `${bitrixApiUrl}imconnector.register?auth=${integration.config.access_token}`;
+    const registerUrl = `${bitrixApiUrl}imconnector.register?auth=${accessToken}`;
 
     const registerResponse = await fetch(registerUrl, {
       method: "POST",
@@ -261,14 +270,19 @@ serve(async (req) => {
     console.log("imconnector.register result:", JSON.stringify(registerResult));
 
     if (registerResult.error && registerResult.error !== "CONNECTOR_ALREADY_EXISTS") {
+      console.error("Failed to register connector:", registerResult);
       return new Response(
-        JSON.stringify({ error: `Bitrix24 register error: ${registerResult.error_description || registerResult.error}` }),
+        JSON.stringify({ 
+          error: `Erro ao registrar conector: ${registerResult.error_description || registerResult.error}`,
+          hint: "Verifique se o aplicativo tem as permissões: imconnector, imopenlines, im, crm, user"
+        }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // 2. Activate the connector
-    const activateUrl = `${bitrixApiUrl}imconnector.activate?auth=${integration.config.access_token}`;
+    // 2. Activate the connector (required for it to be selectable in Contact Center)
+    console.log("Calling imconnector.activate...");
+    const activateUrl = `${bitrixApiUrl}imconnector.activate?auth=${accessToken}`;
 
     const activateResponse = await fetch(activateUrl, {
       method: "POST",
@@ -283,18 +297,24 @@ serve(async (req) => {
     const activateResult = await activateResponse.json();
     console.log("imconnector.activate result:", JSON.stringify(activateResult));
 
+    if (activateResult.error) {
+      console.warn("Activation warning (connector may still work):", activateResult.error);
+    }
+
     // 3. Bind events to receive messages from Bitrix24 operators
+    console.log("Binding events for message handling...");
     const workspaceIdForWebhook = workspace_id || integration?.workspace_id || "default";
     const webhookEndpoint = `${supabaseUrl}/functions/v1/bitrix24-webhook?workspace_id=${workspaceIdForWebhook}&connector_id=${finalConnectorId}`;
     
     const events = [
-      "OnImConnectorMessageAdd",
-      "OnImConnectorDialogFinish", 
-      "OnImConnectorStatusDelete",
+      "OnImConnectorMessageAdd",      // When operator sends message
+      "OnImConnectorDialogStart",     // When dialog starts
+      "OnImConnectorDialogFinish",    // When dialog finishes
+      "OnImConnectorStatusDelete",    // When connector is removed
     ];
 
     for (const event of events) {
-      const bindUrl = `${bitrixApiUrl}event.bind?auth=${integration.config.access_token}`;
+      const bindUrl = `${bitrixApiUrl}event.bind?auth=${accessToken}`;
 
       const bindResponse = await fetch(bindUrl, {
         method: "POST",
@@ -345,10 +365,11 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({ 
         success: true, 
-        message: "Connector registered successfully",
+        message: "Conector registrado com sucesso no Contact Center!",
         connector_id: finalConnectorId,
         events_url: webhookEndpoint,
         mode: "oauth",
+        next_steps: "Vá em Contact Center → + Adicionar → Thoth WhatsApp para configurar a linha",
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
