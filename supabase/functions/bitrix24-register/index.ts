@@ -319,28 +319,11 @@ serve(async (req) => {
       );
     }
 
-    // 2. Activate the connector (required for it to be selectable in Contact Center)
-    console.log("Calling imconnector.activate...");
-    const activateUrl = `${bitrixApiUrl}imconnector.activate?auth=${accessToken}`;
+    // NOTE: imconnector.activate is now handled by bitrix24-webhook when user connects Open Channel
+    // This allows the correct LINE ID to be used (selected by user in Contact Center)
+    console.log("Skipping imconnector.activate - will be called when user connects Open Channel");
 
-    const activateResponse = await fetch(activateUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        CONNECTOR: finalConnectorId,
-        LINE: 1,
-        ACTIVE: 1,
-      }),
-    });
-
-    const activateResult = await activateResponse.json();
-    console.log("imconnector.activate result:", JSON.stringify(activateResult));
-
-    if (activateResult.error) {
-      console.warn("Activation warning (connector may still work):", activateResult.error);
-    }
-
-    // 3. Bind events to receive messages from Bitrix24 operators
+    // 2. Bind events to receive messages from Bitrix24 operators
     console.log("Binding events for message handling...");
     const workspaceIdForWebhook = workspace_id || integration?.workspace_id || "default";
     const webhookEndpoint = `${supabaseUrl}/functions/v1/bitrix24-webhook?workspace_id=${workspaceIdForWebhook}&connector_id=${finalConnectorId}`;
