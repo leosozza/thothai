@@ -680,14 +680,18 @@ export default function Integrations() {
                         </AccordionTrigger>
                         <AccordionContent className="pl-9">
                           <p className="text-sm text-muted-foreground mb-3">
-                            Marque as seguintes permissões:
+                            Marque <strong>todas</strong> as seguintes permissões:
                           </p>
                           <div className="flex flex-wrap gap-2">
                             <Badge variant="secondary" className="font-mono">imopenlines</Badge>
                             <Badge variant="secondary" className="font-mono">imconnector</Badge>
                             <Badge variant="secondary" className="font-mono">im</Badge>
                             <Badge variant="secondary" className="font-mono">crm</Badge>
+                            <Badge variant="secondary" className="font-mono">user</Badge>
                           </div>
+                          <p className="text-xs text-amber-600 mt-3">
+                            ⚠️ Todas estas permissões são obrigatórias para que o conector apareça no Contact Center!
+                          </p>
                         </AccordionContent>
                       </AccordionItem>
 
@@ -718,11 +722,18 @@ export default function Integrations() {
                         </AccordionTrigger>
                         <AccordionContent className="text-sm text-muted-foreground pl-9">
                           <ol className="list-decimal list-inside space-y-2">
-                            <li>No Bitrix24, vá em <strong>Open Channels</strong> → <strong>Adicionar canal</strong></li>
-                            <li>Escolha <strong>Thoth WhatsApp</strong> na lista</li>
-                            <li>Configure as opções do canal (horário, equipe, etc.)</li>
+                            <li>No Bitrix24, vá em <strong>Contact Center</strong> (menu lateral)</li>
+                            <li>Clique em <strong>+ Adicionar</strong> no canto superior</li>
+                            <li>O conector <strong>Thoth WhatsApp</strong> aparecerá na lista de canais disponíveis</li>
+                            <li>Clique nele para conectar a uma Open Line</li>
+                            <li>Configure as opções do canal (horário, equipe, encaminhamento, etc.)</li>
                             <li>Pronto! As mensagens do WhatsApp chegarão no Bitrix24</li>
                           </ol>
+                          <div className="mt-3 p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
+                            <p className="text-green-600 dark:text-green-400 text-xs">
+                              ✓ Após ativar o conector, ele aparecerá no Contact Center igual ao [whatcrm] WhatsApp
+                            </p>
+                          </div>
                         </AccordionContent>
                       </AccordionItem>
                     </Accordion>

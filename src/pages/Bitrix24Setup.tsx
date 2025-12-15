@@ -732,22 +732,33 @@ const [loading, setLoading] = useState(true);
                   <Button
                     className="w-full"
                     onClick={handleRegisterConnector}
-                    disabled={!selectedInstance || registering || status?.registered}
+                    disabled={!selectedInstance || registering}
                   >
                     {registering ? (
                       <>
                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        Ativando...
+                        Registrando no Contact Center...
                       </>
                     ) : status?.registered ? (
                       <>
                         <CheckCircle className="h-4 w-4 mr-2" />
-                        Conector Ativo
+                        Registrar Novamente
                       </>
                     ) : (
-                      "Ativar Conector WhatsApp"
+                      "Ativar Conector no Contact Center"
                     )}
                   </Button>
+                  
+                  {status?.registered && (
+                    <div className="mt-3 p-3 bg-green-500/10 border border-green-500/20 rounded-lg text-center">
+                      <p className="text-green-600 dark:text-green-400 text-sm">
+                        ✓ O conector "Thoth WhatsApp" está disponível no Contact Center do Bitrix24!
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Vá em Contact Center → + Adicionar para configurar a linha.
+                      </p>
+                    </div>
+                  )}
                 </>
               )}
             </CardContent>
@@ -756,11 +767,19 @@ const [loading, setLoading] = useState(true);
 
         {/* Help */}
         <Card>
-          <CardContent className="pt-6">
+          <CardContent className="pt-6 space-y-3">
             <p className="text-sm text-muted-foreground text-center">
-              Após ativar, as mensagens do WhatsApp aparecerão automaticamente
-              no Open Channels do Bitrix24.
+              Após ativar, o conector <strong>"Thoth WhatsApp"</strong> aparecerá no <strong>Contact Center</strong> do Bitrix24.
             </p>
+            <div className="bg-muted/50 rounded-lg p-3 text-xs text-muted-foreground">
+              <p className="font-medium mb-1">Próximos passos:</p>
+              <ol className="list-decimal list-inside space-y-1">
+                <li>Acesse Contact Center no menu lateral do Bitrix24</li>
+                <li>Clique em "+ Adicionar" no canto superior</li>
+                <li>Selecione "Thoth WhatsApp"</li>
+                <li>Configure a Open Line para receber mensagens</li>
+              </ol>
+            </div>
           </CardContent>
         </Card>
       </div>
