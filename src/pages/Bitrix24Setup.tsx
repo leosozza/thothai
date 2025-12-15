@@ -49,6 +49,12 @@ const [loading, setLoading] = useState(true);
   // Webhook URL para apps locais
   const [webhookUrl, setWebhookUrl] = useState<string>(status?.domain ? "" : "");
   const [webhookSaved, setWebhookSaved] = useState(false);
+  
+  // OAuth manual (fallback)
+  const [showOAuthForm, setShowOAuthForm] = useState(false);
+  const [clientId, setClientId] = useState<string>("");
+  const [clientSecret, setClientSecret] = useState<string>("");
+  const [savingOAuth, setSavingOAuth] = useState(false);
 
   useEffect(() => {
     // Extract params from URL (provided by Bitrix24 iframe)
@@ -341,6 +347,65 @@ const [loading, setLoading] = useState(true);
     }
   };
 
+  const handleSaveOAuth = async () => {
+    if (!clientId.trim() || !clientSecret.trim()) {
+      toast.error("Preencha o Client ID e Client Secret");
+      return;
+    }
+
+    if (!memberId && !domain) {
+      toast.error("Identificação do Bitrix24 não encontrada");
+      return;
+    }
+
+    try {
+      setSavingOAuth(true);
+
+      const response = await fetch(
+        `${SUPABASE_URL}/functions/v1/bitrix24-install`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            action: "oauth_exchange",
+            client_id: clientId.trim(),
+            client_secret: clientSecret.trim(),
+            member_id: memberId,
+            domain: domain,
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error || "Erro ao configurar OAuth");
+      }
+
+      if (data?.success) {
+        toast.success("OAuth configurado! Você será redirecionado para autorização...");
+        // Redirect to Bitrix24 OAuth authorization
+        if (data.auth_url) {
+          window.location.href = data.auth_url;
+        } else {
+          await loadData();
+        }
+      } else if (data?.auth_url) {
+        // Redirect to authorization
+        window.location.href = data.auth_url;
+      } else {
+        throw new Error(data?.error || "Erro ao configurar OAuth");
+      }
+    } catch (err: any) {
+      console.error("Error setting up OAuth:", err);
+      toast.error(err.message || "Erro ao configurar OAuth");
+    } finally {
+      setSavingOAuth(false);
+    }
+  };
+
   const handleRegisterConnector = async () => {
     if (!selectedInstance) {
       toast.error("Selecione uma instância WhatsApp");
@@ -559,6 +624,71 @@ const [loading, setLoading] = useState(true);
                   <li>Copie a URL REST gerada (formato: https://xxx.bitrix24.com/rest/1/xxxxx/)</li>
                 </ol>
               </div>
+
+              <div className="border-t pt-4 mt-4">
+                <Button
+                  variant="ghost"
+                  className="w-full text-sm"
+                  onClick={() => setShowOAuthForm(!showOAuthForm)}
+                >
+                  {showOAuthForm ? "Ocultar configuração OAuth" : "Ou configure OAuth manualmente (para Contact Center)"}
+                </Button>
+              </div>
+
+              {showOAuthForm && (
+                <div className="space-y-4 border-t pt-4">
+                  <p className="text-xs text-muted-foreground">
+                    Para que o conector apareça no Contact Center, você precisa configurar um aplicativo OAuth.
+                  </p>
+                  <div className="space-y-2">
+                    <Label htmlFor="client-id">Client ID (código do aplicativo)</Label>
+                    <Input
+                      id="client-id"
+                      placeholder="local.xxxxxxxxxxxx.xxxxxxxx"
+                      value={clientId}
+                      onChange={(e) => setClientId(e.target.value)}
+                      className="font-mono text-sm"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="client-secret">Client Secret (chave do aplicativo)</Label>
+                    <Input
+                      id="client-secret"
+                      type="password"
+                      placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                      value={clientSecret}
+                      onChange={(e) => setClientSecret(e.target.value)}
+                      className="font-mono text-sm"
+                    />
+                  </div>
+                  <Button
+                    className="w-full"
+                    onClick={handleSaveOAuth}
+                    disabled={!clientId.trim() || !clientSecret.trim() || savingOAuth}
+                  >
+                    {savingOAuth ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Configurando...
+                      </>
+                    ) : (
+                      <>
+                        <Key className="h-4 w-4 mr-2" />
+                        Autorizar OAuth
+                      </>
+                    )}
+                  </Button>
+                  <div className="bg-muted/50 rounded-lg p-3 text-xs text-muted-foreground">
+                    <p className="font-medium mb-1">Onde encontrar:</p>
+                    <ol className="list-decimal list-inside space-y-1">
+                      <li>Acesse: Desenvolvedor → Integrações → Meus aplicativos</li>
+                      <li>Selecione seu aplicativo Thoth</li>
+                      <li>Copie o "Código do aplicativo" (Client ID)</li>
+                      <li>Copie a "Chave do aplicativo" (Client Secret)</li>
+                    </ol>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
         )}
