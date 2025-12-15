@@ -214,11 +214,9 @@ serve(async (req) => {
       console.log("Using Bitrix API URL:", bitrixApiUrl);
     }
 
-    // Sanitize connector_id: Bitrix24 doesn't allow dots in connector IDs
-    const sanitizeConnectorId = (id: string) => id.replace(/[^a-zA-Z0-9_]/g, '');
-    const rawConnectorId = connector_id || `thoth_whatsapp_${member_id?.substring(0, 12) || "default"}`;
-    const finalConnectorId = sanitizeConnectorId(rawConnectorId);
-    console.log("Final connector ID (sanitized):", finalConnectorId);
+    // Use a FIXED connector_id to avoid duplicates
+    const finalConnectorId = connector_id || "thoth_whatsapp";
+    console.log("Using fixed connector ID:", finalConnectorId);
 
     // For webhook mode (local apps), we skip imconnector.register as it requires OAuth app permissions
     // Webhooks are meant for direct API access, not for registering connectors
@@ -283,6 +281,21 @@ serve(async (req) => {
         JSON.stringify({ error: "Token de acesso não encontrado. Reinstale o aplicativo." }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
+    }
+
+    // 0. First, try to UNREGISTER any existing connector to avoid duplicates
+    console.log("Attempting to unregister existing connector first...");
+    const unregisterUrl = `${bitrixApiUrl}imconnector.unregister?auth=${accessToken}`;
+    try {
+      const unregisterResponse = await fetch(unregisterUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ID: finalConnectorId }),
+      });
+      const unregisterResult = await unregisterResponse.json();
+      console.log("imconnector.unregister result:", JSON.stringify(unregisterResult));
+    } catch (e) {
+      console.log("Unregister failed (connector may not exist):", e);
     }
 
     // 1. Register connector in Bitrix24 (this makes it appear in Contact Center)
