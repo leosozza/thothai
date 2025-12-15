@@ -443,6 +443,11 @@ const [loading, setLoading] = useState(true);
         payload.member_id = memberId;
       }
 
+      console.log("=== REGISTER CONNECTOR DEBUG ===");
+      console.log("Payload to bitrix24-register:", JSON.stringify(payload, null, 2));
+      console.log("Current memberId state:", memberId);
+      console.log("Current domain state:", domain);
+
       const response = await fetch(
         `${SUPABASE_URL}/functions/v1/bitrix24-register`,
         {
