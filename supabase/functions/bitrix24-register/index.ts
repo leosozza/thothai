@@ -85,9 +85,35 @@ serve(async (req) => {
 
     let bitrixApiUrl: string = "";
     let integration: any = null;
+    let useWebhookMode = false;
 
-    // Mode 1: Using member_id (OAuth app installation)
-    if (member_id) {
+    // Mode 1: Using webhook_url directly (local apps - preferred for local installations)
+    if (webhook_url) {
+      console.log("=== WEBHOOK MODE (Local App) ===");
+      console.log("Using webhook_url:", webhook_url);
+      
+      // Ensure webhook URL ends with /
+      bitrixApiUrl = webhook_url.endsWith("/") ? webhook_url : `${webhook_url}/`;
+      useWebhookMode = true;
+
+      // Try to find existing integration by webhook_url or workspace_id
+      if (workspace_id) {
+        const { data: existingIntegration } = await supabase
+          .from("integrations")
+          .select("*")
+          .eq("type", "bitrix24")
+          .eq("workspace_id", workspace_id)
+          .maybeSingle();
+
+        if (existingIntegration) {
+          integration = existingIntegration;
+          console.log("Found integration by workspace_id:", integration.id);
+        }
+      }
+    }
+    // Mode 2: Using member_id (OAuth app installation - Marketplace apps)
+    else if (member_id) {
+      console.log("=== OAUTH MODE (Marketplace App) ===");
       console.log("Looking for integration with member_id:", member_id);
       
       const { data: existingIntegration, error: lookupError } = await supabase
@@ -115,31 +141,41 @@ serve(async (req) => {
 
       console.log("Found integration:", existingIntegration.id, "workspace:", existingIntegration.workspace_id);
       integration = existingIntegration;
-      
-      const accessToken = await refreshBitrixToken(integration, supabase);
-      
-      if (!accessToken) {
-        console.error("Failed to get access token for integration:", integration.id);
-        return new Response(
-          JSON.stringify({ error: "Falha ao obter token de acesso. Por favor, reinstale o aplicativo." }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
 
-      const clientEndpoint = integration.config.client_endpoint || `https://${integration.config.domain}/rest/`;
-      bitrixApiUrl = `${clientEndpoint}`;
-      console.log("Using Bitrix API URL:", bitrixApiUrl);
-    }
-    // Mode 2: Using webhook_url (manual configuration)
-    else if (webhook_url) {
-      console.log("Using webhook_url mode");
-      if (!connector_id || !workspace_id) {
-        return new Response(
-          JSON.stringify({ error: "Campos obrigatórios: connector_id, workspace_id" }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+      // Check if this is a local app with webhook_url
+      if (integration.config?.webhook_url && integration.config?.is_local_app) {
+        console.log("Integration is a local app, switching to webhook mode");
+        bitrixApiUrl = integration.config.webhook_url;
+        bitrixApiUrl = bitrixApiUrl.endsWith("/") ? bitrixApiUrl : `${bitrixApiUrl}/`;
+        useWebhookMode = true;
+      } else {
+        // OAuth mode - need to refresh token
+        const accessToken = await refreshBitrixToken(integration, supabase);
+        
+        if (!accessToken) {
+          // Check if we have a webhook_url as fallback
+          if (integration.config?.webhook_url) {
+            console.log("OAuth token failed, falling back to webhook_url");
+            bitrixApiUrl = integration.config.webhook_url;
+            bitrixApiUrl = bitrixApiUrl.endsWith("/") ? bitrixApiUrl : `${bitrixApiUrl}/`;
+            useWebhookMode = true;
+          } else {
+            console.error("Failed to get access token and no webhook fallback for integration:", integration.id);
+            return new Response(
+              JSON.stringify({ 
+                error: "Falha ao obter token de acesso. Para aplicações locais, configure a URL do webhook de saída.",
+                needs_webhook: true 
+              }),
+              { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+            );
+          }
+        } else {
+          const clientEndpoint = integration.config.client_endpoint || `https://${integration.config.domain}/rest/`;
+          bitrixApiUrl = clientEndpoint;
+        }
       }
-      bitrixApiUrl = webhook_url;
+      
+      console.log("Using Bitrix API URL:", bitrixApiUrl);
     }
 
     const finalConnectorId = connector_id || `thoth_whatsapp_${member_id?.substring(0, 8) || "default"}`;
@@ -156,12 +192,16 @@ serve(async (req) => {
     };
 
     console.log("Calling imconnector.register with:", JSON.stringify(registerPayload));
+    console.log("useWebhookMode:", useWebhookMode);
 
     // Build the API call URL based on auth mode
     let registerUrl: string;
-    if (member_id && integration) {
-      const accessToken = integration.config.access_token;
-      registerUrl = `${bitrixApiUrl}imconnector.register?auth=${accessToken}`;
+    if (useWebhookMode) {
+      // Webhook mode - URL already contains auth
+      registerUrl = `${bitrixApiUrl}imconnector.register`;
+    } else if (integration?.config?.access_token) {
+      // OAuth mode - append auth token
+      registerUrl = `${bitrixApiUrl}imconnector.register?auth=${integration.config.access_token}`;
     } else {
       registerUrl = `${bitrixApiUrl}imconnector.register`;
     }
@@ -184,9 +224,10 @@ serve(async (req) => {
 
     // 2. Activate the connector
     let activateUrl: string;
-    if (member_id && integration) {
-      const accessToken = integration.config.access_token;
-      activateUrl = `${bitrixApiUrl}imconnector.activate?auth=${accessToken}`;
+    if (useWebhookMode) {
+      activateUrl = `${bitrixApiUrl}imconnector.activate`;
+    } else if (integration?.config?.access_token) {
+      activateUrl = `${bitrixApiUrl}imconnector.activate?auth=${integration.config.access_token}`;
     } else {
       activateUrl = `${bitrixApiUrl}imconnector.activate`;
     }
@@ -216,9 +257,10 @@ serve(async (req) => {
 
     for (const event of events) {
       let bindUrl: string;
-      if (member_id && integration) {
-        const accessToken = integration.config.access_token;
-        bindUrl = `${bitrixApiUrl}event.bind?auth=${accessToken}`;
+      if (useWebhookMode) {
+        bindUrl = `${bitrixApiUrl}event.bind`;
+      } else if (integration?.config?.access_token) {
+        bindUrl = `${bitrixApiUrl}event.bind?auth=${integration.config.access_token}`;
       } else {
         bindUrl = `${bitrixApiUrl}event.bind`;
       }
