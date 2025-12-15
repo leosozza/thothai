@@ -20,7 +20,6 @@ serve(async (req) => {
     if (req.method === "GET") {
       const url = new URL(req.url);
       
-      // Enhanced logging for debugging
       console.log("=== GET REQUEST DEBUG ===");
       console.log("Full URL:", req.url);
       console.log("Search params string:", url.searchParams.toString());
@@ -44,42 +43,17 @@ serve(async (req) => {
 
         let instances: any[] = [];
         
-        // ALWAYS fetch connected instances for first-time setup (when no integration exists)
-        // OR when include_instances is explicitly requested
-        const shouldFetchInstances = includeInstances || !integration;
-        
-        if (shouldFetchInstances) {
-          // Get instances from the workspace associated with this integration
-          if (integration?.workspace_id) {
-            const { data: workspaceInstances } = await supabase
-              .from("instances")
-              .select("id, name, phone_number, status")
-              .eq("workspace_id", integration.workspace_id)
-              .eq("status", "connected");
-            
-            instances = workspaceInstances || [];
-            console.log("Found workspace instances:", instances.length);
-          } else {
-            // If no integration found, get ALL connected instances
-            // This is critical for first-time setup
-            console.log("No integration found - fetching all connected instances for first-time setup");
-            const { data: allInstances, error: instancesError } = await supabase
-              .from("instances")
-              .select("id, name, phone_number, status")
-              .eq("status", "connected")
-              .limit(50);
-            
-            if (instancesError) {
-              console.error("Error fetching instances:", instancesError);
-            }
-            
-            instances = allInstances || [];
-            console.log("Found all connected instances:", instances.length, JSON.stringify(instances));
-          }
-        }
+        if (integration?.workspace_id) {
+          // Integration exists with workspace - fetch instances from that workspace
+          const { data: workspaceInstances } = await supabase
+            .from("instances")
+            .select("id, name, phone_number, status")
+            .eq("workspace_id", integration.workspace_id)
+            .eq("status", "connected");
+          
+          instances = workspaceInstances || [];
+          console.log("Found workspace instances:", instances.length);
 
-        if (integration) {
-          console.log("Integration found:", integration.id);
           return new Response(
             JSON.stringify({
               found: true,
@@ -88,18 +62,19 @@ serve(async (req) => {
               instance_id: integration.config?.instance_id,
               is_active: integration.is_active,
               workspace_id: integration.workspace_id,
-              instances: instances, // Always return instances when we fetched them
+              instances: instances,
             }),
             { headers: { ...corsHeaders, "Content-Type": "application/json" } }
           );
         }
 
-        // Integration not found - ALWAYS return instances for first-time setup
-        console.log("Integration not found, returning instances for setup:", instances.length);
+        // No integration found - require token for multi-tenant linking
+        console.log("No integration found - requires token for workspace linking");
         return new Response(
           JSON.stringify({ 
             found: false,
-            instances: instances, // Always include instances for first-time setup
+            requires_token: true,
+            instances: [], // No instances until token is validated
           }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
@@ -131,8 +106,132 @@ serve(async (req) => {
       }
     }
 
-    console.log("Bitrix24 install event received:", JSON.stringify(body));
+    console.log("Bitrix24 POST received:", JSON.stringify(body));
 
+    // ✅ HANDLE TOKEN VALIDATION
+    if (body.action === "validate_token") {
+      const token = body.token;
+      const memberId = body.member_id;
+      const domain = body.domain;
+
+      console.log("Validating token:", token, "for member_id:", memberId, "domain:", domain);
+
+      if (!token) {
+        return new Response(
+          JSON.stringify({ error: "Token é obrigatório" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Find the token
+      const { data: tokenData, error: tokenError } = await supabase
+        .from("workspace_tokens")
+        .select("*")
+        .eq("token", token)
+        .eq("token_type", "bitrix24")
+        .eq("is_used", false)
+        .gt("expires_at", new Date().toISOString())
+        .maybeSingle();
+
+      if (tokenError) {
+        console.error("Token query error:", tokenError);
+        return new Response(
+          JSON.stringify({ error: "Erro ao validar token" }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      if (!tokenData) {
+        console.log("Token not found or expired");
+        return new Response(
+          JSON.stringify({ error: "Token inválido, expirado ou já utilizado" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const workspaceId = tokenData.workspace_id;
+      console.log("Token valid, workspace_id:", workspaceId);
+
+      // Mark token as used
+      await supabase
+        .from("workspace_tokens")
+        .update({
+          is_used: true,
+          used_at: new Date().toISOString(),
+          used_by_member_id: memberId || domain,
+        })
+        .eq("id", tokenData.id);
+
+      // Check if integration already exists
+      const { data: existingIntegration } = await supabase
+        .from("integrations")
+        .select("*")
+        .eq("type", "bitrix24")
+        .or(`config->>member_id.eq.${memberId || domain},config->>domain.eq.${domain || memberId}`)
+        .maybeSingle();
+
+      if (existingIntegration) {
+        // Update existing integration with workspace_id
+        await supabase
+          .from("integrations")
+          .update({
+            workspace_id: workspaceId,
+            is_active: true,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", existingIntegration.id);
+
+        console.log("Updated existing integration with workspace_id");
+      } else {
+        // Create new integration
+        const { error: insertError } = await supabase
+          .from("integrations")
+          .insert({
+            workspace_id: workspaceId,
+            type: "bitrix24",
+            name: "Bitrix24",
+            config: {
+              member_id: memberId,
+              domain: domain,
+              installed: true,
+              installed_at: new Date().toISOString(),
+              registered: false,
+            },
+            is_active: true,
+          });
+
+        if (insertError) {
+          console.error("Error creating integration:", insertError);
+          return new Response(
+            JSON.stringify({ error: "Erro ao criar integração" }),
+            { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        console.log("Created new integration");
+      }
+
+      // Fetch instances from the linked workspace
+      const { data: instances } = await supabase
+        .from("instances")
+        .select("id, name, phone_number, status")
+        .eq("workspace_id", workspaceId)
+        .eq("status", "connected");
+
+      console.log("Returning instances for workspace:", instances?.length || 0);
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          message: "Token validado com sucesso",
+          workspace_id: workspaceId,
+          instances: instances || [],
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // ✅ HANDLE BITRIX24 EVENTS
     const event = body.event?.toUpperCase();
     const auth = body.auth || {};
 
@@ -184,7 +283,7 @@ serve(async (req) => {
       };
 
       if (existing) {
-        // Update existing integration
+        // Update existing integration (preserve workspace_id if exists)
         await supabase
           .from("integrations")
           .update({
@@ -196,12 +295,8 @@ serve(async (req) => {
 
         console.log(`Updated existing Bitrix24 integration: ${existing.id}`);
       } else {
-        // We need a workspace_id - for now, we'll create a placeholder
-        // The actual workspace association will happen when the user configures in the iframe
-        console.log("New Bitrix24 installation - will be associated with workspace during setup");
-        
-        // Store temporarily without workspace - this requires handling in the setup page
-        // For now, we'll return success and expect the iframe to complete the setup
+        // New installation - will be linked to workspace via token
+        console.log("New Bitrix24 installation - will be associated with workspace via token");
       }
 
       return new Response(

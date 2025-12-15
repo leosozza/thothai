@@ -151,6 +151,10 @@ export default function Integrations() {
   const [syncingContacts, setSyncingContacts] = useState(false);
   const [syncDirection, setSyncDirection] = useState<"both" | "to_bitrix" | "from_bitrix">("both");
 
+  // Token de vinculação Bitrix24
+  const [linkingToken, setLinkingToken] = useState<string | null>(null);
+  const [generatingToken, setGeneratingToken] = useState(false);
+
   useEffect(() => {
     if (workspace) {
       fetchIntegrations();
@@ -319,6 +323,67 @@ export default function Integrations() {
     navigator.clipboard.writeText(text);
     toast.success(`${label} copiado!`);
   };
+
+  const handleGenerateLinkingToken = async () => {
+    if (!workspace?.id) {
+      toast.error("Workspace não encontrado");
+      return;
+    }
+
+    setGeneratingToken(true);
+    try {
+      // Generate a random token
+      const token = crypto.randomUUID().replace(/-/g, "").substring(0, 16).toUpperCase();
+
+      // Save token to database
+      const { error } = await supabase
+        .from("workspace_tokens")
+        .insert({
+          workspace_id: workspace.id,
+          token,
+          token_type: "bitrix24",
+        });
+
+      if (error) throw error;
+
+      setLinkingToken(token);
+      toast.success("Token de vinculação gerado com sucesso!");
+    } catch (error) {
+      console.error("Error generating token:", error);
+      toast.error("Erro ao gerar token de vinculação");
+    } finally {
+      setGeneratingToken(false);
+    }
+  };
+
+  const fetchExistingToken = async () => {
+    if (!workspace?.id) return;
+
+    try {
+      const { data } = await supabase
+        .from("workspace_tokens")
+        .select("token, expires_at, is_used")
+        .eq("workspace_id", workspace.id)
+        .eq("token_type", "bitrix24")
+        .eq("is_used", false)
+        .gt("expires_at", new Date().toISOString())
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (data) {
+        setLinkingToken(data.token);
+      }
+    } catch (error) {
+      console.error("Error fetching token:", error);
+    }
+  };
+
+  useEffect(() => {
+    if (workspace) {
+      fetchExistingToken();
+    }
+  }, [workspace]);
 
   const handleSyncContacts = async () => {
     if (!workspace?.id) {
@@ -661,6 +726,67 @@ export default function Integrations() {
                         </AccordionContent>
                       </AccordionItem>
                     </Accordion>
+
+                    {/* Token de Vinculação */}
+                    <div className="border rounded-lg p-4 space-y-4">
+                      <div className="flex items-start gap-3">
+                        <Key className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                        <div>
+                          <p className="font-medium">Token de Vinculação</p>
+                          <p className="text-sm text-muted-foreground">
+                            Gere um token para conectar sua instalação Bitrix24 a este workspace
+                          </p>
+                        </div>
+                      </div>
+
+                      {linkingToken ? (
+                        <div className="space-y-3">
+                          <div className="flex gap-2">
+                            <Input
+                              readOnly
+                              value={linkingToken}
+                              className="font-mono text-sm bg-muted"
+                            />
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              onClick={() => copyToClipboard(linkingToken, "Token")}
+                            >
+                              <Copy className="h-4 w-4" />
+                            </Button>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            Cole este token na tela de configuração do Bitrix24 para vincular ao seu workspace.
+                            O token expira em 7 dias.
+                          </p>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={handleGenerateLinkingToken}
+                            disabled={generatingToken}
+                          >
+                            {generatingToken ? (
+                              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                            ) : (
+                              <RefreshCw className="h-4 w-4 mr-2" />
+                            )}
+                            Gerar Novo Token
+                          </Button>
+                        </div>
+                      ) : (
+                        <Button
+                          onClick={handleGenerateLinkingToken}
+                          disabled={generatingToken}
+                        >
+                          {generatingToken ? (
+                            <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                          ) : (
+                            <Key className="h-4 w-4 mr-2" />
+                          )}
+                          Gerar Token de Vinculação
+                        </Button>
+                      )}
+                    </div>
 
                     {/* Status if installed via app */}
                     {bitrixConfig.member_id && (

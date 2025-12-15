@@ -693,6 +693,50 @@ export type Database = {
           },
         ]
       }
+      workspace_tokens: {
+        Row: {
+          created_at: string | null
+          expires_at: string | null
+          id: string
+          is_used: boolean | null
+          token: string
+          token_type: string
+          used_at: string | null
+          used_by_member_id: string | null
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          expires_at?: string | null
+          id?: string
+          is_used?: boolean | null
+          token: string
+          token_type?: string
+          used_at?: string | null
+          used_by_member_id?: string | null
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string | null
+          expires_at?: string | null
+          id?: string
+          is_used?: boolean | null
+          token?: string
+          token_type?: string
+          used_at?: string | null
+          used_by_member_id?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workspace_tokens_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       workspaces: {
         Row: {
           created_at: string
