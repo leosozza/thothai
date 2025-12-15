@@ -28,7 +28,7 @@ verify_jwt = true
 verify_jwt = true
 
 [functions.bitrix24-register]
-verify_jwt = true
+verify_jwt = false
 
 [functions.bitrix24-webhook]
 verify_jwt = false
