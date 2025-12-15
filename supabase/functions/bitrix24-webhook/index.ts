@@ -62,10 +62,324 @@ async function refreshBitrixToken(integration: any, supabase: any): Promise<stri
   return config.access_token || null;
 }
 
-// Handler for PLACEMENT calls (when user connects Open Channel in Contact Center)
+// Generate HTML settings page for the connector
+function renderSettingsPage(
+  options: { LINE?: number; ACTIVE_STATUS?: number },
+  connectorId: string,
+  domain: string,
+  supabaseUrl: string,
+  webhookUrl: string
+): string {
+  const lineId = options.LINE || 0;
+  const isConnected = options.ACTIVE_STATUS === 1;
+
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Thoth WhatsApp - Configuração</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      color: #e2e8f0;
+    }
+    .container {
+      background: rgba(30, 41, 59, 0.95);
+      border-radius: 16px;
+      padding: 32px;
+      max-width: 400px;
+      width: 100%;
+      text-align: center;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+      border: 1px solid rgba(148, 163, 184, 0.1);
+    }
+    .logo {
+      width: 72px;
+      height: 72px;
+      background: linear-gradient(135deg, #25D366 0%, #128C7E 100%);
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 20px;
+      font-size: 36px;
+    }
+    h2 {
+      font-size: 24px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: #f8fafc;
+    }
+    .subtitle {
+      color: #94a3b8;
+      font-size: 14px;
+      margin-bottom: 24px;
+    }
+    .status {
+      padding: 12px 20px;
+      border-radius: 12px;
+      margin-bottom: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      font-weight: 500;
+    }
+    .status.connected {
+      background: rgba(34, 197, 94, 0.15);
+      color: #4ade80;
+      border: 1px solid rgba(34, 197, 94, 0.3);
+    }
+    .status.disconnected {
+      background: rgba(251, 191, 36, 0.15);
+      color: #fbbf24;
+      border: 1px solid rgba(251, 191, 36, 0.3);
+    }
+    .info-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 12px 0;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+      font-size: 14px;
+    }
+    .info-row:last-of-type {
+      border-bottom: none;
+      margin-bottom: 24px;
+    }
+    .info-label {
+      color: #94a3b8;
+    }
+    .info-value {
+      color: #f1f5f9;
+      font-weight: 500;
+    }
+    button {
+      width: 100%;
+      padding: 14px 24px;
+      font-size: 16px;
+      font-weight: 600;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    button.connect {
+      background: linear-gradient(135deg, #25D366 0%, #128C7E 100%);
+      color: white;
+    }
+    button.connect:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 20px -5px rgba(37, 211, 102, 0.4);
+    }
+    button.disconnect {
+      background: rgba(239, 68, 68, 0.15);
+      color: #f87171;
+      border: 1px solid rgba(239, 68, 68, 0.3);
+    }
+    button.disconnect:hover {
+      background: rgba(239, 68, 68, 0.25);
+    }
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none !important;
+      box-shadow: none !important;
+    }
+    .loading {
+      display: none;
+      margin-top: 16px;
+      color: #94a3b8;
+      font-size: 14px;
+    }
+    .loading.show {
+      display: block;
+    }
+    .spinner {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2px solid rgba(148, 163, 184, 0.3);
+      border-top-color: #94a3b8;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-right: 8px;
+      vertical-align: middle;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    .error {
+      background: rgba(239, 68, 68, 0.15);
+      color: #f87171;
+      padding: 12px;
+      border-radius: 8px;
+      margin-top: 16px;
+      display: none;
+      font-size: 14px;
+    }
+    .error.show {
+      display: block;
+    }
+    .success {
+      background: rgba(34, 197, 94, 0.15);
+      color: #4ade80;
+      padding: 12px;
+      border-radius: 8px;
+      margin-top: 16px;
+      display: none;
+      font-size: 14px;
+    }
+    .success.show {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">📱</div>
+    <h2>Thoth WhatsApp</h2>
+    <p class="subtitle">Integração de WhatsApp para Bitrix24</p>
+    
+    <div class="status ${isConnected ? 'connected' : 'disconnected'}">
+      <span>${isConnected ? '✓' : '○'}</span>
+      <span>${isConnected ? 'Conectado' : 'Não conectado'}</span>
+    </div>
+    
+    <div class="info-row">
+      <span class="info-label">Canal (LINE)</span>
+      <span class="info-value">${lineId}</span>
+    </div>
+    <div class="info-row">
+      <span class="info-label">Conector</span>
+      <span class="info-value">${connectorId}</span>
+    </div>
+    
+    <button id="actionBtn" class="${isConnected ? 'disconnect' : 'connect'}" onclick="toggleConnection()">
+      ${isConnected ? '✕ Desconectar' : '✓ Conectar Canal'}
+    </button>
+    
+    <p class="loading" id="loading">
+      <span class="spinner"></span>
+      Processando...
+    </p>
+    
+    <div class="error" id="error"></div>
+    <div class="success" id="success"></div>
+  </div>
+  
+  <script src="//api.bitrix24.com/api/v1/"></script>
+  <script>
+    const LINE = ${lineId};
+    const CONNECTOR = '${connectorId}';
+    const CURRENT_STATUS = ${isConnected ? 1 : 0};
+    const WEBHOOK_URL = '${webhookUrl}';
+    
+    function showError(message) {
+      const el = document.getElementById('error');
+      el.textContent = '❌ ' + message;
+      el.classList.add('show');
+    }
+    
+    function showSuccess(message) {
+      const el = document.getElementById('success');
+      el.textContent = '✓ ' + message;
+      el.classList.add('show');
+    }
+    
+    function toggleConnection() {
+      const btn = document.getElementById('actionBtn');
+      const loading = document.getElementById('loading');
+      
+      document.getElementById('error').classList.remove('show');
+      document.getElementById('success').classList.remove('show');
+      
+      btn.disabled = true;
+      loading.classList.add('show');
+      
+      const newStatus = CURRENT_STATUS === 1 ? 0 : 1;
+      
+      console.log('Calling imconnector.activate with:', {
+        CONNECTOR: CONNECTOR,
+        LINE: LINE,
+        ACTIVE: newStatus
+      });
+      
+      BX24.callMethod('imconnector.activate', {
+        CONNECTOR: CONNECTOR,
+        LINE: LINE,
+        ACTIVE: newStatus
+      }, function(result) {
+        console.log('imconnector.activate result:', result);
+        
+        if (result.error()) {
+          console.error('Error:', result.error());
+          showError(result.error().ex?.error_description || result.error());
+          btn.disabled = false;
+          loading.classList.remove('show');
+          return;
+        }
+        
+        if (newStatus === 1) {
+          // When connecting, also set connector data
+          console.log('Calling imconnector.connector.data.set');
+          
+          BX24.callMethod('imconnector.connector.data.set', {
+            CONNECTOR: CONNECTOR,
+            LINE: LINE,
+            DATA: {
+              id: CONNECTOR + '_line_' + LINE,
+              url: WEBHOOK_URL,
+              url_im: WEBHOOK_URL,
+              name: 'Thoth WhatsApp'
+            }
+          }, function(dataResult) {
+            console.log('imconnector.connector.data.set result:', dataResult);
+            
+            if (dataResult.error()) {
+              console.error('Data set error:', dataResult.error());
+            }
+            
+            showSuccess('Canal conectado com sucesso!');
+            setTimeout(function() {
+              location.reload();
+            }, 1500);
+          });
+        } else {
+          showSuccess('Canal desconectado.');
+          setTimeout(function() {
+            location.reload();
+          }, 1500);
+        }
+      });
+    }
+    
+    // Initialize BX24
+    BX24.init(function() {
+      console.log('BX24 initialized');
+    });
+  </script>
+</body>
+</html>`;
+}
+
+// Handler for PLACEMENT calls (when user opens connector settings in Contact Center)
 async function handlePlacement(supabase: any, payload: any, supabaseUrl: string) {
   console.log("=== PLACEMENT HANDLER ===");
   console.log("Payload:", JSON.stringify(payload, null, 2));
+
+  const placement = payload.PLACEMENT;
 
   // Parse PLACEMENT_OPTIONS
   let options: { LINE?: number; ACTIVE_STATUS?: number } = {};
@@ -81,25 +395,15 @@ async function handlePlacement(supabase: any, payload: any, supabaseUrl: string)
   }
 
   const lineId = options.LINE;
-  const activeStatus = options.ACTIVE_STATUS ?? 1;
-  const accessToken = payload.auth?.access_token || payload.AUTH_ID;
+  const activeStatus = options.ACTIVE_STATUS ?? 0;
   const domain = payload.auth?.domain || payload.DOMAIN;
   const memberId = payload.auth?.member_id || payload.member_id;
 
-  console.log("Parsed values - Line ID:", lineId, "Active Status:", activeStatus, "Domain:", domain);
-
-  if (!lineId) {
-    console.error("LINE not provided in PLACEMENT_OPTIONS");
-    return new Response(
-      JSON.stringify({ error: "LINE not provided" }), 
-      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
-  }
+  console.log("Parsed values - Placement:", placement, "Line ID:", lineId, "Active Status:", activeStatus, "Domain:", domain);
 
   // Find the integration
   let integration = null;
 
-  // Try to find by member_id first
   if (memberId) {
     const { data } = await supabase
       .from("integrations")
@@ -110,7 +414,6 @@ async function handlePlacement(supabase: any, payload: any, supabaseUrl: string)
     integration = data;
   }
 
-  // Try by domain
   if (!integration && domain) {
     const { data } = await supabase
       .from("integrations")
@@ -121,7 +424,6 @@ async function handlePlacement(supabase: any, payload: any, supabaseUrl: string)
     integration = data;
   }
 
-  // Fallback: get any active bitrix24 integration
   if (!integration) {
     const { data } = await supabase
       .from("integrations")
@@ -135,90 +437,45 @@ async function handlePlacement(supabase: any, payload: any, supabaseUrl: string)
   if (!integration) {
     console.error("No Bitrix24 integration found");
     return new Response(
-      JSON.stringify({ error: "Integration not found" }), 
-      { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      `<html><body><h1>Erro</h1><p>Integração Bitrix24 não encontrada. Configure a integração primeiro.</p></body></html>`,
+      { 
+        status: 404, 
+        headers: { ...corsHeaders, "Content-Type": "text/html; charset=utf-8" } 
+      }
     );
   }
 
   console.log("Found integration:", integration.id);
 
   const connectorId = integration.config?.connector_id || "thoth_whatsapp";
-  const token = accessToken || await refreshBitrixToken(integration, supabase);
   const bitrixDomain = domain || integration.config?.domain;
-  
-  if (!token) {
-    console.error("No access token available");
+  const webhookUrl = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
+
+  // If this is SETTING_CONNECTOR placement, return the settings HTML page
+  if (placement === "SETTING_CONNECTOR" || lineId) {
+    console.log("=== RENDERING SETTINGS PAGE ===");
+    
     return new Response(
-      JSON.stringify({ error: "No access token" }), 
-      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
-  }
-
-  const bitrixApiUrl = `https://${bitrixDomain}/rest/`;
-  console.log("Using Bitrix API URL:", bitrixApiUrl, "Connector ID:", connectorId);
-
-  // 1. Activate the connector for this LINE
-  console.log("Calling imconnector.activate for LINE:", lineId);
-  const activateResponse = await fetch(
-    `${bitrixApiUrl}imconnector.activate?auth=${token}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        CONNECTOR: connectorId,
-        LINE: lineId,
-        ACTIVE: activeStatus,
-      }),
-    }
-  );
-  const activateResult = await activateResponse.json();
-  console.log("imconnector.activate result:", JSON.stringify(activateResult));
-
-  // 2. If activating, configure connector data
-  if (activeStatus === 1) {
-    console.log("Calling imconnector.connector.data.set...");
-    const dataSetResponse = await fetch(
-      `${bitrixApiUrl}imconnector.connector.data.set?auth=${token}`,
+      renderSettingsPage(options, connectorId, bitrixDomain, supabaseUrl, webhookUrl),
       {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          CONNECTOR: connectorId,
-          LINE: lineId,
-          DATA: {
-            id: `${connectorId}_line_${lineId}`,
-            url: supabaseUrl,
-            url_im: supabaseUrl,
-            name: "Thoth WhatsApp",
-          },
-        }),
+        headers: {
+          "Content-Type": "text/html; charset=utf-8",
+          ...corsHeaders,
+        },
       }
     );
-    const dataSetResult = await dataSetResponse.json();
-    console.log("imconnector.connector.data.set result:", JSON.stringify(dataSetResult));
-
-    // 3. Save LINE ID in integration config
-    await supabase
-      .from("integrations")
-      .update({
-        config: {
-          ...integration.config,
-          line_id: lineId,
-          connected: true,
-          connected_at: new Date().toISOString(),
-        },
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", integration.id);
-
-    console.log("Integration updated with line_id:", lineId);
   }
 
-  // Return success response for Bitrix24
-  // Bitrix24 expects a simple response
-  return new Response("successfully", {
-    headers: { "Content-Type": "text/plain" },
-  });
+  // Default: return settings page
+  return new Response(
+    renderSettingsPage(options, connectorId, bitrixDomain, supabaseUrl, webhookUrl),
+    {
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        ...corsHeaders,
+      },
+    }
+  );
 }
 
 serve(async (req) => {
