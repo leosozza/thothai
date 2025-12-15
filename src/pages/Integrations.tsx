@@ -414,10 +414,12 @@ export default function Integrations() {
       }
 
       const data = response.data;
-      if (data?.authorization_url) {
+      const authUrl = data?.auth_url || data?.authorization_url;
+      if (authUrl) {
         toast.info("Redirecionando para autorização no Bitrix24...");
-        window.location.href = data.authorization_url;
+        window.location.href = authUrl;
       } else {
+        console.error("Response data:", data);
         throw new Error("URL de autorização não retornada");
       }
     } catch (error) {
