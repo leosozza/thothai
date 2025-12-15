@@ -965,69 +965,135 @@ export default function Integrations() {
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="bg-muted/50 rounded-lg p-4 text-sm">
-                    <div className="flex items-start gap-2">
-                      <ArrowLeftRight className="h-5 w-5 text-emerald-500 shrink-0 mt-0.5" />
-                      <div>
-                        <p className="font-medium">Sincronização bidirecional:</p>
-                        <ul className="text-muted-foreground mt-1 space-y-1">
-                          <li>• <strong>Do Bitrix24:</strong> Importa contatos do CRM para o WhatsApp</li>
-                          <li>• <strong>Para o Bitrix24:</strong> Exporta contatos do WhatsApp para o CRM</li>
-                          <li>• <strong>Ambos:</strong> Sincroniza em ambas as direções</li>
-                        </ul>
+                  {/* Warning if no webhook_url or access_token configured */}
+                  {!bitrixConfig.webhook_url && !bitrixConfig.access_token && (
+                    <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-4">
+                      <div className="flex items-start gap-3">
+                        <AlertCircle className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
+                        <div className="space-y-3 flex-1">
+                          <div>
+                            <p className="font-medium text-amber-600 dark:text-amber-400">
+                              Configuração Incompleta
+                            </p>
+                            <p className="text-sm text-muted-foreground mt-1">
+                              Para sincronizar contatos, você precisa configurar um <strong>Webhook de Entrada (REST)</strong> no Bitrix24.
+                            </p>
+                          </div>
+                          <div className="space-y-2">
+                            <Label htmlFor="sync-webhook-url" className="text-xs">URL do Webhook de Entrada</Label>
+                            <div className="flex gap-2">
+                              <Input
+                                id="sync-webhook-url"
+                                placeholder="https://seudominio.bitrix24.com.br/rest/1/xxxxx/"
+                                value={bitrixWebhookUrl}
+                                onChange={(e) => setBitrixWebhookUrl(e.target.value)}
+                                className="text-sm"
+                              />
+                              <Button 
+                                size="sm"
+                                disabled={!bitrixWebhookUrl || registeringBitrix}
+                                onClick={async () => {
+                                  if (!bitrixWebhookUrl) return;
+                                  setRegisteringBitrix(true);
+                                  try {
+                                    const { error } = await supabase
+                                      .from("integrations")
+                                      .update({
+                                        config: { ...bitrixConfig, webhook_url: bitrixWebhookUrl },
+                                        updated_at: new Date().toISOString(),
+                                      })
+                                      .eq("id", bitrixIntegration.id);
+                                    
+                                    if (error) throw error;
+                                    toast.success("Webhook salvo com sucesso!");
+                                    fetchIntegrations();
+                                  } catch (err) {
+                                    console.error(err);
+                                    toast.error("Erro ao salvar webhook");
+                                  } finally {
+                                    setRegisteringBitrix(false);
+                                  }
+                                }}
+                              >
+                                {registeringBitrix ? <Loader2 className="h-4 w-4 animate-spin" /> : "Salvar"}
+                              </Button>
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              Crie um webhook em Bitrix24 → Aplicativos → Webhooks → Entrada com permissões: crm, user
+                            </p>
+                          </div>
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  )}
 
-                  <div className="space-y-4">
-                    <div className="space-y-2">
-                      <Label>Direção da Sincronização</Label>
-                      <Select value={syncDirection} onValueChange={(v) => setSyncDirection(v as typeof syncDirection)}>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="both">Bidirecional (recomendado)</SelectItem>
-                          <SelectItem value="from_bitrix">Importar do Bitrix24</SelectItem>
-                          <SelectItem value="to_bitrix">Exportar para o Bitrix24</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
+                  {(bitrixConfig.webhook_url || bitrixConfig.access_token) && (
+                    <>
+                      <div className="bg-muted/50 rounded-lg p-4 text-sm">
+                        <div className="flex items-start gap-2">
+                          <ArrowLeftRight className="h-5 w-5 text-emerald-500 shrink-0 mt-0.5" />
+                          <div>
+                            <p className="font-medium">Sincronização bidirecional:</p>
+                            <ul className="text-muted-foreground mt-1 space-y-1">
+                              <li>• <strong>Do Bitrix24:</strong> Importa contatos do CRM para o WhatsApp</li>
+                              <li>• <strong>Para o Bitrix24:</strong> Exporta contatos do WhatsApp para o CRM</li>
+                              <li>• <strong>Ambos:</strong> Sincroniza em ambas as direções</li>
+                            </ul>
+                          </div>
+                        </div>
+                      </div>
 
-                    <div className="space-y-2">
-                      <Label>Instância WhatsApp</Label>
-                      <Select 
-                        value={bitrixInstanceId || "__default__"} 
-                        onValueChange={(val) => setBitrixInstanceId(val === "__default__" ? "" : val)}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Usar instância configurada" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__default__">Usar instância configurada</SelectItem>
-                          {instances.map((inst) => (
-                            <SelectItem key={inst.id} value={inst.id}>
-                              {inst.name} {inst.phone_number ? `(${inst.phone_number})` : ""}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
+                      <div className="space-y-4">
+                        <div className="space-y-2">
+                          <Label>Direção da Sincronização</Label>
+                          <Select value={syncDirection} onValueChange={(v) => setSyncDirection(v as typeof syncDirection)}>
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="both">Bidirecional (recomendado)</SelectItem>
+                              <SelectItem value="from_bitrix">Importar do Bitrix24</SelectItem>
+                              <SelectItem value="to_bitrix">Exportar para o Bitrix24</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
 
-                  <Button onClick={handleSyncContacts} disabled={syncingContacts} className="gap-2">
-                    {syncingContacts ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        Sincronizando...
-                      </>
-                    ) : (
-                      <>
-                        <RefreshCw className="h-4 w-4" />
-                        Sincronizar Contatos
-                      </>
-                    )}
-                  </Button>
+                        <div className="space-y-2">
+                          <Label>Instância WhatsApp</Label>
+                          <Select 
+                            value={bitrixInstanceId || "__default__"} 
+                            onValueChange={(val) => setBitrixInstanceId(val === "__default__" ? "" : val)}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Usar instância configurada" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__default__">Usar instância configurada</SelectItem>
+                              {instances.map((inst) => (
+                                <SelectItem key={inst.id} value={inst.id}>
+                                  {inst.name} {inst.phone_number ? `(${inst.phone_number})` : ""}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+
+                      <Button onClick={handleSyncContacts} disabled={syncingContacts} className="gap-2">
+                        {syncingContacts ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Sincronizando...
+                          </>
+                        ) : (
+                          <>
+                            <RefreshCw className="h-4 w-4" />
+                            Sincronizar Contatos
+                          </>
+                        )}
+                      </Button>
+                    </>
+                  )}
                 </CardContent>
               </Card>
             )}
