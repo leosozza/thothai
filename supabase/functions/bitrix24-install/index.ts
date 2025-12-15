@@ -16,7 +16,88 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    // Bitrix24 sends data as application/x-www-form-urlencoded
+    // ✅ HANDLE GET REQUESTS FIRST (before trying to parse body)
+    if (req.method === "GET") {
+      const url = new URL(req.url);
+      const queryMemberId = url.searchParams.get("member_id");
+      const queryDomain = url.searchParams.get("domain") || url.searchParams.get("DOMAIN");
+      const includeInstances = url.searchParams.get("include_instances") === "true";
+
+      console.log("GET request - member_id:", queryMemberId, "domain:", queryDomain, "include_instances:", includeInstances);
+
+      const searchValue = queryMemberId || queryDomain;
+
+      if (searchValue) {
+        // Try to find integration by member_id or domain
+        const { data: integration } = await supabase
+          .from("integrations")
+          .select("*")
+          .eq("type", "bitrix24")
+          .or(`config->>member_id.eq.${searchValue},config->>domain.eq.${searchValue}`)
+          .maybeSingle();
+
+        let instances: any[] = [];
+        
+        // If include_instances is true, fetch available instances
+        if (includeInstances) {
+          // Get instances from the workspace associated with this integration
+          if (integration?.workspace_id) {
+            const { data: workspaceInstances } = await supabase
+              .from("instances")
+              .select("id, name, phone_number, status")
+              .eq("workspace_id", integration.workspace_id)
+              .eq("status", "connected");
+            
+            instances = workspaceInstances || [];
+            console.log("Found workspace instances:", instances.length);
+          } else {
+            // If no integration found, get all connected instances
+            // This is a fallback for first-time setup
+            const { data: allInstances } = await supabase
+              .from("instances")
+              .select("id, name, phone_number, status")
+              .eq("status", "connected")
+              .limit(20);
+            
+            instances = allInstances || [];
+            console.log("Found all connected instances (fallback):", instances.length);
+          }
+        }
+
+        if (integration) {
+          console.log("Integration found:", integration.id);
+          return new Response(
+            JSON.stringify({
+              found: true,
+              domain: integration.config?.domain,
+              registered: integration.config?.registered || false,
+              instance_id: integration.config?.instance_id,
+              is_active: integration.is_active,
+              workspace_id: integration.workspace_id,
+              instances: includeInstances ? instances : undefined,
+            }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        // Integration not found but return instances if requested
+        console.log("Integration not found, returning instances:", instances.length);
+        return new Response(
+          JSON.stringify({ 
+            found: false,
+            instances: includeInstances ? instances : undefined,
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      return new Response(
+        JSON.stringify({ found: false, message: "No member_id or domain provided" }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // ✅ ONLY PARSE BODY FOR POST REQUESTS
     const contentType = req.headers.get("content-type") || "";
     let body: Record<string, any> = {};
 
@@ -145,81 +226,6 @@ serve(async (req) => {
 
       return new Response(
         JSON.stringify({ success: true, message: "App uninstalled" }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // Handle other events or direct API calls
-    // This could be used for setup page to get current status
-    if (req.method === "GET") {
-      const url = new URL(req.url);
-      const queryMemberId = url.searchParams.get("member_id");
-      const includeInstances = url.searchParams.get("include_instances") === "true";
-
-      console.log("GET request - member_id:", queryMemberId, "include_instances:", includeInstances);
-
-      if (queryMemberId) {
-        // Try to find integration by member_id or domain
-        const { data: integration } = await supabase
-          .from("integrations")
-          .select("*")
-          .eq("type", "bitrix24")
-          .or(`config->>member_id.eq.${queryMemberId},config->>domain.eq.${queryMemberId}`)
-          .maybeSingle();
-
-        let instances: any[] = [];
-        
-        // If include_instances is true, fetch available instances
-        if (includeInstances) {
-          // Get instances from the workspace associated with this integration
-          if (integration?.workspace_id) {
-            const { data: workspaceInstances } = await supabase
-              .from("instances")
-              .select("id, name, phone_number, status")
-              .eq("workspace_id", integration.workspace_id)
-              .eq("status", "connected");
-            
-            instances = workspaceInstances || [];
-          } else {
-            // If no integration found, get all connected instances
-            // This is a fallback for first-time setup
-            const { data: allInstances } = await supabase
-              .from("instances")
-              .select("id, name, phone_number, status")
-              .eq("status", "connected")
-              .limit(20);
-            
-            instances = allInstances || [];
-          }
-        }
-
-        if (integration) {
-          return new Response(
-            JSON.stringify({
-              found: true,
-              domain: integration.config?.domain,
-              registered: integration.config?.registered || false,
-              instance_id: integration.config?.instance_id,
-              is_active: integration.is_active,
-              workspace_id: integration.workspace_id,
-              instances: includeInstances ? instances : undefined,
-            }),
-            { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-          );
-        }
-
-        // Integration not found but return instances if requested
-        return new Response(
-          JSON.stringify({ 
-            found: false,
-            instances: includeInstances ? instances : undefined,
-          }),
-          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      return new Response(
-        JSON.stringify({ found: false }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
