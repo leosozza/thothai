@@ -29,9 +29,10 @@ interface BitrixStatus {
 }
 
 export default function Bitrix24Setup() {
-  const [loading, setLoading] = useState(true);
+const [loading, setLoading] = useState(true);
   const [registering, setRegistering] = useState(false);
   const [validatingToken, setValidatingToken] = useState(false);
+  const [savingWebhook, setSavingWebhook] = useState(false);
   const [memberId, setMemberId] = useState<string | null>(null);
   const [domain, setDomain] = useState<string | null>(null);
   const [status, setStatus] = useState<BitrixStatus | null>(null);
@@ -42,6 +43,10 @@ export default function Bitrix24Setup() {
   // Token de vinculação
   const [linkingToken, setLinkingToken] = useState<string>("");
   const [tokenValidated, setTokenValidated] = useState(false);
+  
+  // Webhook URL para apps locais
+  const [webhookUrl, setWebhookUrl] = useState<string>("");
+  const [webhookSaved, setWebhookSaved] = useState(false);
 
   useEffect(() => {
     // Extract params from URL (provided by Bitrix24 iframe)
@@ -210,14 +215,91 @@ export default function Bitrix24Setup() {
     }
   };
 
+  const handleSaveWebhook = async () => {
+    if (!webhookUrl.trim()) {
+      toast.error("Digite a URL do webhook de saída");
+      return;
+    }
+
+    // Validar formato da URL
+    if (!webhookUrl.includes("/rest/") || !webhookUrl.includes(".bitrix24.")) {
+      toast.error("URL inválida. A URL deve ser do Bitrix24 e conter /rest/");
+      return;
+    }
+
+    if (!memberId && !domain) {
+      toast.error("Identificação do Bitrix24 não encontrada");
+      return;
+    }
+
+    try {
+      setSavingWebhook(true);
+
+      const response = await fetch(
+        `${SUPABASE_URL}/functions/v1/bitrix24-install`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            action: "save_webhook",
+            webhook_url: webhookUrl.trim(),
+            member_id: memberId,
+            domain: domain,
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error || "Erro ao salvar webhook");
+      }
+
+      if (data?.success) {
+        toast.success("Webhook salvo! Agora vincule seu workspace.");
+        setWebhookSaved(true);
+        await loadData();
+      } else {
+        throw new Error(data?.error || "Erro ao salvar webhook");
+      }
+    } catch (err: any) {
+      console.error("Error saving webhook:", err);
+      toast.error(err.message || "Erro ao salvar webhook");
+    } finally {
+      setSavingWebhook(false);
+    }
+  };
+
   const handleRegisterConnector = async () => {
-    if (!memberId || !selectedInstance) {
+    if (!selectedInstance) {
       toast.error("Selecione uma instância WhatsApp");
+      return;
+    }
+
+    // Para apps locais, verificar se tem webhook_url
+    const hasWebhook = webhookUrl.trim() || status?.domain;
+    if (!memberId && !hasWebhook) {
+      toast.error("Identificação do Bitrix24 não encontrada");
       return;
     }
 
     try {
       setRegistering(true);
+
+      const payload: any = {
+        instance_id: selectedInstance,
+        connector_id: `thoth_whatsapp_${(memberId || domain || "local").substring(0, 8)}`,
+      };
+
+      // Usar webhook_url se disponível, senão usar member_id
+      if (webhookUrl.trim()) {
+        payload.webhook_url = webhookUrl.trim();
+        payload.workspace_id = status?.workspace_id;
+      } else if (memberId) {
+        payload.member_id = memberId;
+      }
 
       const response = await fetch(
         `${SUPABASE_URL}/functions/v1/bitrix24-register`,
@@ -226,11 +308,7 @@ export default function Bitrix24Setup() {
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({
-            member_id: memberId,
-            instance_id: selectedInstance,
-            connector_id: `thoth_whatsapp_${memberId.substring(0, 8)}`,
-          }),
+          body: JSON.stringify(payload),
         }
       );
 
@@ -311,8 +389,68 @@ export default function Bitrix24Setup() {
           </Card>
         )}
 
+        {/* Webhook URL Card - Para apps locais do Bitrix24 */}
+        {showTokenInput && !webhookSaved && (
+          <Card className="border-amber-500/50 bg-amber-500/5">
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <AlertCircle className="h-5 w-5 text-amber-500" />
+                Aplicação Local do Bitrix24
+              </CardTitle>
+              <CardDescription>
+                Cole a URL do webhook de saída fornecida na configuração da aplicação local no Bitrix24.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="webhook-url">URL do Webhook de Saída</Label>
+                <Input
+                  id="webhook-url"
+                  placeholder="https://seudominio.bitrix24.com.br/rest/1/abc123xyz/"
+                  value={webhookUrl}
+                  onChange={(e) => setWebhookUrl(e.target.value)}
+                  className="font-mono text-sm"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Encontre esta URL em: Bitrix24 → Aplicativos → Webhooks de Saída
+                </p>
+              </div>
+
+              <Button
+                className="w-full"
+                variant="secondary"
+                onClick={handleSaveWebhook}
+                disabled={!webhookUrl.trim() || savingWebhook}
+              >
+                {savingWebhook ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Salvando...
+                  </>
+                ) : (
+                  <>
+                    <Plug className="h-4 w-4 mr-2" />
+                    Salvar Webhook
+                  </>
+                )}
+              </Button>
+
+              <div className="bg-muted/50 rounded-lg p-3 text-sm text-muted-foreground">
+                <p className="font-medium mb-1">Como obter a URL do webhook:</p>
+                <ol className="list-decimal list-inside space-y-1 text-xs">
+                  <li>Acesse seu portal Bitrix24</li>
+                  <li>Vá em Aplicativos → Webhooks</li>
+                  <li>Crie um novo Webhook de Saída (REST)</li>
+                  <li>Permissões: imconnector, imopenlines, crm, user</li>
+                  <li>Copie a URL gerada e cole aqui</li>
+                </ol>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {/* Token Validation Card - Mostrar quando não há workspace vinculado */}
-        {showTokenInput && (
+        {(showTokenInput || webhookSaved) && !tokenValidated && (
           <Card className="border-primary/50">
             <CardHeader>
               <CardTitle className="text-lg flex items-center gap-2">

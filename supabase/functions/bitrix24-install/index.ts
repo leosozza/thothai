@@ -108,6 +108,102 @@ serve(async (req) => {
 
     console.log("Bitrix24 POST received:", JSON.stringify(body));
 
+    // ✅ HANDLE SAVE WEBHOOK (for local apps)
+    if (body.action === "save_webhook") {
+      const webhookUrl = body.webhook_url;
+      const memberId = body.member_id;
+      const domain = body.domain;
+
+      console.log("Saving webhook URL for local app:", webhookUrl, "member_id:", memberId, "domain:", domain);
+
+      if (!webhookUrl) {
+        return new Response(
+          JSON.stringify({ error: "URL do webhook é obrigatória" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Extract domain from webhook URL if not provided
+      const urlDomain = domain || webhookUrl.match(/https?:\/\/([^\/]+)/)?.[1] || null;
+      const identifier = memberId || urlDomain;
+
+      if (!identifier) {
+        return new Response(
+          JSON.stringify({ error: "Não foi possível identificar o portal Bitrix24" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Check if integration already exists
+      const { data: existingIntegration } = await supabase
+        .from("integrations")
+        .select("*")
+        .eq("type", "bitrix24")
+        .or(`config->>member_id.eq.${identifier},config->>domain.eq.${urlDomain}`)
+        .maybeSingle();
+
+      const configData = {
+        member_id: memberId || urlDomain,
+        domain: urlDomain,
+        webhook_url: webhookUrl,
+        is_local_app: true,
+        installed: true,
+        installed_at: new Date().toISOString(),
+        registered: false,
+      };
+
+      if (existingIntegration) {
+        // Update existing integration
+        const { error: updateError } = await supabase
+          .from("integrations")
+          .update({
+            config: { ...existingIntegration.config, ...configData },
+            is_active: true,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", existingIntegration.id);
+
+        if (updateError) {
+          console.error("Error updating integration with webhook:", updateError);
+          return new Response(
+            JSON.stringify({ error: "Erro ao atualizar integração" }),
+            { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        console.log("Updated existing integration with webhook URL");
+      } else {
+        // Create new integration (without workspace_id - will be linked via token)
+        const { error: insertError } = await supabase
+          .from("integrations")
+          .insert({
+            type: "bitrix24",
+            name: `Bitrix24 Local - ${urlDomain}`,
+            config: configData,
+            is_active: true,
+          });
+
+        if (insertError) {
+          console.error("Error creating integration with webhook:", insertError);
+          return new Response(
+            JSON.stringify({ error: "Erro ao criar integração" }),
+            { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        console.log("Created new integration with webhook URL");
+      }
+
+      return new Response(
+        JSON.stringify({
+          success: true,
+          message: "Webhook salvo com sucesso",
+          domain: urlDomain,
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     // ✅ HANDLE TOKEN VALIDATION
     if (body.action === "validate_token") {
       const token = body.token;
