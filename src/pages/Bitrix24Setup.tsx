@@ -5,7 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { CheckCircle, Loader2, MessageSquare, Phone, AlertCircle, Plug, Key, TestTube, XCircle } from "lucide-react";
+import { CheckCircle, Loader2, MessageSquare, Phone, AlertCircle, Plug, Key, TestTube, XCircle, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
@@ -55,6 +55,9 @@ const [loading, setLoading] = useState(true);
   const [clientId, setClientId] = useState<string>("");
   const [clientSecret, setClientSecret] = useState<string>("");
   const [savingOAuth, setSavingOAuth] = useState(false);
+  
+  // Limpar conectores
+  const [cleaningConnectors, setCleaningConnectors] = useState(false);
 
   useEffect(() => {
     // Extract params from URL (provided by Bitrix24 iframe)
@@ -411,6 +414,50 @@ const [loading, setLoading] = useState(true);
       toast.error(err.message || "Erro ao configurar OAuth");
     } finally {
       setSavingOAuth(false);
+    }
+  };
+
+  const handleCleanConnectors = async () => {
+    if (!memberId && !domain) {
+      toast.error("Identificação do Bitrix24 não encontrada");
+      return;
+    }
+
+    try {
+      setCleaningConnectors(true);
+
+      const response = await fetch(
+        `${SUPABASE_URL}/functions/v1/bitrix24-register`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            action: "clean_connectors",
+            member_id: memberId,
+            domain: domain,
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error || "Erro ao limpar conectores");
+      }
+
+      if (data?.success) {
+        toast.success(`${data.removed_count || 0} conector(es) removido(s) com sucesso!`);
+        await loadData();
+      } else {
+        throw new Error(data?.error || "Erro ao limpar conectores");
+      }
+    } catch (err: any) {
+      console.error("Error cleaning connectors:", err);
+      toast.error(err.message || "Erro ao limpar conectores");
+    } finally {
+      setCleaningConnectors(false);
     }
   };
 
@@ -822,6 +869,35 @@ const [loading, setLoading] = useState(true);
                   <Badge variant="secondary">Não configurado</Badge>
                 )}
               </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Clean Connectors Button - Mostrar quando tem integração OAuth */}
+        {(tokenValidated || status?.found) && (
+          <Card className="border-amber-500/30">
+            <CardContent className="pt-6">
+              <Button
+                variant="outline"
+                className="w-full border-destructive/50 text-destructive hover:bg-destructive/10"
+                onClick={handleCleanConnectors}
+                disabled={cleaningConnectors}
+              >
+                {cleaningConnectors ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Limpando conectores...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Limpar Conectores Duplicados
+                  </>
+                )}
+              </Button>
+              <p className="text-xs text-muted-foreground text-center mt-2">
+                Remove todos os conectores "Thoth WhatsApp" do Contact Center
+              </p>
             </CardContent>
           </Card>
         )}

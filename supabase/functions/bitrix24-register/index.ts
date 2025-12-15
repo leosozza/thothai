@@ -66,7 +66,92 @@ serve(async (req) => {
     const body = await req.json();
     console.log("Request body:", JSON.stringify(body));
     
-    const { webhook_url, connector_id, instance_id, workspace_id, integration_id, member_id } = body;
+    const { action, webhook_url, connector_id, instance_id, workspace_id, integration_id, member_id, domain } = body;
+
+    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    // Action: Clean connectors
+    if (action === "clean_connectors") {
+      console.log("=== CLEAN CONNECTORS ACTION ===");
+      const searchId = member_id || domain;
+      
+      if (!searchId) {
+        return new Response(
+          JSON.stringify({ error: "member_id ou domain é obrigatório" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Find integration
+      const { data: integration } = await supabase
+        .from("integrations")
+        .select("*")
+        .eq("type", "bitrix24")
+        .or(`config->>member_id.eq.${searchId},config->>domain.eq.${searchId},config->>member_id.ilike.%${searchId}%,config->>domain.ilike.%${searchId}%`)
+        .maybeSingle();
+
+      if (!integration || !integration.config?.access_token) {
+        return new Response(
+          JSON.stringify({ error: "Integração não encontrada ou sem token OAuth" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      const accessToken = integration.config.access_token;
+      const clientEndpoint = integration.config.client_endpoint || `https://${integration.config.domain}/rest/`;
+      
+      // List all connectors
+      console.log("Listing connectors...");
+      const listUrl = `${clientEndpoint}imconnector.list?auth=${accessToken}`;
+      const listResponse = await fetch(listUrl);
+      const listResult = await listResponse.json();
+      console.log("imconnector.list result:", JSON.stringify(listResult));
+
+      const removedConnectors: string[] = [];
+      
+      if (listResult.result) {
+        // Filter connectors that contain "thoth" or "whatsapp" (case insensitive)
+        const connectorsToRemove = Object.keys(listResult.result).filter(id => {
+          const idLower = id.toLowerCase();
+          return idLower.includes("thoth") || idLower.includes("whatsapp");
+        });
+
+        console.log("Connectors to remove:", connectorsToRemove);
+
+        // Unregister each connector
+        for (const connectorId of connectorsToRemove) {
+          console.log(`Unregistering connector: ${connectorId}`);
+          const unregisterUrl = `${clientEndpoint}imconnector.unregister?auth=${accessToken}`;
+          try {
+            const unregisterResponse = await fetch(unregisterUrl, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ ID: connectorId }),
+            });
+            const unregisterResult = await unregisterResponse.json();
+            console.log(`Unregister ${connectorId} result:`, JSON.stringify(unregisterResult));
+            
+            if (unregisterResult.result || !unregisterResult.error) {
+              removedConnectors.push(connectorId);
+            }
+          } catch (e) {
+            console.log(`Failed to unregister ${connectorId}:`, e);
+          }
+        }
+      }
+
+      return new Response(
+        JSON.stringify({ 
+          success: true, 
+          removed_count: removedConnectors.length,
+          removed_connectors: removedConnectors,
+          message: `${removedConnectors.length} conector(es) removido(s)`,
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
     // Validate that we have at least member_id or webhook_url
     if (!member_id && !webhook_url) {
@@ -78,10 +163,6 @@ serve(async (req) => {
     }
 
     console.log("Registering Bitrix24 connector:", { connector_id, workspace_id, member_id, instance_id });
-
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     let bitrixApiUrl: string = "";
     let integration: any = null;
