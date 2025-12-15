@@ -55,68 +55,95 @@ async function refreshBitrixToken(integration: any, supabase: any): Promise<stri
 }
 
 serve(async (req) => {
+  console.log("=== BITRIX24-REGISTER REQUEST ===");
+  console.log("Method:", req.method);
+  
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const { webhook_url, connector_id, instance_id, workspace_id, integration_id, member_id } = await req.json();
+    const body = await req.json();
+    console.log("Request body:", JSON.stringify(body));
+    
+    const { webhook_url, connector_id, instance_id, workspace_id, integration_id, member_id } = body;
 
-    console.log("Registering Bitrix24 connector:", { connector_id, workspace_id, member_id });
+    // Validate that we have at least member_id or webhook_url
+    if (!member_id && !webhook_url) {
+      console.error("No member_id or webhook_url provided");
+      return new Response(
+        JSON.stringify({ error: "member_id ou webhook_url é obrigatório" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    console.log("Registering Bitrix24 connector:", { connector_id, workspace_id, member_id, instance_id });
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
-    let bitrixApiUrl: string;
+    let bitrixApiUrl: string = "";
     let integration: any = null;
 
     // Mode 1: Using member_id (OAuth app installation)
     if (member_id) {
-      const { data: existingIntegration } = await supabase
+      console.log("Looking for integration with member_id:", member_id);
+      
+      const { data: existingIntegration, error: lookupError } = await supabase
         .from("integrations")
         .select("*")
         .eq("type", "bitrix24")
         .filter("config->>member_id", "eq", member_id)
         .maybeSingle();
 
-      if (!existingIntegration) {
+      if (lookupError) {
+        console.error("Error looking up integration:", lookupError);
         return new Response(
-          JSON.stringify({ error: "Bitrix24 integration not found for this member_id. Please reinstall the app." }),
+          JSON.stringify({ error: "Erro ao buscar integração" }),
+          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      if (!existingIntegration) {
+        console.error("No integration found for member_id:", member_id);
+        return new Response(
+          JSON.stringify({ error: "Integração Bitrix24 não encontrada. Por favor, reinstale o aplicativo." }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
 
+      console.log("Found integration:", existingIntegration.id, "workspace:", existingIntegration.workspace_id);
       integration = existingIntegration;
+      
       const accessToken = await refreshBitrixToken(integration, supabase);
       
       if (!accessToken) {
+        console.error("Failed to get access token for integration:", integration.id);
         return new Response(
-          JSON.stringify({ error: "Failed to get valid access token. Please reinstall the app." }),
+          JSON.stringify({ error: "Falha ao obter token de acesso. Por favor, reinstale o aplicativo." }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
 
       const clientEndpoint = integration.config.client_endpoint || `https://${integration.config.domain}/rest/`;
       bitrixApiUrl = `${clientEndpoint}`;
+      console.log("Using Bitrix API URL:", bitrixApiUrl);
     }
     // Mode 2: Using webhook_url (manual configuration)
     else if (webhook_url) {
+      console.log("Using webhook_url mode");
       if (!connector_id || !workspace_id) {
         return new Response(
-          JSON.stringify({ error: "Missing required fields: connector_id, workspace_id" }),
+          JSON.stringify({ error: "Campos obrigatórios: connector_id, workspace_id" }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
       bitrixApiUrl = webhook_url;
-    } else {
-      return new Response(
-        JSON.stringify({ error: "Either member_id or webhook_url is required" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
     }
 
     const finalConnectorId = connector_id || `thoth_whatsapp_${member_id?.substring(0, 8) || "default"}`;
+    console.log("Final connector ID:", finalConnectorId);
 
     // 1. Register connector in Bitrix24
     const registerPayload = {
