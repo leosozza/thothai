@@ -214,8 +214,11 @@ serve(async (req) => {
       console.log("Using Bitrix API URL:", bitrixApiUrl);
     }
 
-    const finalConnectorId = connector_id || `thoth_whatsapp_${member_id?.substring(0, 8) || "default"}`;
-    console.log("Final connector ID:", finalConnectorId);
+    // Sanitize connector_id: Bitrix24 doesn't allow dots in connector IDs
+    const sanitizeConnectorId = (id: string) => id.replace(/[^a-zA-Z0-9_]/g, '');
+    const rawConnectorId = connector_id || `thoth_whatsapp_${member_id?.substring(0, 12) || "default"}`;
+    const finalConnectorId = sanitizeConnectorId(rawConnectorId);
+    console.log("Final connector ID (sanitized):", finalConnectorId);
 
     // For webhook mode (local apps), we skip imconnector.register as it requires OAuth app permissions
     // Webhooks are meant for direct API access, not for registering connectors
