@@ -19,11 +19,17 @@ serve(async (req) => {
     // ✅ HANDLE GET REQUESTS FIRST (before trying to parse body)
     if (req.method === "GET") {
       const url = new URL(req.url);
+      
+      // Enhanced logging for debugging
+      console.log("=== GET REQUEST DEBUG ===");
+      console.log("Full URL:", req.url);
+      console.log("Search params string:", url.searchParams.toString());
+      
       const queryMemberId = url.searchParams.get("member_id");
       const queryDomain = url.searchParams.get("domain") || url.searchParams.get("DOMAIN");
       const includeInstances = url.searchParams.get("include_instances") === "true";
 
-      console.log("GET request - member_id:", queryMemberId, "domain:", queryDomain, "include_instances:", includeInstances);
+      console.log("Parsed - member_id:", queryMemberId, "domain:", queryDomain, "include_instances:", includeInstances);
 
       const searchValue = queryMemberId || queryDomain;
 
@@ -38,8 +44,11 @@ serve(async (req) => {
 
         let instances: any[] = [];
         
-        // If include_instances is true, fetch available instances
-        if (includeInstances) {
+        // ALWAYS fetch connected instances for first-time setup (when no integration exists)
+        // OR when include_instances is explicitly requested
+        const shouldFetchInstances = includeInstances || !integration;
+        
+        if (shouldFetchInstances) {
           // Get instances from the workspace associated with this integration
           if (integration?.workspace_id) {
             const { data: workspaceInstances } = await supabase
@@ -51,16 +60,21 @@ serve(async (req) => {
             instances = workspaceInstances || [];
             console.log("Found workspace instances:", instances.length);
           } else {
-            // If no integration found, get all connected instances
-            // This is a fallback for first-time setup
-            const { data: allInstances } = await supabase
+            // If no integration found, get ALL connected instances
+            // This is critical for first-time setup
+            console.log("No integration found - fetching all connected instances for first-time setup");
+            const { data: allInstances, error: instancesError } = await supabase
               .from("instances")
               .select("id, name, phone_number, status")
               .eq("status", "connected")
-              .limit(20);
+              .limit(50);
+            
+            if (instancesError) {
+              console.error("Error fetching instances:", instancesError);
+            }
             
             instances = allInstances || [];
-            console.log("Found all connected instances (fallback):", instances.length);
+            console.log("Found all connected instances:", instances.length, JSON.stringify(instances));
           }
         }
 
@@ -74,18 +88,18 @@ serve(async (req) => {
               instance_id: integration.config?.instance_id,
               is_active: integration.is_active,
               workspace_id: integration.workspace_id,
-              instances: includeInstances ? instances : undefined,
+              instances: instances, // Always return instances when we fetched them
             }),
             { headers: { ...corsHeaders, "Content-Type": "application/json" } }
           );
         }
 
-        // Integration not found but return instances if requested
-        console.log("Integration not found, returning instances:", instances.length);
+        // Integration not found - ALWAYS return instances for first-time setup
+        console.log("Integration not found, returning instances for setup:", instances.length);
         return new Response(
           JSON.stringify({ 
             found: false,
-            instances: includeInstances ? instances : undefined,
+            instances: instances, // Always include instances for first-time setup
           }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
