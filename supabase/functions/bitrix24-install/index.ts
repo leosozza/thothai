@@ -248,6 +248,11 @@ serve(async (req) => {
     const event = body.event?.toUpperCase();
     const auth = body.auth || {};
 
+    console.log("=== BITRIX24 EVENT DEBUG ===");
+    console.log("Event:", event);
+    console.log("Full body:", JSON.stringify(body, null, 2));
+    console.log("Auth object:", JSON.stringify(auth, null, 2));
+
     // Extract auth data
     const accessToken = auth.access_token;
     const refreshToken = auth.refresh_token;
@@ -257,9 +262,25 @@ serve(async (req) => {
     const applicationToken = body.application_token || auth.application_token;
     const expiresIn = parseInt(auth.expires_in || "3600", 10);
 
+    console.log("Extracted auth data:", {
+      hasAccessToken: !!accessToken,
+      hasRefreshToken: !!refreshToken,
+      domain,
+      memberId,
+      clientEndpoint,
+      hasApplicationToken: !!applicationToken,
+      expiresIn,
+    });
+
     if (event === "ONAPPINSTALL") {
+      console.log("=== ONAPPINSTALL EVENT ===");
+      
       if (!domain || !memberId || !accessToken) {
-        console.error("Missing required auth data for ONAPPINSTALL");
+        console.error("Missing required auth data for ONAPPINSTALL:", {
+          hasDomain: !!domain,
+          hasMemberId: !!memberId,
+          hasAccessToken: !!accessToken,
+        });
         return new Response(
           JSON.stringify({ error: "Missing required auth data" }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -272,12 +293,18 @@ serve(async (req) => {
       const tokenExpiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
 
       // Check if integration already exists for this member_id
-      const { data: existing } = await supabase
+      const { data: existing, error: existingError } = await supabase
         .from("integrations")
         .select("*")
         .eq("type", "bitrix24")
         .filter("config->>member_id", "eq", memberId)
         .maybeSingle();
+
+      if (existingError) {
+        console.error("Error checking existing integration:", existingError);
+      }
+
+      console.log("Existing integration:", existing ? existing.id : "none");
 
       const configData = {
         member_id: memberId,
@@ -297,7 +324,7 @@ serve(async (req) => {
 
       if (existing) {
         // Update existing integration (preserve workspace_id if exists)
-        await supabase
+        const { error: updateError } = await supabase
           .from("integrations")
           .update({
             config: { ...existing.config, ...configData },
@@ -306,10 +333,34 @@ serve(async (req) => {
           })
           .eq("id", existing.id);
 
-        console.log(`Updated existing Bitrix24 integration: ${existing.id}`);
+        if (updateError) {
+          console.error("Error updating integration:", updateError);
+        } else {
+          console.log(`Updated existing Bitrix24 integration: ${existing.id}`);
+        }
       } else {
-        // New installation - will be linked to workspace via token
-        console.log("New Bitrix24 installation - will be associated with workspace via token");
+        // ✅ FIX: Create a new integration record even without workspace_id
+        // The workspace will be linked later via token validation
+        console.log("Creating new Bitrix24 integration (will be linked to workspace later)");
+        
+        const { data: newIntegration, error: insertError } = await supabase
+          .from("integrations")
+          .insert({
+            type: "bitrix24",
+            name: `Bitrix24 - ${domain}`,
+            config: configData,
+            is_active: true,
+            // workspace_id will be null until token validation
+          })
+          .select()
+          .single();
+
+        if (insertError) {
+          console.error("Error creating new integration:", insertError);
+          // Return success anyway - Bitrix24 expects 200
+        } else {
+          console.log(`Created new Bitrix24 integration: ${newIntegration?.id}`);
+        }
       }
 
       return new Response(
