@@ -5,7 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { CheckCircle, Loader2, MessageSquare, Phone, AlertCircle, Plug, Key } from "lucide-react";
+import { CheckCircle, Loader2, MessageSquare, Phone, AlertCircle, Plug, Key, TestTube, XCircle } from "lucide-react";
 import { toast } from "sonner";
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
@@ -33,6 +33,8 @@ const [loading, setLoading] = useState(true);
   const [registering, setRegistering] = useState(false);
   const [validatingToken, setValidatingToken] = useState(false);
   const [savingWebhook, setSavingWebhook] = useState(false);
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [connectionTestResult, setConnectionTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [memberId, setMemberId] = useState<string | null>(null);
   const [domain, setDomain] = useState<string | null>(null);
   const [status, setStatus] = useState<BitrixStatus | null>(null);
@@ -45,7 +47,7 @@ const [loading, setLoading] = useState(true);
   const [tokenValidated, setTokenValidated] = useState(false);
   
   // Webhook URL para apps locais
-  const [webhookUrl, setWebhookUrl] = useState<string>("");
+  const [webhookUrl, setWebhookUrl] = useState<string>(status?.domain ? "" : "");
   const [webhookSaved, setWebhookSaved] = useState(false);
 
   useEffect(() => {
@@ -272,6 +274,73 @@ const [loading, setLoading] = useState(true);
     }
   };
 
+  const handleTestConnection = async () => {
+    const urlToTest = webhookUrl.trim();
+    
+    if (!urlToTest) {
+      toast.error("Digite a URL do webhook de entrada primeiro");
+      return;
+    }
+
+    // Validar formato da URL
+    if (!urlToTest.includes("/rest/") || !urlToTest.includes("bitrix24")) {
+      toast.error("URL inválida. Use o formato: https://xxx.bitrix24.com/rest/1/xxxxx/");
+      return;
+    }
+
+    try {
+      setTestingConnection(true);
+      setConnectionTestResult(null);
+
+      // Testar chamando um método simples da API do Bitrix24
+      const testUrl = urlToTest.endsWith("/") ? `${urlToTest}profile` : `${urlToTest}/profile`;
+      
+      console.log("Testing Bitrix24 connection:", testUrl);
+
+      const response = await fetch(testUrl, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+        },
+      });
+
+      const data = await response.json();
+      console.log("Bitrix24 test response:", data);
+
+      if (data.result) {
+        // Conexão bem sucedida
+        const userName = data.result.NAME || data.result.LAST_NAME || "Usuário";
+        setConnectionTestResult({
+          success: true,
+          message: `Conexão OK! Usuário: ${userName}`,
+        });
+        toast.success("Conexão com Bitrix24 funcionando!");
+      } else if (data.error) {
+        // Erro da API
+        setConnectionTestResult({
+          success: false,
+          message: `Erro: ${data.error_description || data.error}`,
+        });
+        toast.error(`Erro na API: ${data.error_description || data.error}`);
+      } else {
+        setConnectionTestResult({
+          success: false,
+          message: "Resposta inesperada da API",
+        });
+        toast.error("Resposta inesperada do Bitrix24");
+      }
+    } catch (err: any) {
+      console.error("Error testing connection:", err);
+      setConnectionTestResult({
+        success: false,
+        message: err.message || "Erro de conexão",
+      });
+      toast.error("Erro ao conectar com Bitrix24. Verifique a URL.");
+    } finally {
+      setTestingConnection(false);
+    }
+  };
+
   const handleRegisterConnector = async () => {
     if (!selectedInstance) {
       toast.error("Selecione uma instância WhatsApp");
@@ -416,24 +485,69 @@ const [loading, setLoading] = useState(true);
                 </p>
               </div>
 
-              <Button
-                className="w-full"
-                variant="secondary"
-                onClick={handleSaveWebhook}
-                disabled={!webhookUrl.trim() || savingWebhook}
-              >
-                {savingWebhook ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Salvando...
-                  </>
-                ) : (
-                  <>
-                    <Plug className="h-4 w-4 mr-2" />
-                    Salvar Webhook
-                  </>
-                )}
-              </Button>
+              {/* Test Connection Result */}
+              {connectionTestResult && (
+                <div className={`rounded-lg p-3 flex items-center gap-2 ${
+                  connectionTestResult.success 
+                    ? "bg-green-500/10 border border-green-500/30" 
+                    : "bg-destructive/10 border border-destructive/30"
+                }`}>
+                  {connectionTestResult.success ? (
+                    <CheckCircle className="h-4 w-4 text-green-500 shrink-0" />
+                  ) : (
+                    <XCircle className="h-4 w-4 text-destructive shrink-0" />
+                  )}
+                  <span className={`text-sm ${connectionTestResult.success ? "text-green-500" : "text-destructive"}`}>
+                    {connectionTestResult.message}
+                  </span>
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <Button
+                  className="flex-1"
+                  variant="outline"
+                  onClick={handleTestConnection}
+                  disabled={!webhookUrl.trim() || testingConnection}
+                >
+                  {testingConnection ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Testando...
+                    </>
+                  ) : (
+                    <>
+                      <TestTube className="h-4 w-4 mr-2" />
+                      Testar Conexão
+                    </>
+                  )}
+                </Button>
+
+                <Button
+                  className="flex-1"
+                  variant="secondary"
+                  onClick={handleSaveWebhook}
+                  disabled={!webhookUrl.trim() || savingWebhook || !connectionTestResult?.success}
+                >
+                  {savingWebhook ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Salvando...
+                    </>
+                  ) : (
+                    <>
+                      <Plug className="h-4 w-4 mr-2" />
+                      Salvar Webhook
+                    </>
+                  )}
+                </Button>
+              </div>
+
+              {!connectionTestResult?.success && webhookUrl.trim() && (
+                <p className="text-xs text-muted-foreground text-center">
+                  Teste a conexão primeiro antes de salvar
+                </p>
+              )}
 
               <div className="bg-muted/50 rounded-lg p-3 text-sm text-muted-foreground">
                 <p className="font-medium mb-1">Como criar o webhook de entrada:</p>
