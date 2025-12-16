@@ -49,7 +49,18 @@ import {
   Users,
   RefreshCw,
   ArrowLeftRight,
+  Trash2,
+  Plus,
+  Phone,
 } from "lucide-react";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 interface Integration {
   id: string;
@@ -65,6 +76,16 @@ interface Instance {
   name: string;
   phone_number: string | null;
   status: string;
+}
+
+interface ChannelMapping {
+  id: string;
+  instance_id: string;
+  line_id: number;
+  line_name: string | null;
+  is_active: boolean;
+  instance_name?: string;
+  phone_number?: string | null;
 }
 
 const integrationTypes = [
@@ -161,10 +182,20 @@ export default function Integrations() {
   const [oauthDomain, setOauthDomain] = useState("");
   const [savingOAuth, setSavingOAuth] = useState(false);
 
+  // Channel Mappings
+  const [channelMappings, setChannelMappings] = useState<ChannelMapping[]>([]);
+  const [showMappingDialog, setShowMappingDialog] = useState(false);
+  const [newMappingInstanceId, setNewMappingInstanceId] = useState("");
+  const [newMappingLineId, setNewMappingLineId] = useState("");
+  const [newMappingLineName, setNewMappingLineName] = useState("");
+  const [savingMapping, setSavingMapping] = useState(false);
+  const [cleaningConnectors, setCleaningConnectors] = useState(false);
+
   useEffect(() => {
     if (workspace) {
       fetchIntegrations();
       fetchInstances();
+      fetchChannelMappings();
     }
   }, [workspace]);
 
@@ -217,6 +248,142 @@ export default function Integrations() {
       setInstances(data || []);
     } catch (error) {
       console.error("Error fetching instances:", error);
+    }
+  };
+
+  const fetchChannelMappings = async () => {
+    if (!workspace?.id) return;
+    try {
+      const { data, error } = await supabase
+        .from("bitrix_channel_mappings")
+        .select(`
+          id,
+          instance_id,
+          line_id,
+          line_name,
+          is_active,
+          instances (name, phone_number)
+        `)
+        .eq("workspace_id", workspace.id);
+
+      if (error) throw error;
+
+      const mappings: ChannelMapping[] = (data || []).map((item: any) => ({
+        id: item.id,
+        instance_id: item.instance_id,
+        line_id: item.line_id,
+        line_name: item.line_name,
+        is_active: item.is_active,
+        instance_name: item.instances?.name,
+        phone_number: item.instances?.phone_number,
+      }));
+
+      setChannelMappings(mappings);
+    } catch (error) {
+      console.error("Error fetching channel mappings:", error);
+    }
+  };
+
+  const handleCleanConnectors = async () => {
+    if (!workspace?.id) {
+      toast.error("Workspace não encontrado");
+      return;
+    }
+
+    const bitrix = integrations.find((i) => i.type === "bitrix24");
+    if (!bitrix) {
+      toast.error("Integração Bitrix24 não encontrada");
+      return;
+    }
+
+    setCleaningConnectors(true);
+    try {
+      const response = await supabase.functions.invoke("bitrix24-register", {
+        body: {
+          action: "clean_connectors",
+          workspace_id: workspace.id,
+          integration_id: bitrix.id,
+        },
+      });
+
+      if (response.error) {
+        throw new Error(response.error.message || "Erro ao limpar conectores");
+      }
+
+      const result = response.data;
+      if (result?.removed_count > 0) {
+        toast.success(`${result.removed_count} conector(es) removido(s) com sucesso!`);
+      } else {
+        toast.info("Nenhum conector duplicado encontrado");
+      }
+
+      fetchIntegrations();
+    } catch (error) {
+      console.error("Error cleaning connectors:", error);
+      toast.error(error instanceof Error ? error.message : "Erro ao limpar conectores");
+    } finally {
+      setCleaningConnectors(false);
+    }
+  };
+
+  const handleAddMapping = async () => {
+    if (!workspace?.id || !newMappingInstanceId || !newMappingLineId) {
+      toast.error("Preencha todos os campos");
+      return;
+    }
+
+    const bitrix = integrations.find((i) => i.type === "bitrix24");
+    if (!bitrix) {
+      toast.error("Integração Bitrix24 não encontrada");
+      return;
+    }
+
+    setSavingMapping(true);
+    try {
+      const { error } = await supabase
+        .from("bitrix_channel_mappings")
+        .insert({
+          workspace_id: workspace.id,
+          integration_id: bitrix.id,
+          instance_id: newMappingInstanceId,
+          line_id: parseInt(newMappingLineId),
+          line_name: newMappingLineName || `Linha ${newMappingLineId}`,
+        });
+
+      if (error) throw error;
+
+      toast.success("Mapeamento adicionado com sucesso!");
+      setShowMappingDialog(false);
+      setNewMappingInstanceId("");
+      setNewMappingLineId("");
+      setNewMappingLineName("");
+      fetchChannelMappings();
+    } catch (error: any) {
+      console.error("Error adding mapping:", error);
+      if (error.code === "23505") {
+        toast.error("Esta instância ou linha já está mapeada");
+      } else {
+        toast.error("Erro ao adicionar mapeamento");
+      }
+    } finally {
+      setSavingMapping(false);
+    }
+  };
+
+  const handleDeleteMapping = async (mappingId: string) => {
+    try {
+      const { error } = await supabase
+        .from("bitrix_channel_mappings")
+        .delete()
+        .eq("id", mappingId);
+
+      if (error) throw error;
+
+      toast.success("Mapeamento removido");
+      fetchChannelMappings();
+    } catch (error) {
+      console.error("Error deleting mapping:", error);
+      toast.error("Erro ao remover mapeamento");
     }
   };
 
@@ -1021,7 +1188,7 @@ export default function Integrations() {
                     )}
 
                     {/* Actions */}
-                    <div className="flex gap-3">
+                    <div className="flex flex-wrap gap-3">
                       <Button onClick={handleRegisterBitrix24} disabled={registeringBitrix}>
                         {registeringBitrix ? (
                           <>
@@ -1035,6 +1202,26 @@ export default function Integrations() {
                           </>
                         )}
                       </Button>
+                      {bitrixIntegration && (
+                        <Button
+                          variant="outline"
+                          className="text-destructive hover:bg-destructive/10"
+                          onClick={handleCleanConnectors}
+                          disabled={cleaningConnectors}
+                        >
+                          {cleaningConnectors ? (
+                            <>
+                              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                              Limpando...
+                            </>
+                          ) : (
+                            <>
+                              <Trash2 className="h-4 w-4 mr-2" />
+                              Limpar Conectores Duplicados
+                            </>
+                          )}
+                        </Button>
+                      )}
                     </div>
                   </div>
                 )}
@@ -1202,6 +1389,97 @@ export default function Integrations() {
                 </CardContent>
               </Card>
             )}
+
+            {/* Channel Mappings Card */}
+            {bitrixIntegration?.is_active && (
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="h-12 w-12 rounded-xl bg-indigo-500/10 flex items-center justify-center">
+                        <ArrowLeftRight className="h-6 w-6 text-indigo-500" />
+                      </div>
+                      <div>
+                        <CardTitle>Mapeamento de Canais</CardTitle>
+                        <CardDescription>
+                          Vincule cada número W-API a um Canal Aberto do Bitrix24
+                        </CardDescription>
+                      </div>
+                    </div>
+                    <Button size="sm" onClick={() => setShowMappingDialog(true)}>
+                      <Plus className="h-4 w-4 mr-2" />
+                      Adicionar
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {channelMappings.length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <ArrowLeftRight className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                      <p>Nenhum mapeamento configurado</p>
+                      <p className="text-sm">
+                        Adicione mapeamentos para vincular instâncias W-API a canais Bitrix24
+                      </p>
+                    </div>
+                  ) : (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Instância W-API</TableHead>
+                          <TableHead>Telefone</TableHead>
+                          <TableHead>Canal Bitrix24</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead className="w-[50px]"></TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {channelMappings.map((mapping) => (
+                          <TableRow key={mapping.id}>
+                            <TableCell className="font-medium">{mapping.instance_name}</TableCell>
+                            <TableCell>
+                              <div className="flex items-center gap-1.5">
+                                <Phone className="h-3.5 w-3.5 text-muted-foreground" />
+                                {mapping.phone_number || "-"}
+                              </div>
+                            </TableCell>
+                            <TableCell>{mapping.line_name || `Linha ${mapping.line_id}`}</TableCell>
+                            <TableCell>
+                              <Badge variant={mapping.is_active ? "default" : "secondary"}>
+                                {mapping.is_active ? "Ativo" : "Inativo"}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-destructive hover:bg-destructive/10"
+                                onClick={() => handleDeleteMapping(mapping.id)}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
+
+                  <div className="bg-muted/50 rounded-lg p-4 text-sm">
+                    <div className="flex items-start gap-2">
+                      <AlertCircle className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-medium">Como funciona:</p>
+                        <ul className="text-muted-foreground mt-1 space-y-1">
+                          <li>• Cada instância W-API pode ser vinculada a um canal Bitrix24 diferente</li>
+                          <li>• As mensagens serão roteadas automaticamente para o canal correspondente</li>
+                          <li>• O "Line ID" é o número do Canal Aberto no Bitrix24</li>
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
           </TabsContent>
 
           <TabsContent value="ai" className="mt-6 space-y-4">
@@ -1346,6 +1624,79 @@ export default function Integrations() {
                   </>
                 ) : (
                   "Salvar"
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Channel Mapping Dialog */}
+        <Dialog open={showMappingDialog} onOpenChange={setShowMappingDialog}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <ArrowLeftRight className="h-5 w-5" />
+                Adicionar Mapeamento
+              </DialogTitle>
+              <DialogDescription>
+                Vincule uma instância W-API a um Canal Aberto do Bitrix24
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label>Instância W-API</Label>
+                <Select value={newMappingInstanceId} onValueChange={setNewMappingInstanceId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione uma instância" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {instances
+                      .filter((inst) => !channelMappings.some((m) => m.instance_id === inst.id))
+                      .map((inst) => (
+                        <SelectItem key={inst.id} value={inst.id}>
+                          {inst.name} {inst.phone_number ? `(${inst.phone_number})` : ""}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Line ID (Canal Aberto)</Label>
+                <Input
+                  type="number"
+                  placeholder="Ex: 1, 2, 3..."
+                  value={newMappingLineId}
+                  onChange={(e) => setNewMappingLineId(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  O número da linha do Canal Aberto no Bitrix24 (encontrado nas configurações do canal)
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Nome do Canal (opcional)</Label>
+                <Input
+                  placeholder="Ex: Vendas, Suporte..."
+                  value={newMappingLineName}
+                  onChange={(e) => setNewMappingLineName(e.target.value)}
+                />
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowMappingDialog(false)}>
+                Cancelar
+              </Button>
+              <Button onClick={handleAddMapping} disabled={savingMapping || !newMappingInstanceId || !newMappingLineId}>
+                {savingMapping ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Salvando...
+                  </>
+                ) : (
+                  "Adicionar Mapeamento"
                 )}
               </Button>
             </DialogFooter>

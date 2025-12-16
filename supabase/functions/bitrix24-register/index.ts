@@ -75,82 +75,174 @@ serve(async (req) => {
     // Action: Clean connectors
     if (action === "clean_connectors") {
       console.log("=== CLEAN CONNECTORS ACTION ===");
-      const searchId = member_id || domain;
+      console.log("integration_id:", integration_id);
+      console.log("workspace_id:", workspace_id);
+      console.log("member_id:", member_id);
+      console.log("domain:", domain);
       
-      if (!searchId) {
-        return new Response(
-          JSON.stringify({ error: "member_id ou domain é obrigatório" }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
+      let integration: any = null;
+
+      // Try to find integration by integration_id first
+      if (integration_id) {
+        const { data } = await supabase
+          .from("integrations")
+          .select("*")
+          .eq("id", integration_id)
+          .maybeSingle();
+        integration = data;
       }
 
-      // Find integration
-      const { data: integration } = await supabase
-        .from("integrations")
-        .select("*")
-        .eq("type", "bitrix24")
-        .or(`config->>member_id.eq.${searchId},config->>domain.eq.${searchId},config->>member_id.ilike.%${searchId}%,config->>domain.ilike.%${searchId}%`)
-        .maybeSingle();
-
-      if (!integration || !integration.config?.access_token) {
-        return new Response(
-          JSON.stringify({ error: "Integração não encontrada ou sem token OAuth" }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      const accessToken = integration.config.access_token;
-      const clientEndpoint = integration.config.client_endpoint || `https://${integration.config.domain}/rest/`;
-      
-      // List all connectors
-      console.log("Listing connectors...");
-      const listUrl = `${clientEndpoint}imconnector.list?auth=${accessToken}`;
-      const listResponse = await fetch(listUrl);
-      const listResult = await listResponse.json();
-      console.log("imconnector.list result:", JSON.stringify(listResult));
-
-      const removedConnectors: string[] = [];
-      
-      if (listResult.result) {
-        // Filter connectors that contain "thoth" or "whatsapp" (case insensitive)
-        const connectorsToRemove = Object.keys(listResult.result).filter(id => {
-          const idLower = id.toLowerCase();
-          return idLower.includes("thoth") || idLower.includes("whatsapp");
-        });
-
-        console.log("Connectors to remove:", connectorsToRemove);
-
-        // Unregister each connector
-        for (const connectorId of connectorsToRemove) {
-          console.log(`Unregistering connector: ${connectorId}`);
-          const unregisterUrl = `${clientEndpoint}imconnector.unregister?auth=${accessToken}`;
-          try {
-            const unregisterResponse = await fetch(unregisterUrl, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ ID: connectorId }),
-            });
-            const unregisterResult = await unregisterResponse.json();
-            console.log(`Unregister ${connectorId} result:`, JSON.stringify(unregisterResult));
-            
-            if (unregisterResult.result || !unregisterResult.error) {
-              removedConnectors.push(connectorId);
-            }
-          } catch (e) {
-            console.log(`Failed to unregister ${connectorId}:`, e);
-          }
+      // If not found, try by member_id or domain
+      if (!integration) {
+        const searchId = member_id || domain;
+        if (searchId) {
+          const { data } = await supabase
+            .from("integrations")
+            .select("*")
+            .eq("type", "bitrix24")
+            .or(`config->>member_id.eq.${searchId},config->>domain.eq.${searchId},config->>member_id.ilike.%${searchId}%,config->>domain.ilike.%${searchId}%`)
+            .maybeSingle();
+          integration = data;
         }
       }
 
-      return new Response(
-        JSON.stringify({ 
-          success: true, 
-          removed_count: removedConnectors.length,
-          removed_connectors: removedConnectors,
-          message: `${removedConnectors.length} conector(es) removido(s)`,
-        }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      // If still not found, try by workspace_id
+      if (!integration && workspace_id) {
+        const { data } = await supabase
+          .from("integrations")
+          .select("*")
+          .eq("type", "bitrix24")
+          .eq("workspace_id", workspace_id)
+          .maybeSingle();
+        integration = data;
+      }
+
+      if (!integration) {
+        return new Response(
+          JSON.stringify({ error: "Integração Bitrix24 não encontrada" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Check if integration has OAuth token or webhook_url
+      const config = integration.config || {};
+      let bitrixApiUrl: string;
+      
+      if (config.access_token) {
+        // Refresh token if needed
+        const accessToken = await refreshBitrixToken(integration, supabase);
+        if (!accessToken) {
+          return new Response(
+            JSON.stringify({ error: "Falha ao obter token de acesso" }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+        const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
+        bitrixApiUrl = `${clientEndpoint}`;
+        
+        // List all connectors
+        console.log("Listing connectors (OAuth mode)...");
+        const listUrl = `${bitrixApiUrl}imconnector.list?auth=${accessToken}`;
+        const listResponse = await fetch(listUrl);
+        const listResult = await listResponse.json();
+        console.log("imconnector.list result:", JSON.stringify(listResult));
+
+        const removedConnectors: string[] = [];
+        
+        if (listResult.result) {
+          const connectorsToRemove = Object.keys(listResult.result).filter(id => {
+            const idLower = id.toLowerCase();
+            return idLower.includes("thoth") || idLower.includes("whatsapp");
+          });
+
+          console.log("Connectors to remove:", connectorsToRemove);
+
+          for (const connectorId of connectorsToRemove) {
+            console.log(`Unregistering connector: ${connectorId}`);
+            const unregisterUrl = `${bitrixApiUrl}imconnector.unregister?auth=${accessToken}`;
+            try {
+              const unregisterResponse = await fetch(unregisterUrl, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ID: connectorId }),
+              });
+              const unregisterResult = await unregisterResponse.json();
+              console.log(`Unregister ${connectorId} result:`, JSON.stringify(unregisterResult));
+              
+              if (unregisterResult.result || !unregisterResult.error) {
+                removedConnectors.push(connectorId);
+              }
+            } catch (e) {
+              console.log(`Failed to unregister ${connectorId}:`, e);
+            }
+          }
+        }
+
+        return new Response(
+          JSON.stringify({ 
+            success: true, 
+            removed_count: removedConnectors.length,
+            removed_connectors: removedConnectors,
+            message: `${removedConnectors.length} conector(es) removido(s)`,
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      } else if (config.webhook_url) {
+        // Webhook mode
+        bitrixApiUrl = config.webhook_url.endsWith("/") ? config.webhook_url : `${config.webhook_url}/`;
+        
+        console.log("Listing connectors (Webhook mode)...");
+        const listUrl = `${bitrixApiUrl}imconnector.list`;
+        const listResponse = await fetch(listUrl);
+        const listResult = await listResponse.json();
+        console.log("imconnector.list result:", JSON.stringify(listResult));
+
+        const removedConnectors: string[] = [];
+        
+        if (listResult.result) {
+          const connectorsToRemove = Object.keys(listResult.result).filter(id => {
+            const idLower = id.toLowerCase();
+            return idLower.includes("thoth") || idLower.includes("whatsapp");
+          });
+
+          console.log("Connectors to remove:", connectorsToRemove);
+
+          for (const connectorId of connectorsToRemove) {
+            console.log(`Unregistering connector: ${connectorId}`);
+            const unregisterUrl = `${bitrixApiUrl}imconnector.unregister`;
+            try {
+              const unregisterResponse = await fetch(unregisterUrl, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ ID: connectorId }),
+              });
+              const unregisterResult = await unregisterResponse.json();
+              console.log(`Unregister ${connectorId} result:`, JSON.stringify(unregisterResult));
+              
+              if (unregisterResult.result || !unregisterResult.error) {
+                removedConnectors.push(connectorId);
+              }
+            } catch (e) {
+              console.log(`Failed to unregister ${connectorId}:`, e);
+            }
+          }
+        }
+
+        return new Response(
+          JSON.stringify({ 
+            success: true, 
+            removed_count: removedConnectors.length,
+            removed_connectors: removedConnectors,
+            message: `${removedConnectors.length} conector(es) removido(s)`,
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      } else {
+        return new Response(
+          JSON.stringify({ error: "Integração não possui token OAuth nem webhook configurado" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
     }
 
     // Validate that we have at least member_id or webhook_url

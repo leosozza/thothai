@@ -14,6 +14,64 @@ export type Database = {
   }
   public: {
     Tables: {
+      bitrix_channel_mappings: {
+        Row: {
+          created_at: string
+          id: string
+          instance_id: string
+          integration_id: string
+          is_active: boolean
+          line_id: number
+          line_name: string | null
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          instance_id: string
+          integration_id: string
+          is_active?: boolean
+          line_id: number
+          line_name?: string | null
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          instance_id?: string
+          integration_id?: string
+          is_active?: boolean
+          line_id?: number
+          line_name?: string | null
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bitrix_channel_mappings_instance_id_fkey"
+            columns: ["instance_id"]
+            isOneToOne: false
+            referencedRelation: "instances"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bitrix_channel_mappings_integration_id_fkey"
+            columns: ["integration_id"]
+            isOneToOne: false
+            referencedRelation: "integrations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "bitrix_channel_mappings_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       bot_settings: {
         Row: {
           created_at: string
