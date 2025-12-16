@@ -61,15 +61,16 @@ async function refreshBitrixToken(integration: any, supabase: any): Promise<stri
   return config.access_token || null;
 }
 
-// Activate connector via Bitrix24 REST API (backend call)
+// Activate/Deactivate connector via Bitrix24 REST API
 async function activateConnectorViaAPI(
   integration: any, 
   supabase: any, 
   lineId: number, 
+  active: number, // 1 = activate, 0 = deactivate
   webhookUrl: string
 ): Promise<{ success: boolean; error?: string }> {
   console.log("=== ACTIVATING CONNECTOR VIA API ===");
-  console.log("Line ID:", lineId);
+  console.log("Line ID:", lineId, "Active:", active);
   
   const config = integration.config;
   const connectorId = config?.connector_id || "thoth_whatsapp";
@@ -89,20 +90,18 @@ async function activateConnectorViaAPI(
   console.log("Connector ID:", connectorId);
   
   try {
-    // 1. First, activate the connector for this line
+    // 1. Activate/Deactivate the connector for this line
     const activateUrl = `${clientEndpoint}imconnector.activate`;
-    console.log("Calling imconnector.activate...");
+    console.log("Calling imconnector.activate with ACTIVE:", active);
     
     const activateResponse = await fetch(activateUrl, {
       method: "POST",
-      headers: { 
-        "Content-Type": "application/json"
-      },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         auth: accessToken,
         CONNECTOR: connectorId,
         LINE: lineId,
-        ACTIVE: 1
+        ACTIVE: active // Use the parameter value
       })
     });
     
@@ -111,60 +110,37 @@ async function activateConnectorViaAPI(
     
     if (activateResult.error) {
       console.error("Activate error:", activateResult.error, activateResult.error_description);
-      // Don't fail completely, try to continue
     }
     
-    // 2. Set connector data with URLs
-    const dataSetUrl = `${clientEndpoint}imconnector.connector.data.set`;
-    console.log("Calling imconnector.connector.data.set...");
-    
-    const dataSetResponse = await fetch(dataSetUrl, {
-      method: "POST",
-      headers: { 
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        auth: accessToken,
-        CONNECTOR: connectorId,
-        LINE: lineId,
-        DATA: {
-          id: `${connectorId}_line_${lineId}`,
-          url: webhookUrl,
-          url_im: webhookUrl,
-          name: "Thoth WhatsApp"
-        }
-      })
-    });
-    
-    const dataSetResult = await dataSetResponse.json();
-    console.log("Data set result:", JSON.stringify(dataSetResult, null, 2));
-    
-    if (dataSetResult.error) {
-      console.error("Data set error:", dataSetResult.error, dataSetResult.error_description);
+    // Only set connector data if activating (not deactivating)
+    if (active === 1) {
+      // 2. Set connector data with URLs
+      const dataSetUrl = `${clientEndpoint}imconnector.connector.data.set`;
+      console.log("Calling imconnector.connector.data.set...");
+      
+      const dataSetResponse = await fetch(dataSetUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          auth: accessToken,
+          CONNECTOR: connectorId,
+          LINE: lineId,
+          DATA: {
+            id: `${connectorId}_line_${lineId}`,
+            url: webhookUrl,
+            url_im: webhookUrl,
+            name: "Thoth WhatsApp"
+          }
+        })
+      });
+      
+      const dataSetResult = await dataSetResponse.json();
+      console.log("Data set result:", JSON.stringify(dataSetResult, null, 2));
+      
+      if (dataSetResult.error) {
+        console.error("Data set error:", dataSetResult.error, dataSetResult.error_description);
+      }
     }
-    
-    // 3. Also register the connector if not already registered
-    const registerUrl = `${clientEndpoint}imconnector.register`;
-    console.log("Calling imconnector.register (just in case)...");
-    
-    const registerResponse = await fetch(registerUrl, {
-      method: "POST",
-      headers: { 
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        auth: accessToken,
-        ID: connectorId,
-        NAME: "Thoth WhatsApp",
-        ICON: {
-          DATA_IMAGE: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0OCIgaGVpZ2h0PSI0OCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSIjMjVEMzY2Ij48cGF0aCBkPSJNMTcuNDcyIDQuMzA4YTkuOTcgOS45NyAwIDAgMC03LjA1Ni0yLjkyOGMtNS41NDUgMC0xMC4wNTggNC41MS0xMC4wNjIgMTAuMDUxYS45OTQuOTk0IDAgMCAwIC4wMDMuMTc4Yy4wMDcgMS44MTguNDg3IDMuNTk0IDEuMzk0IDUuMTRsLTEuNDk0IDUuNDE3YS41LjUgMCAwIDAgLjYxLjYxTDYuMyAyMS4yOTFhMTAgMTAgMCAwIDAgNC43NjMgMS4yMjJoLjAwNGM1LjU0IDAgMTAuMDUtNC41MDcgMTAuMDU0LTEwLjA1MWE5Ljk3IDkuOTcgMCAwIDAtMi45MDctNy4wNjRsLS43NDItLjA5Wm0tNS45MjYgMTUuNWgtLjAwMWE4LjMzOCA4LjMzOCAwIDAgMS00LjI1Mi0xLjE3bC0uMzA2LS4xODEtMy4xNzEuODMyLjg0Ny0zLjA4OS0uMTk5LS4zMTZhOC4zMjEgOC4zMjEgMCAwIDEtMS4yNzctNC40NGMuMDAzLTQuNjI1IDMuNzY5LTguMzkgOC4zOTgtOC4zOWE4LjMzMiA4LjMzMiAwIDAgMSA1LjkxNCAyLjQ0OCA4LjMxNCA4LjMxNCAwIDAgMSAyLjQ0MyA1LjkxYy0uMDAzIDQuNjI4LTMuNzY4IDguMzk3LTguMzk2IDguMzk2Wm00LjU5Ny05LjQ5Yy0uMjUyLS4xMjYtMS40OS0uNzM1LTEuNzItLjgxOS0uMjMtLjA4NC0uMzk4LS4xMjYtLjU2Ni4xMjYtLjE2OC4yNTItLjY1MS44MTktLjc5OC45ODctLjE0Ny4xNjgtLjI5NC4xOS0uNTQ2LjA2My0uMjUyLS4xMjYtMS4wNjQtLjM5Mi0yLjAyNS0xLjI1LS43NDgtLjY2Ny0xLjI1NC0xLjQ5MS0xLjQwMi0xLjc0NC0uMTQ3LS4yNTItLjAxNS0uMzg4LjExMS0uNTEzLjExNC0uMTEyLjI1Mi0uMjk0LjM3OC0uNDQuMTI2LS4xNDcuMTY4LS4yNTIuMjUyLS40Mi4wODQtLjE2OC4wNDItLjMxNS0uMDIxLS40NC0uMDYzLS4xMjYtLjU2Ni0xLjM2Ny0uNzc2LTEuODcxLS4yMDQtLjQ5MS0uNDEyLS40MjUtLjU2Ni0uNDMzLS4xNDctLjAwNy0uMzE1LS4wMDktLjQ4My0uMDA5cy0uNDQuMDYzLS42NzIuMzE1Yy0uMjMuMjUyLS44ODIuODYxLS44ODIgMi4xczkwMyAyLjQzOC45MDMgMi40MzhjMCAuMDAxIDEuNTY5IDIuMzk1IDMuNzk4IDMuMzU5LjUzMS4yMjkuOTQ1LjM2NiAxLjI2OC40N2ExLjU3NiAxLjU3NiAwIDAgMCAxLjQ0Ny0uMDk3Yy4zNjctLjIxLjk2Ni0uNzc5IDEuMTAyLTEuNTMyLjEzNS0uNzUyLjEzNS0xLjM5Ny4wOTQtMS41My0uMDQxLS4xMzQtLjE1Mi0uMjA4LS4zMjMtLjI3M1oiLz48L3N2Zz4="
-        },
-        PLACEMENT_HANDLER: webhookUrl
-      })
-    });
-    
-    const registerResult = await registerResponse.json();
-    console.log("Register result:", JSON.stringify(registerResult, null, 2));
     
     return { success: true };
   } catch (error) {
@@ -173,7 +149,7 @@ async function activateConnectorViaAPI(
   }
 }
 
-// Generate HTML settings page for the connector with instance and channel selection
+// Generate HTML settings page for the connector
 function renderSettingsPage(
   options: { LINE?: number; ACTIVE_STATUS?: number },
   connectorId: string,
@@ -187,9 +163,12 @@ function renderSettingsPage(
   activationResult?: { success: boolean; error?: string }
 ): string {
   const lineId = options.LINE || 0;
+  const activeStatus = options.ACTIVE_STATUS ?? 1;
   const isActivated = activationResult?.success || false;
 
-  // JSON encode instances and mappings for JS
+  // Check if there's already a mapping for this line
+  const existingMapping = mappings.find(m => m.line_id === lineId);
+
   const instancesJson = JSON.stringify(instances || []);
   const mappingsJson = JSON.stringify(mappings || []);
 
@@ -212,102 +191,82 @@ function renderSettingsPage(
       background: rgba(30, 41, 59, 0.95);
       border-radius: 16px;
       padding: 32px;
-      max-width: 600px;
+      max-width: 500px;
       margin: 0 auto;
       box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
       border: 1px solid rgba(148, 163, 184, 0.1);
     }
     .header {
       text-align: center;
-      margin-bottom: 32px;
+      margin-bottom: 24px;
     }
     .logo {
-      width: 72px;
-      height: 72px;
+      width: 64px;
+      height: 64px;
       background: linear-gradient(135deg, #25D366 0%, #128C7E 100%);
       border-radius: 16px;
       display: flex;
       align-items: center;
       justify-content: center;
-      margin: 0 auto 20px;
-      font-size: 36px;
+      margin: 0 auto 16px;
+      font-size: 32px;
     }
     h2 {
-      font-size: 24px;
+      font-size: 22px;
       font-weight: 600;
-      margin-bottom: 8px;
       color: #f8fafc;
+      margin-bottom: 4px;
     }
     .subtitle {
       color: #94a3b8;
       font-size: 14px;
     }
-    .activation-status {
+    .status-box {
       padding: 16px;
       border-radius: 12px;
-      margin-bottom: 24px;
+      margin-bottom: 20px;
       text-align: center;
     }
-    .activation-status.success {
+    .status-box.success {
       background: rgba(34, 197, 94, 0.15);
       border: 1px solid rgba(34, 197, 94, 0.3);
     }
-    .activation-status.error {
-      background: rgba(239, 68, 68, 0.15);
-      border: 1px solid rgba(239, 68, 68, 0.3);
-    }
-    .activation-status.pending {
+    .status-box.pending {
       background: rgba(234, 179, 8, 0.15);
       border: 1px solid rgba(234, 179, 8, 0.3);
     }
-    .activation-status h3 {
+    .status-box h3 {
       font-size: 16px;
       margin-bottom: 4px;
     }
-    .activation-status.success h3 { color: #4ade80; }
-    .activation-status.error h3 { color: #f87171; }
-    .activation-status.pending h3 { color: #fbbf24; }
-    .activation-status p {
-      font-size: 14px;
-      color: #94a3b8;
-    }
-    .channel-info {
+    .status-box.success h3 { color: #4ade80; }
+    .status-box.pending h3 { color: #fbbf24; }
+    .status-box p { font-size: 13px; color: #94a3b8; }
+    .channel-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
       background: rgba(15, 23, 42, 0.5);
       border: 1px solid rgba(148, 163, 184, 0.2);
       border-radius: 8px;
-      padding: 16px;
+      padding: 12px 16px;
       margin-bottom: 20px;
+      width: 100%;
     }
-    .channel-info .label {
-      font-size: 12px;
-      color: #64748b;
-      text-transform: uppercase;
-      margin-bottom: 8px;
-    }
-    .channel-info .value {
-      font-size: 16px;
-      color: #f1f5f9;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-    .channel-info .value .dot {
+    .channel-badge .dot {
       width: 10px;
       height: 10px;
       border-radius: 50%;
       background: #25D366;
     }
-    .section {
-      margin-bottom: 24px;
-    }
-    .section-title {
-      font-size: 16px;
-      font-weight: 600;
+    .channel-badge .text {
+      font-size: 14px;
       color: #f1f5f9;
-      margin-bottom: 16px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
+    }
+    .channel-badge .label {
+      font-size: 11px;
+      color: #64748b;
+      text-transform: uppercase;
     }
     .form-group {
       margin-bottom: 16px;
@@ -327,7 +286,6 @@ function renderSettingsPage(
       background: rgba(15, 23, 42, 0.8);
       color: #f1f5f9;
       cursor: pointer;
-      transition: border-color 0.2s;
     }
     select:focus {
       outline: none;
@@ -338,14 +296,15 @@ function renderSettingsPage(
       color: #f1f5f9;
     }
     button {
-      padding: 12px 24px;
-      font-size: 14px;
+      width: 100%;
+      padding: 14px 24px;
+      font-size: 15px;
       font-weight: 600;
       border: none;
       border-radius: 8px;
       cursor: pointer;
       transition: all 0.2s ease;
-      display: inline-flex;
+      display: flex;
       align-items: center;
       justify-content: center;
       gap: 8px;
@@ -353,76 +312,19 @@ function renderSettingsPage(
     button.primary {
       background: linear-gradient(135deg, #25D366 0%, #128C7E 100%);
       color: white;
-      width: 100%;
     }
-    button.primary:hover {
+    button.primary:hover:not(:disabled) {
       transform: translateY(-2px);
       box-shadow: 0 10px 20px -5px rgba(37, 211, 102, 0.4);
     }
     button.primary:disabled {
-      opacity: 0.6;
-      cursor: not-allowed;
-      transform: none !important;
-      box-shadow: none !important;
-    }
-    button.danger {
-      background: rgba(239, 68, 68, 0.15);
-      color: #f87171;
-      border: 1px solid rgba(239, 68, 68, 0.3);
-      padding: 6px 12px;
-      font-size: 12px;
-    }
-    button.danger:hover {
-      background: rgba(239, 68, 68, 0.25);
-    }
-    .mappings-table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-top: 16px;
-    }
-    .mappings-table th,
-    .mappings-table td {
-      padding: 12px;
-      text-align: left;
-      border-bottom: 1px solid rgba(148, 163, 184, 0.1);
-    }
-    .mappings-table th {
-      font-size: 12px;
-      color: #94a3b8;
-      font-weight: 500;
-      text-transform: uppercase;
-    }
-    .mappings-table td {
-      font-size: 14px;
-      color: #f1f5f9;
-    }
-    .badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      padding: 4px 8px;
-      border-radius: 4px;
-      font-size: 12px;
-      font-weight: 500;
-    }
-    .badge.active {
-      background: rgba(34, 197, 94, 0.15);
-      color: #4ade80;
-    }
-    .badge.inactive {
-      background: rgba(148, 163, 184, 0.15);
-      color: #94a3b8;
-    }
-    .empty-state {
-      text-align: center;
-      padding: 32px;
-      color: #64748b;
-    }
-    .empty-state svg {
-      width: 48px;
-      height: 48px;
-      margin-bottom: 16px;
       opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .help-text {
+      font-size: 12px;
+      color: #64748b;
+      margin-top: 6px;
     }
     .loading {
       display: none;
@@ -431,9 +333,7 @@ function renderSettingsPage(
       text-align: center;
       padding: 16px;
     }
-    .loading.show {
-      display: block;
-    }
+    .loading.show { display: block; }
     .spinner {
       display: inline-block;
       width: 16px;
@@ -443,11 +343,8 @@ function renderSettingsPage(
       border-radius: 50%;
       animation: spin 1s linear infinite;
       margin-right: 8px;
-      vertical-align: middle;
     }
-    @keyframes spin {
-      to { transform: rotate(360deg); }
-    }
+    @keyframes spin { to { transform: rotate(360deg); } }
     .message {
       padding: 12px;
       border-radius: 8px;
@@ -463,19 +360,7 @@ function renderSettingsPage(
       background: rgba(34, 197, 94, 0.15);
       color: #4ade80;
     }
-    .message.show {
-      display: block;
-    }
-    .divider {
-      height: 1px;
-      background: rgba(148, 163, 184, 0.1);
-      margin: 24px 0;
-    }
-    .help-text {
-      font-size: 13px;
-      color: #64748b;
-      margin-top: 8px;
-    }
+    .message.show { display: block; }
   </style>
 </head>
 <body>
@@ -483,106 +368,56 @@ function renderSettingsPage(
     <div class="header">
       <div class="logo">📱</div>
       <h2>Thoth WhatsApp</h2>
-      <p class="subtitle">Vincule seus números W-API aos Canais Abertos do Bitrix24</p>
+      <p class="subtitle">Vincular número ao Canal Aberto</p>
     </div>
 
     ${lineId > 0 ? `
-    <div class="activation-status ${isActivated ? 'success' : 'pending'}">
-      <h3>${isActivated ? '✓ Conector Ativado' : '⏳ Finalizando Configuração...'}</h3>
-      <p>${isActivated ? 'O conector está pronto para uso' : 'Selecione uma instância W-API para completar'}</p>
-    </div>
-    
-    <div class="channel-info">
-      <div class="label">Canal Aberto Selecionado</div>
-      <div class="value">
-        <span class="dot"></span>
-        Linha ${lineId}
+    <div class="channel-badge">
+      <span class="dot"></span>
+      <div>
+        <div class="label">Canal Aberto</div>
+        <div class="text">Linha ${lineId}</div>
       </div>
     </div>
     ` : ''}
 
-    <div class="section">
-      <div class="section-title">
-        <span>🔗</span> ${lineId > 0 ? 'Vincular Instância' : 'Novo Mapeamento'}
-      </div>
-      
-      <div class="form-group">
-        <label>Instância W-API (Número WhatsApp)</label>
-        <select id="instanceSelect">
-          <option value="">Selecione uma instância...</option>
-        </select>
-        <p class="help-text">Selecione qual número de WhatsApp receberá as mensagens deste canal</p>
-      </div>
-      
-      ${lineId === 0 ? `
-      <div class="form-group">
-        <label>Canal Aberto do Bitrix24</label>
-        <select id="channelSelect">
-          <option value="">Carregando canais...</option>
-        </select>
-      </div>
-      ` : ''}
-      
-      <button class="primary" id="saveBtn" onclick="completeSetup()" disabled>
-        ✓ ${lineId > 0 ? 'Finalizar Configuração' : 'Vincular Canal'}
-      </button>
-      
-      <p class="loading" id="loading">
-        <span class="spinner"></span>
-        Processando...
-      </p>
-      
-      <div class="message error" id="error"></div>
-      <div class="message success" id="success"></div>
+    <div class="status-box ${isActivated ? 'success' : 'pending'}">
+      <h3>${isActivated ? '✓ Conector Ativo' : '⏳ Aguardando Configuração'}</h3>
+      <p>${isActivated ? 'Selecione uma instância para finalizar' : 'Selecione qual número WhatsApp vincular'}</p>
     </div>
 
-    <div class="divider"></div>
-
-    <div class="section">
-      <div class="section-title">
-        <span>📋</span> Mapeamentos Ativos
-      </div>
-      
-      <div id="mappingsContainer">
-        <div class="empty-state" id="emptyState">
-          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path>
-          </svg>
-          <p>Nenhum mapeamento configurado</p>
-        </div>
-        
-        <table class="mappings-table" id="mappingsTable" style="display: none;">
-          <thead>
-            <tr>
-              <th>Instância W-API</th>
-              <th>Canal Bitrix24</th>
-              <th>Status</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody id="mappingsBody">
-          </tbody>
-        </table>
-      </div>
+    <div class="form-group">
+      <label>Instância W-API (Número WhatsApp)</label>
+      <select id="instanceSelect">
+        <option value="">Selecione uma instância...</option>
+      </select>
+      <p class="help-text">O número selecionado receberá mensagens deste canal</p>
     </div>
+
+    <button class="primary" id="saveBtn" onclick="completeSetup()" disabled>
+      ✓ Finalizar Configuração
+    </button>
+
+    <p class="loading" id="loading">
+      <span class="spinner"></span>
+      Finalizando configuração...
+    </p>
+
+    <div class="message error" id="error"></div>
+    <div class="message success" id="success"></div>
   </div>
-  
+
   <script src="//api.bitrix24.com/api/v1/"></script>
   <script>
     const CONNECTOR = '${connectorId}';
     const WEBHOOK_URL = '${webhookUrl}';
     const INTEGRATION_ID = '${integrationId}';
     const WORKSPACE_ID = '${workspaceId}';
-    const LINE_FROM_BITRIX = ${lineId};
-    const ALREADY_ACTIVATED = ${isActivated};
+    const LINE_ID = ${lineId};
+    const ACTIVE_STATUS = ${activeStatus};
     
-    // Data from backend
     const instances = ${instancesJson};
     const existingMappings = ${mappingsJson};
-    
-    let channels = [];
-    let selectedChannelId = LINE_FROM_BITRIX;
-    let selectedChannelName = 'Linha ' + LINE_FROM_BITRIX;
     
     // Populate instances dropdown
     function populateInstances() {
@@ -598,106 +433,24 @@ function renderSettingsPage(
         select.appendChild(option);
       });
       
+      // Check if there's already a mapping for this line
+      const existingMapping = existingMappings.find(m => m.line_id === LINE_ID);
+      if (existingMapping) {
+        select.value = existingMapping.instance_id;
+      }
+      
       updateSaveButton();
     }
     
-    // Load Bitrix24 Open Channels (only if no LINE specified)
-    function loadChannels() {
-      if (LINE_FROM_BITRIX > 0) {
-        // Channel already specified, no need to load
-        updateSaveButton();
-        return;
-      }
-      
-      const select = document.getElementById('channelSelect');
-      if (!select) return;
-      
-      BX24.callMethod('imopenlines.config.list.get', {}, function(result) {
-        console.log('Open Lines result:', result);
-        
-        if (result.error()) {
-          console.error('Error loading channels:', result.error());
-          select.innerHTML = '<option value="">Erro ao carregar canais</option>';
-          return;
-        }
-        
-        const data = result.data();
-        if (!data || data.length === 0) {
-          select.innerHTML = '<option value="">Nenhum canal encontrado</option>';
-          return;
-        }
-        
-        channels = data;
-        select.innerHTML = '<option value="">Selecione um canal...</option>';
-        
-        data.forEach(channel => {
-          const option = document.createElement('option');
-          option.value = channel.ID;
-          option.dataset.name = channel.LINE_NAME || 'Canal ' + channel.ID;
-          option.textContent = (channel.ACTIVE === 'Y' ? '🟢 ' : '⚪ ') + (channel.LINE_NAME || 'Canal ' + channel.ID);
-          select.appendChild(option);
-        });
-        
-        updateSaveButton();
-      });
-    }
-    
-    // Update save button state
     function updateSaveButton() {
       const instanceId = document.getElementById('instanceSelect').value;
-      const channelSelect = document.getElementById('channelSelect');
-      const channelId = channelSelect ? channelSelect.value : LINE_FROM_BITRIX;
-      document.getElementById('saveBtn').disabled = !instanceId || !channelId;
+      document.getElementById('saveBtn').disabled = !instanceId || LINE_ID <= 0;
     }
     
-    // Render mappings table
-    function renderMappings() {
-      const tbody = document.getElementById('mappingsBody');
-      const table = document.getElementById('mappingsTable');
-      const empty = document.getElementById('emptyState');
-      
-      if (!existingMappings || existingMappings.length === 0) {
-        table.style.display = 'none';
-        empty.style.display = 'block';
-        return;
-      }
-      
-      table.style.display = 'table';
-      empty.style.display = 'none';
-      
-      tbody.innerHTML = '';
-      
-      existingMappings.forEach(mapping => {
-        // Find instance name
-        const inst = instances.find(i => i.id === mapping.instance_id);
-        const instName = inst ? inst.name + ' (' + (inst.phone_number || 'Sem número') + ')' : mapping.instance_id;
-        
-        const tr = document.createElement('tr');
-        tr.innerHTML = 
-          '<td>' + instName + '</td>' +
-          '<td>' + (mapping.line_name || 'Linha ' + mapping.line_id) + '</td>' +
-          '<td><span class="badge ' + (mapping.is_active ? 'active' : 'inactive') + '">' + (mapping.is_active ? '✓ Ativo' : '○ Inativo') + '</span></td>' +
-          '<td><button class="danger" onclick="deleteMapping(\\'' + mapping.id + '\\')">✕ Remover</button></td>';
-        tbody.appendChild(tr);
-      });
-    }
-    
-    // Complete setup - activate connector and save mapping
+    // Complete setup - THE KEY FUNCTION
     function completeSetup() {
       const instanceId = document.getElementById('instanceSelect').value;
-      const channelSelect = document.getElementById('channelSelect');
-      
-      let channelId, channelName;
-      
-      if (LINE_FROM_BITRIX > 0) {
-        channelId = LINE_FROM_BITRIX;
-        channelName = 'Linha ' + LINE_FROM_BITRIX;
-      } else {
-        channelId = parseInt(channelSelect.value);
-        channelName = channelSelect.options[channelSelect.selectedIndex].dataset.name || 'Canal ' + channelId;
-      }
-      
-      if (!instanceId || !channelId) return;
+      if (!instanceId || LINE_ID <= 0) return;
       
       const btn = document.getElementById('saveBtn');
       const loading = document.getElementById('loading');
@@ -709,31 +462,30 @@ function renderSettingsPage(
       btn.disabled = true;
       loading.classList.add('show');
       
-      // Activate connector via BX24 API (ensures it's activated from Bitrix24 side)
+      console.log('Starting setup for LINE:', LINE_ID, 'Instance:', instanceId);
+      
+      // Step 1: Activate connector via BX24.callMethod
       BX24.callMethod('imconnector.activate', {
         CONNECTOR: CONNECTOR,
-        LINE: channelId,
+        LINE: LINE_ID,
         ACTIVE: 1
       }, function(activateResult) {
-        console.log('Activate result:', activateResult);
+        console.log('imconnector.activate result:', activateResult.data(), activateResult.error());
         
-        // Even if activation fails, continue to save mapping
-        // (backend already tried to activate)
-        
-        // Set connector data
+        // Step 2: Set connector data
         BX24.callMethod('imconnector.connector.data.set', {
           CONNECTOR: CONNECTOR,
-          LINE: channelId,
+          LINE: LINE_ID,
           DATA: {
-            id: CONNECTOR + '_line_' + channelId,
+            id: CONNECTOR + '_line_' + LINE_ID,
             url: WEBHOOK_URL,
             url_im: WEBHOOK_URL,
             name: 'Thoth WhatsApp'
           }
         }, function(dataResult) {
-          console.log('Data set result:', dataResult);
+          console.log('imconnector.connector.data.set result:', dataResult.data(), dataResult.error());
           
-          // Save mapping to our database
+          // Step 3: Save mapping to our database
           fetch(WEBHOOK_URL + '?action=complete_setup', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -742,13 +494,13 @@ function renderSettingsPage(
               workspace_id: WORKSPACE_ID,
               integration_id: INTEGRATION_ID,
               instance_id: instanceId,
-              line_id: channelId,
-              line_name: channelName
+              line_id: LINE_ID,
+              line_name: 'Linha ' + LINE_ID
             })
           })
           .then(res => res.json())
           .then(result => {
-            console.log('Complete setup result:', result);
+            console.log('complete_setup result:', result);
             
             if (result.error) {
               errorEl.textContent = '❌ ' + result.error;
@@ -758,22 +510,22 @@ function renderSettingsPage(
               return;
             }
             
-            successEl.textContent = '✓ Configuração concluída com sucesso!';
+            successEl.textContent = '✓ Configuração concluída!';
             successEl.classList.add('show');
             loading.classList.remove('show');
             
-            // Notify Bitrix24 that setup is complete
+            // CRITICAL: Close application to signal Bitrix24 that setup is complete
             setTimeout(function() {
+              console.log('Closing application...');
               try {
                 BX24.closeApplication();
               } catch(e) {
-                console.log('Could not close application:', e);
-                location.reload();
+                console.log('BX24.closeApplication error:', e);
               }
-            }, 2000);
+            }, 1500);
           })
           .catch(err => {
-            console.error('Complete setup error:', err);
+            console.error('complete_setup error:', err);
             errorEl.textContent = '❌ Erro ao salvar configuração';
             errorEl.classList.add('show');
             btn.disabled = false;
@@ -783,45 +535,13 @@ function renderSettingsPage(
       });
     }
     
-    // Delete mapping
-    function deleteMapping(mappingId) {
-      if (!confirm('Deseja realmente remover este mapeamento?')) return;
-      
-      fetch(WEBHOOK_URL + '?action=delete_mapping', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'delete_mapping',
-          mapping_id: mappingId
-        })
-      })
-      .then(res => res.json())
-      .then(result => {
-        if (result.error) {
-          alert('Erro: ' + result.error);
-          return;
-        }
-        location.reload();
-      })
-      .catch(err => {
-        console.error('Delete error:', err);
-        alert('Erro ao remover mapeamento');
-      });
-    }
-    
     // Event listeners
     document.getElementById('instanceSelect').addEventListener('change', updateSaveButton);
-    const channelSelect = document.getElementById('channelSelect');
-    if (channelSelect) {
-      channelSelect.addEventListener('change', updateSaveButton);
-    }
     
     // Initialize
     BX24.init(function() {
-      console.log('BX24 initialized');
+      console.log('BX24 initialized, LINE_ID:', LINE_ID, 'ACTIVE_STATUS:', ACTIVE_STATUS);
       populateInstances();
-      loadChannels();
-      renderMappings();
     });
   </script>
 </body>
@@ -833,27 +553,25 @@ async function handlePlacement(supabase: any, payload: any, supabaseUrl: string)
   console.log("=== PLACEMENT HANDLER ===");
   console.log("Payload:", JSON.stringify(payload, null, 2));
 
-  const placement = payload.PLACEMENT;
-
   // Parse PLACEMENT_OPTIONS
   let options: { LINE?: number; ACTIVE_STATUS?: number } = {};
   if (typeof payload.PLACEMENT_OPTIONS === "string") {
     try {
       options = JSON.parse(payload.PLACEMENT_OPTIONS);
     } catch (e) {
-      console.log("Failed to parse PLACEMENT_OPTIONS as JSON, trying as object");
+      console.log("Failed to parse PLACEMENT_OPTIONS as JSON");
       options = payload.PLACEMENT_OPTIONS || {};
     }
   } else {
     options = payload.PLACEMENT_OPTIONS || {};
   }
 
-  const lineId = options.LINE;
-  const activeStatus = options.ACTIVE_STATUS ?? 0;
+  const lineId = options.LINE || 0;
+  const activeStatus = options.ACTIVE_STATUS ?? 1; // Default to activate
   const domain = payload.auth?.domain || payload.DOMAIN;
   const memberId = payload.auth?.member_id || payload.member_id;
 
-  console.log("Parsed values - Placement:", placement, "Line ID:", lineId, "Active Status:", activeStatus, "Domain:", domain);
+  console.log("Parsed - LINE:", lineId, "ACTIVE_STATUS:", activeStatus, "Domain:", domain, "MemberId:", memberId);
 
   // Find the integration
   let integration = null;
@@ -891,27 +609,51 @@ async function handlePlacement(supabase: any, payload: any, supabaseUrl: string)
   if (!integration) {
     console.error("No Bitrix24 integration found");
     return new Response(
-      `<html><body><h1>Erro</h1><p>Integração Bitrix24 não encontrada. Configure a integração primeiro.</p></body></html>`,
-      { 
-        status: 404, 
-        headers: { ...corsHeaders, "Content-Type": "text/html; charset=utf-8" } 
-      }
+      `<html><body><h1>Erro</h1><p>Integração Bitrix24 não encontrada.</p></body></html>`,
+      { status: 404, headers: { ...corsHeaders, "Content-Type": "text/html; charset=utf-8" } }
     );
   }
 
-  console.log("Found integration:", integration.id, "workspace:", integration.workspace_id);
+  console.log("Found integration:", integration.id);
 
   const connectorId = integration.config?.connector_id || "thoth_whatsapp";
   const bitrixDomain = domain || integration.config?.domain;
   const webhookUrl = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
 
-  // AUTO-ACTIVATE: If a LINE is specified, automatically activate the connector
+  // Fetch existing mappings first
+  const { data: mappings } = await supabase
+    .from("bitrix_channel_mappings")
+    .select("*")
+    .eq("integration_id", integration.id);
+
+  console.log("Existing mappings:", mappings?.length || 0);
+
+  // If LINE is specified, handle activation/deactivation
   let activationResult: { success: boolean; error?: string } = { success: false };
   
-  if (lineId && lineId > 0) {
-    console.log("LINE specified, auto-activating connector...");
-    activationResult = await activateConnectorViaAPI(integration, supabase, lineId, webhookUrl);
-    console.log("Auto-activation result:", activationResult);
+  if (lineId > 0) {
+    console.log("LINE specified, calling activateConnectorViaAPI with ACTIVE:", activeStatus);
+    
+    // Activate or deactivate based on ACTIVE_STATUS
+    activationResult = await activateConnectorViaAPI(integration, supabase, lineId, activeStatus, webhookUrl);
+    console.log("Activation result:", activationResult);
+    
+    // If deactivating (ACTIVE_STATUS = 0), just return success
+    if (activeStatus === 0) {
+      console.log("Deactivation requested, returning success");
+      return new Response("successfully", {
+        headers: { ...corsHeaders, "Content-Type": "text/plain" }
+      });
+    }
+    
+    // If activating and there's already a mapping for this line, return success immediately
+    const existingMapping = mappings?.find((m: any) => m.line_id === lineId);
+    if (existingMapping && activationResult.success) {
+      console.log("Existing mapping found for line", lineId, "- returning success");
+      return new Response("successfully", {
+        headers: { ...corsHeaders, "Content-Type": "text/plain" }
+      });
+    }
   }
 
   // Fetch instances from the workspace
@@ -926,25 +668,13 @@ async function handlePlacement(supabase: any, payload: any, supabaseUrl: string)
 
   console.log("Found instances:", instances?.length || 0);
 
-  // Fetch existing mappings
-  const { data: mappings, error: mappingsError } = await supabase
-    .from("bitrix_channel_mappings")
-    .select("*")
-    .eq("integration_id", integration.id);
-
-  if (mappingsError) {
-    console.error("Error fetching mappings:", mappingsError);
-  }
-
-  console.log("Found mappings:", mappings?.length || 0);
-
-  // Return settings page with instances and mappings
+  // Show settings page for user to select instance
   return new Response(
     renderSettingsPage(
-      options, 
-      connectorId, 
-      bitrixDomain, 
-      supabaseUrl, 
+      options,
+      connectorId,
+      bitrixDomain,
+      supabaseUrl,
       webhookUrl,
       instances || [],
       mappings || [],
@@ -992,8 +722,8 @@ async function handleCompleteSetup(supabase: any, payload: any, supabaseUrl: str
 
   const webhookUrl = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
 
-  // Activate connector via API (redundant but ensures activation)
-  const activationResult = await activateConnectorViaAPI(integration, supabase, line_id, webhookUrl);
+  // Activate connector via API (with ACTIVE = 1)
+  const activationResult = await activateConnectorViaAPI(integration, supabase, line_id, 1, webhookUrl);
   console.log("Activation result:", activationResult);
 
   // Save the mapping
@@ -1008,7 +738,7 @@ async function handleCompleteSetup(supabase: any, payload: any, supabaseUrl: str
       is_active: true,
       updated_at: new Date().toISOString()
     }, { 
-      onConflict: "integration_id,instance_id"
+      onConflict: "integration_id,line_id"
     })
     .select()
     .single();
@@ -1029,11 +759,9 @@ async function handleCompleteSetup(supabase: any, payload: any, supabaseUrl: str
   );
 }
 
-// Handle save_mapping action (legacy, redirects to complete_setup)
+// Handle save_mapping action (legacy)
 async function handleSaveMapping(supabase: any, payload: any) {
   console.log("=== SAVE MAPPING ===");
-  console.log("Payload:", JSON.stringify(payload, null, 2));
-
   const { workspace_id, integration_id, instance_id, line_id, line_name } = payload;
 
   if (!workspace_id || !integration_id || !instance_id || !line_id) {
@@ -1043,7 +771,6 @@ async function handleSaveMapping(supabase: any, payload: any) {
     );
   }
 
-  // Upsert the mapping (update if exists, insert if not)
   const { data, error } = await supabase
     .from("bitrix_channel_mappings")
     .upsert({
@@ -1055,7 +782,7 @@ async function handleSaveMapping(supabase: any, payload: any) {
       is_active: true,
       updated_at: new Date().toISOString()
     }, { 
-      onConflict: "integration_id,instance_id"
+      onConflict: "integration_id,line_id"
     })
     .select()
     .single();
@@ -1068,8 +795,6 @@ async function handleSaveMapping(supabase: any, payload: any) {
     );
   }
 
-  console.log("Mapping saved:", data);
-
   return new Response(
     JSON.stringify({ success: true, mapping: data }),
     { headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -1079,8 +804,6 @@ async function handleSaveMapping(supabase: any, payload: any) {
 // Handle delete_mapping action
 async function handleDeleteMapping(supabase: any, payload: any) {
   console.log("=== DELETE MAPPING ===");
-  console.log("Payload:", JSON.stringify(payload, null, 2));
-
   const { mapping_id } = payload;
 
   if (!mapping_id) {
@@ -1103,8 +826,6 @@ async function handleDeleteMapping(supabase: any, payload: any) {
     );
   }
 
-  console.log("Mapping deleted:", mapping_id);
-
   return new Response(
     JSON.stringify({ success: true }),
     { headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -1126,7 +847,6 @@ serve(async (req) => {
   try {
     const url = new URL(req.url);
     const action = url.searchParams.get("action");
-    const workspaceId = url.searchParams.get("workspace_id");
     const connectorId = url.searchParams.get("connector_id");
 
     // Parse request body
@@ -1175,7 +895,7 @@ serve(async (req) => {
       }
     }
 
-    console.log("Bitrix24 webhook received:", JSON.stringify(payload, null, 2));
+    console.log("Received payload:", JSON.stringify(payload, null, 2));
 
     // Handle specific actions
     if (action === "complete_setup" || payload.action === "complete_setup") {
@@ -1190,7 +910,7 @@ serve(async (req) => {
       return await handleDeleteMapping(supabase, payload);
     }
 
-    // Check if this is a PLACEMENT call (user connecting Open Channel)
+    // Check if this is a PLACEMENT call
     if (payload.PLACEMENT || payload.PLACEMENT_OPTIONS) {
       console.log("=== DETECTED PLACEMENT CALL ===");
       return await handlePlacement(supabase, payload, supabaseUrl);
@@ -1198,31 +918,26 @@ serve(async (req) => {
 
     // Otherwise, process as event
     const event = payload.event;
-    console.log("Processing Bitrix24 event:", event);
+    console.log("Processing event:", event);
 
     switch (event) {
       case "ONIMCONNECTORMESSAGEADD": {
-        // Operator sent a message from Bitrix24 → Send to WhatsApp
         const data = payload.data?.MESSAGES?.[0] || payload.data;
         
         if (!data) {
-          console.log("No message data in payload");
+          console.log("No message data");
           break;
         }
 
         const userId = data.im?.chat_id || data.user?.id;
         const messageText = data.message?.text || data.text || "";
         const line = data.line || payload.data?.LINE;
-        const connector = data.connector || connectorId;
 
-        console.log("Bitrix24 operator message:", { userId, messageText, line, connector });
+        console.log("Operator message:", { userId, messageText, line });
 
-        if (!messageText) {
-          console.log("Empty message, skipping");
-          break;
-        }
+        if (!messageText) break;
 
-        // Find the mapping for this line to get the correct instance
+        // Find instance from mapping
         let instanceId: string | null = null;
 
         if (line) {
@@ -1235,11 +950,9 @@ serve(async (req) => {
 
           if (mapping) {
             instanceId = mapping.instance_id;
-            console.log("Found instance from mapping:", instanceId);
           }
         }
 
-        // Fallback to integration config if no mapping found
         if (!instanceId) {
           const { data: integration } = await supabase
             .from("integrations")
@@ -1248,18 +961,17 @@ serve(async (req) => {
             .eq("is_active", true)
             .maybeSingle();
 
-          if (integration) {
-            const config = integration.config as Record<string, unknown>;
-            instanceId = config?.instance_id as string;
+          if (integration?.config?.instance_id) {
+            instanceId = integration.config.instance_id;
           }
         }
 
         if (!instanceId) {
-          console.error("No instance_id found for message routing");
+          console.error("No instance_id found");
           break;
         }
 
-        // Find the contact by Bitrix24 user ID (stored in metadata)
+        // Find contact
         const { data: contact } = await supabase
           .from("contacts")
           .select("*")
@@ -1268,13 +980,11 @@ serve(async (req) => {
           .maybeSingle();
 
         if (!contact) {
-          console.error("Contact not found for Bitrix24 user:", userId);
+          console.error("Contact not found for:", userId);
           break;
         }
 
-        // Send message to WhatsApp via wapi-send-message
-        console.log("Sending message to WhatsApp:", { phone: contact.phone_number, message: messageText });
-
+        // Send to WhatsApp
         const sendResponse = await fetch(`${supabaseUrl}/functions/v1/wapi-send-message`, {
           method: "POST",
           headers: {
@@ -1290,28 +1000,18 @@ serve(async (req) => {
         });
 
         const sendResult = await sendResponse.json();
-        console.log("wapi-send-message result:", sendResult);
+        console.log("Send result:", sendResult);
         break;
       }
 
-      case "ONIMCONNECTORTYPING": {
-        console.log("Bitrix24 operator typing event");
+      case "ONIMCONNECTORTYPING":
+      case "ONIMCONNECTORDIALOGFINISH":
+      case "ONIMCONNECTORSTATUSDELETE":
+        console.log("Event handled:", event);
         break;
-      }
-
-      case "ONIMCONNECTORDIALOGFINISH": {
-        const dialogId = payload.data?.DIALOG_ID;
-        console.log("Bitrix24 dialog finished:", dialogId);
-        break;
-      }
-
-      case "ONIMCONNECTORSTATUSDELETE": {
-        console.log("Bitrix24 connector status deleted");
-        break;
-      }
 
       default:
-        console.log("Unhandled Bitrix24 event:", event);
+        console.log("Unhandled event:", event);
     }
 
     return new Response(
@@ -1319,10 +1019,9 @@ serve(async (req) => {
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error) {
-    console.error("Bitrix24 webhook error:", error);
-    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    console.error("Webhook error:", error);
     return new Response(
-      JSON.stringify({ error: errorMessage }),
+      JSON.stringify({ error: error instanceof Error ? error.message : "Unknown error" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
