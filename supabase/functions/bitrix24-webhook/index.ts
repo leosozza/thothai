@@ -10,7 +10,6 @@ const corsHeaders = {
 async function refreshBitrixToken(integration: any, supabase: any): Promise<string | null> {
   const config = integration.config;
   
-  // Check if token is still valid (with 5 minute buffer)
   if (config.token_expires_at) {
     const expiresAt = new Date(config.token_expires_at);
     const now = new Date();
@@ -62,16 +61,23 @@ async function refreshBitrixToken(integration: any, supabase: any): Promise<stri
   return config.access_token || null;
 }
 
-// Generate HTML settings page for the connector
+// Generate HTML settings page for the connector with instance and channel selection
 function renderSettingsPage(
   options: { LINE?: number; ACTIVE_STATUS?: number },
   connectorId: string,
   domain: string,
   supabaseUrl: string,
-  webhookUrl: string
+  webhookUrl: string,
+  instances: any[],
+  mappings: any[],
+  integrationId: string,
+  workspaceId: string
 ): string {
   const lineId = options.LINE || 0;
-  const isConnected = options.ACTIVE_STATUS === 1;
+
+  // JSON encode instances and mappings for JS
+  const instancesJson = JSON.stringify(instances || []);
+  const mappingsJson = JSON.stringify(mappings || []);
 
   return `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -85,9 +91,6 @@ function renderSettingsPage(
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
       background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
       min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
       padding: 20px;
       color: #e2e8f0;
     }
@@ -95,11 +98,14 @@ function renderSettingsPage(
       background: rgba(30, 41, 59, 0.95);
       border-radius: 16px;
       padding: 32px;
-      max-width: 400px;
-      width: 100%;
-      text-align: center;
+      max-width: 600px;
+      margin: 0 auto;
       box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
       border: 1px solid rgba(148, 163, 184, 0.1);
+    }
+    .header {
+      text-align: center;
+      margin-bottom: 32px;
     }
     .logo {
       width: 72px;
@@ -121,87 +127,140 @@ function renderSettingsPage(
     .subtitle {
       color: #94a3b8;
       font-size: 14px;
+    }
+    .section {
       margin-bottom: 24px;
     }
-    .status {
-      padding: 12px 20px;
-      border-radius: 12px;
-      margin-bottom: 24px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      font-weight: 500;
-    }
-    .status.connected {
-      background: rgba(34, 197, 94, 0.15);
-      color: #4ade80;
-      border: 1px solid rgba(34, 197, 94, 0.3);
-    }
-    .status.disconnected {
-      background: rgba(251, 191, 36, 0.15);
-      color: #fbbf24;
-      border: 1px solid rgba(251, 191, 36, 0.3);
-    }
-    .info-row {
-      display: flex;
-      justify-content: space-between;
-      padding: 12px 0;
-      border-bottom: 1px solid rgba(148, 163, 184, 0.1);
-      font-size: 14px;
-    }
-    .info-row:last-of-type {
-      border-bottom: none;
-      margin-bottom: 24px;
-    }
-    .info-label {
-      color: #94a3b8;
-    }
-    .info-value {
-      color: #f1f5f9;
-      font-weight: 500;
-    }
-    button {
-      width: 100%;
-      padding: 14px 24px;
+    .section-title {
       font-size: 16px;
       font-weight: 600;
+      color: #f1f5f9;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .form-group {
+      margin-bottom: 16px;
+    }
+    label {
+      display: block;
+      font-size: 14px;
+      color: #94a3b8;
+      margin-bottom: 8px;
+    }
+    select {
+      width: 100%;
+      padding: 12px 16px;
+      font-size: 14px;
+      border: 1px solid rgba(148, 163, 184, 0.2);
+      border-radius: 8px;
+      background: rgba(15, 23, 42, 0.8);
+      color: #f1f5f9;
+      cursor: pointer;
+      transition: border-color 0.2s;
+    }
+    select:focus {
+      outline: none;
+      border-color: #25D366;
+    }
+    select option {
+      background: #1e293b;
+      color: #f1f5f9;
+    }
+    button {
+      padding: 12px 24px;
+      font-size: 14px;
+      font-weight: 600;
       border: none;
-      border-radius: 12px;
+      border-radius: 8px;
       cursor: pointer;
       transition: all 0.2s ease;
-      display: flex;
+      display: inline-flex;
       align-items: center;
       justify-content: center;
       gap: 8px;
     }
-    button.connect {
+    button.primary {
       background: linear-gradient(135deg, #25D366 0%, #128C7E 100%);
       color: white;
+      width: 100%;
     }
-    button.connect:hover {
+    button.primary:hover {
       transform: translateY(-2px);
       box-shadow: 0 10px 20px -5px rgba(37, 211, 102, 0.4);
     }
-    button.disconnect {
-      background: rgba(239, 68, 68, 0.15);
-      color: #f87171;
-      border: 1px solid rgba(239, 68, 68, 0.3);
-    }
-    button.disconnect:hover {
-      background: rgba(239, 68, 68, 0.25);
-    }
-    button:disabled {
+    button.primary:disabled {
       opacity: 0.6;
       cursor: not-allowed;
       transform: none !important;
       box-shadow: none !important;
     }
+    button.danger {
+      background: rgba(239, 68, 68, 0.15);
+      color: #f87171;
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      padding: 6px 12px;
+      font-size: 12px;
+    }
+    button.danger:hover {
+      background: rgba(239, 68, 68, 0.25);
+    }
+    .mappings-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 16px;
+    }
+    .mappings-table th,
+    .mappings-table td {
+      padding: 12px;
+      text-align: left;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+    }
+    .mappings-table th {
+      font-size: 12px;
+      color: #94a3b8;
+      font-weight: 500;
+      text-transform: uppercase;
+    }
+    .mappings-table td {
+      font-size: 14px;
+      color: #f1f5f9;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+    .badge.active {
+      background: rgba(34, 197, 94, 0.15);
+      color: #4ade80;
+    }
+    .badge.inactive {
+      background: rgba(148, 163, 184, 0.15);
+      color: #94a3b8;
+    }
+    .empty-state {
+      text-align: center;
+      padding: 32px;
+      color: #64748b;
+    }
+    .empty-state svg {
+      width: 48px;
+      height: 48px;
+      margin-bottom: 16px;
+      opacity: 0.5;
+    }
     .loading {
       display: none;
-      margin-top: 16px;
       color: #94a3b8;
       font-size: 14px;
+      text-align: center;
+      padding: 16px;
     }
     .loading.show {
       display: block;
@@ -220,154 +279,339 @@ function renderSettingsPage(
     @keyframes spin {
       to { transform: rotate(360deg); }
     }
-    .error {
+    .message {
+      padding: 12px;
+      border-radius: 8px;
+      margin-top: 16px;
+      display: none;
+      font-size: 14px;
+    }
+    .message.error {
       background: rgba(239, 68, 68, 0.15);
       color: #f87171;
-      padding: 12px;
-      border-radius: 8px;
-      margin-top: 16px;
-      display: none;
-      font-size: 14px;
     }
-    .error.show {
-      display: block;
-    }
-    .success {
+    .message.success {
       background: rgba(34, 197, 94, 0.15);
       color: #4ade80;
-      padding: 12px;
-      border-radius: 8px;
-      margin-top: 16px;
-      display: none;
-      font-size: 14px;
     }
-    .success.show {
+    .message.show {
       display: block;
+    }
+    .divider {
+      height: 1px;
+      background: rgba(148, 163, 184, 0.1);
+      margin: 24px 0;
     }
   </style>
 </head>
 <body>
   <div class="container">
-    <div class="logo">📱</div>
-    <h2>Thoth WhatsApp</h2>
-    <p class="subtitle">Integração de WhatsApp para Bitrix24</p>
-    
-    <div class="status ${isConnected ? 'connected' : 'disconnected'}">
-      <span>${isConnected ? '✓' : '○'}</span>
-      <span>${isConnected ? 'Conectado' : 'Não conectado'}</span>
+    <div class="header">
+      <div class="logo">📱</div>
+      <h2>Thoth WhatsApp</h2>
+      <p class="subtitle">Vincule seus números W-API aos Canais Abertos do Bitrix24</p>
     </div>
-    
-    <div class="info-row">
-      <span class="info-label">Canal (LINE)</span>
-      <span class="info-value">${lineId}</span>
+
+    <div class="section">
+      <div class="section-title">
+        <span>➕</span> Novo Mapeamento
+      </div>
+      
+      <div class="form-group">
+        <label>Instância W-API (Número WhatsApp)</label>
+        <select id="instanceSelect">
+          <option value="">Selecione uma instância...</option>
+        </select>
+      </div>
+      
+      <div class="form-group">
+        <label>Canal Aberto do Bitrix24</label>
+        <select id="channelSelect">
+          <option value="">Carregando canais...</option>
+        </select>
+      </div>
+      
+      <button class="primary" id="saveBtn" onclick="saveMapping()" disabled>
+        ✓ Vincular Canal
+      </button>
+      
+      <p class="loading" id="loading">
+        <span class="spinner"></span>
+        Processando...
+      </p>
+      
+      <div class="message error" id="error"></div>
+      <div class="message success" id="success"></div>
     </div>
-    <div class="info-row">
-      <span class="info-label">Conector</span>
-      <span class="info-value">${connectorId}</span>
+
+    <div class="divider"></div>
+
+    <div class="section">
+      <div class="section-title">
+        <span>🔗</span> Mapeamentos Ativos
+      </div>
+      
+      <div id="mappingsContainer">
+        <div class="empty-state" id="emptyState">
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path>
+          </svg>
+          <p>Nenhum mapeamento configurado</p>
+        </div>
+        
+        <table class="mappings-table" id="mappingsTable" style="display: none;">
+          <thead>
+            <tr>
+              <th>Instância W-API</th>
+              <th>Canal Bitrix24</th>
+              <th>Status</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="mappingsBody">
+          </tbody>
+        </table>
+      </div>
     </div>
-    
-    <button id="actionBtn" class="${isConnected ? 'disconnect' : 'connect'}" onclick="toggleConnection()">
-      ${isConnected ? '✕ Desconectar' : '✓ Conectar Canal'}
-    </button>
-    
-    <p class="loading" id="loading">
-      <span class="spinner"></span>
-      Processando...
-    </p>
-    
-    <div class="error" id="error"></div>
-    <div class="success" id="success"></div>
   </div>
   
   <script src="//api.bitrix24.com/api/v1/"></script>
   <script>
-    const LINE = ${lineId};
     const CONNECTOR = '${connectorId}';
-    const CURRENT_STATUS = ${isConnected ? 1 : 0};
     const WEBHOOK_URL = '${webhookUrl}';
+    const INTEGRATION_ID = '${integrationId}';
+    const WORKSPACE_ID = '${workspaceId}';
+    const LINE_FROM_BITRIX = ${lineId};
     
-    function showError(message) {
-      const el = document.getElementById('error');
-      el.textContent = '❌ ' + message;
-      el.classList.add('show');
+    // Data from backend
+    const instances = ${instancesJson};
+    const existingMappings = ${mappingsJson};
+    
+    let channels = [];
+    
+    // Populate instances dropdown
+    function populateInstances() {
+      const select = document.getElementById('instanceSelect');
+      select.innerHTML = '<option value="">Selecione uma instância...</option>';
+      
+      instances.forEach(inst => {
+        const phone = inst.phone_number || 'Sem número';
+        const status = inst.status === 'connected' ? '🟢' : '⚪';
+        const option = document.createElement('option');
+        option.value = inst.id;
+        option.textContent = status + ' ' + inst.name + ' (' + phone + ')';
+        select.appendChild(option);
+      });
+      
+      updateSaveButton();
     }
     
-    function showSuccess(message) {
-      const el = document.getElementById('success');
-      el.textContent = '✓ ' + message;
-      el.classList.add('show');
+    // Load Bitrix24 Open Channels
+    function loadChannels() {
+      const select = document.getElementById('channelSelect');
+      
+      BX24.callMethod('imopenlines.config.list.get', {}, function(result) {
+        console.log('Open Lines result:', result);
+        
+        if (result.error()) {
+          console.error('Error loading channels:', result.error());
+          select.innerHTML = '<option value="">Erro ao carregar canais</option>';
+          return;
+        }
+        
+        const data = result.data();
+        if (!data || data.length === 0) {
+          select.innerHTML = '<option value="">Nenhum canal encontrado</option>';
+          return;
+        }
+        
+        channels = data;
+        select.innerHTML = '<option value="">Selecione um canal...</option>';
+        
+        data.forEach(channel => {
+          const option = document.createElement('option');
+          option.value = channel.ID;
+          option.dataset.name = channel.LINE_NAME || 'Canal ' + channel.ID;
+          option.textContent = (channel.ACTIVE === 'Y' ? '🟢 ' : '⚪ ') + (channel.LINE_NAME || 'Canal ' + channel.ID);
+          select.appendChild(option);
+        });
+        
+        // If opened from a specific line, pre-select it
+        if (LINE_FROM_BITRIX > 0) {
+          select.value = LINE_FROM_BITRIX;
+        }
+        
+        updateSaveButton();
+      });
     }
     
-    function toggleConnection() {
-      const btn = document.getElementById('actionBtn');
+    // Update save button state
+    function updateSaveButton() {
+      const instanceId = document.getElementById('instanceSelect').value;
+      const channelId = document.getElementById('channelSelect').value;
+      document.getElementById('saveBtn').disabled = !instanceId || !channelId;
+    }
+    
+    // Render mappings table
+    function renderMappings() {
+      const tbody = document.getElementById('mappingsBody');
+      const table = document.getElementById('mappingsTable');
+      const empty = document.getElementById('emptyState');
+      
+      if (!existingMappings || existingMappings.length === 0) {
+        table.style.display = 'none';
+        empty.style.display = 'block';
+        return;
+      }
+      
+      table.style.display = 'table';
+      empty.style.display = 'none';
+      
+      tbody.innerHTML = '';
+      
+      existingMappings.forEach(mapping => {
+        // Find instance name
+        const inst = instances.find(i => i.id === mapping.instance_id);
+        const instName = inst ? inst.name + ' (' + (inst.phone_number || 'Sem número') + ')' : mapping.instance_id;
+        
+        const tr = document.createElement('tr');
+        tr.innerHTML = 
+          '<td>' + instName + '</td>' +
+          '<td>' + (mapping.line_name || 'Linha ' + mapping.line_id) + '</td>' +
+          '<td><span class="badge ' + (mapping.is_active ? 'active' : 'inactive') + '">' + (mapping.is_active ? '✓ Ativo' : '○ Inativo') + '</span></td>' +
+          '<td><button class="danger" onclick="deleteMapping(\\'' + mapping.id + '\\')">✕ Remover</button></td>';
+        tbody.appendChild(tr);
+      });
+    }
+    
+    // Save new mapping
+    function saveMapping() {
+      const instanceId = document.getElementById('instanceSelect').value;
+      const channelSelect = document.getElementById('channelSelect');
+      const channelId = channelSelect.value;
+      const channelName = channelSelect.options[channelSelect.selectedIndex].dataset.name || 'Canal ' + channelId;
+      
+      if (!instanceId || !channelId) return;
+      
+      const btn = document.getElementById('saveBtn');
       const loading = document.getElementById('loading');
+      const errorEl = document.getElementById('error');
+      const successEl = document.getElementById('success');
       
-      document.getElementById('error').classList.remove('show');
-      document.getElementById('success').classList.remove('show');
-      
+      errorEl.classList.remove('show');
+      successEl.classList.remove('show');
       btn.disabled = true;
       loading.classList.add('show');
       
-      const newStatus = CURRENT_STATUS === 1 ? 0 : 1;
-      
-      console.log('Calling imconnector.activate with:', {
-        CONNECTOR: CONNECTOR,
-        LINE: LINE,
-        ACTIVE: newStatus
-      });
-      
+      // First activate the connector for this line
       BX24.callMethod('imconnector.activate', {
         CONNECTOR: CONNECTOR,
-        LINE: LINE,
-        ACTIVE: newStatus
-      }, function(result) {
-        console.log('imconnector.activate result:', result);
+        LINE: parseInt(channelId),
+        ACTIVE: 1
+      }, function(activateResult) {
+        console.log('Activate result:', activateResult);
         
-        if (result.error()) {
-          console.error('Error:', result.error());
-          showError(result.error().ex?.error_description || result.error());
+        if (activateResult.error()) {
+          console.error('Activate error:', activateResult.error());
+          errorEl.textContent = '❌ Erro ao ativar conector: ' + (activateResult.error().ex?.error_description || activateResult.error());
+          errorEl.classList.add('show');
           btn.disabled = false;
           loading.classList.remove('show');
           return;
         }
         
-        if (newStatus === 1) {
-          // When connecting, also set connector data
-          console.log('Calling imconnector.connector.data.set');
+        // Set connector data
+        BX24.callMethod('imconnector.connector.data.set', {
+          CONNECTOR: CONNECTOR,
+          LINE: parseInt(channelId),
+          DATA: {
+            id: CONNECTOR + '_line_' + channelId,
+            url: WEBHOOK_URL,
+            url_im: WEBHOOK_URL,
+            name: 'Thoth WhatsApp'
+          }
+        }, function(dataResult) {
+          console.log('Data set result:', dataResult);
           
-          BX24.callMethod('imconnector.connector.data.set', {
-            CONNECTOR: CONNECTOR,
-            LINE: LINE,
-            DATA: {
-              id: CONNECTOR + '_line_' + LINE,
-              url: WEBHOOK_URL,
-              url_im: WEBHOOK_URL,
-              name: 'Thoth WhatsApp'
-            }
-          }, function(dataResult) {
-            console.log('imconnector.connector.data.set result:', dataResult);
+          // Now save mapping to our database
+          fetch(WEBHOOK_URL + '?action=save_mapping', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'save_mapping',
+              workspace_id: WORKSPACE_ID,
+              integration_id: INTEGRATION_ID,
+              instance_id: instanceId,
+              line_id: parseInt(channelId),
+              line_name: channelName
+            })
+          })
+          .then(res => res.json())
+          .then(result => {
+            console.log('Save mapping result:', result);
             
-            if (dataResult.error()) {
-              console.error('Data set error:', dataResult.error());
+            if (result.error) {
+              errorEl.textContent = '❌ ' + result.error;
+              errorEl.classList.add('show');
+              btn.disabled = false;
+              loading.classList.remove('show');
+              return;
             }
             
-            showSuccess('Canal conectado com sucesso!');
+            successEl.textContent = '✓ Mapeamento salvo com sucesso!';
+            successEl.classList.add('show');
+            
             setTimeout(function() {
               location.reload();
             }, 1500);
+          })
+          .catch(err => {
+            console.error('Save error:', err);
+            errorEl.textContent = '❌ Erro ao salvar mapeamento';
+            errorEl.classList.add('show');
+            btn.disabled = false;
+            loading.classList.remove('show');
           });
-        } else {
-          showSuccess('Canal desconectado.');
-          setTimeout(function() {
-            location.reload();
-          }, 1500);
-        }
+        });
       });
     }
     
-    // Initialize BX24
+    // Delete mapping
+    function deleteMapping(mappingId) {
+      if (!confirm('Deseja realmente remover este mapeamento?')) return;
+      
+      fetch(WEBHOOK_URL + '?action=delete_mapping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'delete_mapping',
+          mapping_id: mappingId
+        })
+      })
+      .then(res => res.json())
+      .then(result => {
+        if (result.error) {
+          alert('Erro: ' + result.error);
+          return;
+        }
+        location.reload();
+      })
+      .catch(err => {
+        console.error('Delete error:', err);
+        alert('Erro ao remover mapeamento');
+      });
+    }
+    
+    // Event listeners
+    document.getElementById('instanceSelect').addEventListener('change', updateSaveButton);
+    document.getElementById('channelSelect').addEventListener('change', updateSaveButton);
+    
+    // Initialize
     BX24.init(function() {
       console.log('BX24 initialized');
+      populateInstances();
+      loadChannels();
+      renderMappings();
     });
   </script>
 </body>
@@ -445,36 +689,137 @@ async function handlePlacement(supabase: any, payload: any, supabaseUrl: string)
     );
   }
 
-  console.log("Found integration:", integration.id);
+  console.log("Found integration:", integration.id, "workspace:", integration.workspace_id);
 
   const connectorId = integration.config?.connector_id || "thoth_whatsapp";
   const bitrixDomain = domain || integration.config?.domain;
   const webhookUrl = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
 
-  // If this is SETTING_CONNECTOR placement, return the settings HTML page
-  if (placement === "SETTING_CONNECTOR" || lineId) {
-    console.log("=== RENDERING SETTINGS PAGE ===");
-    
-    return new Response(
-      renderSettingsPage(options, connectorId, bitrixDomain, supabaseUrl, webhookUrl),
-      {
-        headers: {
-          "Content-Type": "text/html; charset=utf-8",
-          ...corsHeaders,
-        },
-      }
-    );
+  // Fetch instances from the workspace
+  const { data: instances, error: instancesError } = await supabase
+    .from("instances")
+    .select("id, name, phone_number, status")
+    .eq("workspace_id", integration.workspace_id);
+
+  if (instancesError) {
+    console.error("Error fetching instances:", instancesError);
   }
 
-  // Default: return settings page
+  console.log("Found instances:", instances?.length || 0);
+
+  // Fetch existing mappings
+  const { data: mappings, error: mappingsError } = await supabase
+    .from("bitrix_channel_mappings")
+    .select("*")
+    .eq("integration_id", integration.id);
+
+  if (mappingsError) {
+    console.error("Error fetching mappings:", mappingsError);
+  }
+
+  console.log("Found mappings:", mappings?.length || 0);
+
+  // Return settings page with instances and mappings
   return new Response(
-    renderSettingsPage(options, connectorId, bitrixDomain, supabaseUrl, webhookUrl),
+    renderSettingsPage(
+      options, 
+      connectorId, 
+      bitrixDomain, 
+      supabaseUrl, 
+      webhookUrl,
+      instances || [],
+      mappings || [],
+      integration.id,
+      integration.workspace_id
+    ),
     {
       headers: {
         "Content-Type": "text/html; charset=utf-8",
         ...corsHeaders,
       },
     }
+  );
+}
+
+// Handle save_mapping action
+async function handleSaveMapping(supabase: any, payload: any) {
+  console.log("=== SAVE MAPPING ===");
+  console.log("Payload:", JSON.stringify(payload, null, 2));
+
+  const { workspace_id, integration_id, instance_id, line_id, line_name } = payload;
+
+  if (!workspace_id || !integration_id || !instance_id || !line_id) {
+    return new Response(
+      JSON.stringify({ error: "Campos obrigatórios não preenchidos" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  // Upsert the mapping (update if exists, insert if not)
+  const { data, error } = await supabase
+    .from("bitrix_channel_mappings")
+    .upsert({
+      workspace_id,
+      integration_id,
+      instance_id,
+      line_id,
+      line_name,
+      is_active: true,
+      updated_at: new Date().toISOString()
+    }, { 
+      onConflict: "integration_id,instance_id"
+    })
+    .select()
+    .single();
+
+  if (error) {
+    console.error("Error saving mapping:", error);
+    return new Response(
+      JSON.stringify({ error: error.message }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  console.log("Mapping saved:", data);
+
+  return new Response(
+    JSON.stringify({ success: true, mapping: data }),
+    { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+  );
+}
+
+// Handle delete_mapping action
+async function handleDeleteMapping(supabase: any, payload: any) {
+  console.log("=== DELETE MAPPING ===");
+  console.log("Payload:", JSON.stringify(payload, null, 2));
+
+  const { mapping_id } = payload;
+
+  if (!mapping_id) {
+    return new Response(
+      JSON.stringify({ error: "ID do mapeamento não fornecido" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const { error } = await supabase
+    .from("bitrix_channel_mappings")
+    .delete()
+    .eq("id", mapping_id);
+
+  if (error) {
+    console.error("Error deleting mapping:", error);
+    return new Response(
+      JSON.stringify({ error: error.message }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  console.log("Mapping deleted:", mapping_id);
+
+  return new Response(
+    JSON.stringify({ success: true }),
+    { headers: { ...corsHeaders, "Content-Type": "application/json" } }
   );
 }
 
@@ -492,10 +837,11 @@ serve(async (req) => {
 
   try {
     const url = new URL(req.url);
+    const action = url.searchParams.get("action");
     const workspaceId = url.searchParams.get("workspace_id");
     const connectorId = url.searchParams.get("connector_id");
 
-    // Parse request body - Bitrix24 can send as JSON or form-urlencoded
+    // Parse request body
     const contentType = req.headers.get("content-type") || "";
     let payload: any = {};
 
@@ -520,7 +866,6 @@ serve(async (req) => {
         },
       };
     } else {
-      // Try to parse as JSON first, fallback to form
       const text = await req.text();
       try {
         payload = JSON.parse(text);
@@ -543,6 +888,15 @@ serve(async (req) => {
     }
 
     console.log("Bitrix24 webhook received:", JSON.stringify(payload, null, 2));
+
+    // Handle specific actions
+    if (action === "save_mapping" || payload.action === "save_mapping") {
+      return await handleSaveMapping(supabase, payload);
+    }
+
+    if (action === "delete_mapping" || payload.action === "delete_mapping") {
+      return await handleDeleteMapping(supabase, payload);
+    }
 
     // Check if this is a PLACEMENT call (user connecting Open Channel)
     if (payload.PLACEMENT || payload.PLACEMENT_OPTIONS) {
@@ -576,24 +930,40 @@ serve(async (req) => {
           break;
         }
 
-        // Find the integration to get instance_id
-        const { data: integration } = await supabase
-          .from("integrations")
-          .select("*")
-          .eq("type", "bitrix24")
-          .eq("is_active", true)
-          .maybeSingle();
+        // Find the mapping for this line to get the correct instance
+        let instanceId: string | null = null;
 
-        if (!integration) {
-          console.error("No active Bitrix24 integration found");
-          break;
+        if (line) {
+          const { data: mapping } = await supabase
+            .from("bitrix_channel_mappings")
+            .select("instance_id")
+            .eq("line_id", line)
+            .eq("is_active", true)
+            .maybeSingle();
+
+          if (mapping) {
+            instanceId = mapping.instance_id;
+            console.log("Found instance from mapping:", instanceId);
+          }
         }
 
-        const config = integration.config as Record<string, unknown>;
-        const instanceId = config?.instance_id as string;
+        // Fallback to integration config if no mapping found
+        if (!instanceId) {
+          const { data: integration } = await supabase
+            .from("integrations")
+            .select("*")
+            .eq("type", "bitrix24")
+            .eq("is_active", true)
+            .maybeSingle();
+
+          if (integration) {
+            const config = integration.config as Record<string, unknown>;
+            instanceId = config?.instance_id as string;
+          }
+        }
 
         if (!instanceId) {
-          console.error("No instance_id configured for Bitrix24 integration");
+          console.error("No instance_id found for message routing");
           break;
         }
 
@@ -633,56 +1003,17 @@ serve(async (req) => {
       }
 
       case "ONIMCONNECTORTYPING": {
-        // Operator is typing in Bitrix24 → Send typing indicator to WhatsApp
         console.log("Bitrix24 operator typing event");
-        
-        const userId = payload.data?.USER_ID || payload.data?.user_id;
-        const line = payload.data?.LINE;
-        
-        // Find the integration
-        const { data: integration } = await supabase
-          .from("integrations")
-          .select("*")
-          .eq("type", "bitrix24")
-          .eq("is_active", true)
-          .maybeSingle();
-
-        if (!integration) {
-          console.log("No active Bitrix24 integration for typing");
-          break;
-        }
-
-        const config = integration.config as Record<string, unknown>;
-        const instanceId = config?.instance_id as string;
-
-        if (!instanceId) {
-          console.log("No instance configured for typing");
-          break;
-        }
-
-        // Find the contact
-        const { data: contact } = await supabase
-          .from("contacts")
-          .select("*")
-          .eq("instance_id", instanceId)
-          .contains("metadata", { bitrix24_user_id: userId })
-          .maybeSingle();
-
-        if (contact) {
-          console.log("Would send typing indicator to WhatsApp for:", contact.phone_number);
-        }
         break;
       }
 
       case "ONIMCONNECTORDIALOGFINISH": {
-        // Conversation closed in Bitrix24
         const dialogId = payload.data?.DIALOG_ID;
         console.log("Bitrix24 dialog finished:", dialogId);
         break;
       }
 
       case "ONIMCONNECTORSTATUSDELETE": {
-        // Line disconnected in Bitrix24
         console.log("Bitrix24 connector status deleted");
         break;
       }
