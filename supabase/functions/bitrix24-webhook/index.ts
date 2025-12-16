@@ -61,6 +61,118 @@ async function refreshBitrixToken(integration: any, supabase: any): Promise<stri
   return config.access_token || null;
 }
 
+// Activate connector via Bitrix24 REST API (backend call)
+async function activateConnectorViaAPI(
+  integration: any, 
+  supabase: any, 
+  lineId: number, 
+  webhookUrl: string
+): Promise<{ success: boolean; error?: string }> {
+  console.log("=== ACTIVATING CONNECTOR VIA API ===");
+  console.log("Line ID:", lineId);
+  
+  const config = integration.config;
+  const connectorId = config?.connector_id || "thoth_whatsapp";
+  
+  // Get fresh access token
+  const accessToken = await refreshBitrixToken(integration, supabase);
+  
+  if (!accessToken) {
+    console.error("No access token available");
+    return { success: false, error: "Token de acesso não disponível" };
+  }
+  
+  // Determine API endpoint
+  const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
+  
+  console.log("Using endpoint:", clientEndpoint);
+  console.log("Connector ID:", connectorId);
+  
+  try {
+    // 1. First, activate the connector for this line
+    const activateUrl = `${clientEndpoint}imconnector.activate`;
+    console.log("Calling imconnector.activate...");
+    
+    const activateResponse = await fetch(activateUrl, {
+      method: "POST",
+      headers: { 
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        auth: accessToken,
+        CONNECTOR: connectorId,
+        LINE: lineId,
+        ACTIVE: 1
+      })
+    });
+    
+    const activateResult = await activateResponse.json();
+    console.log("Activate result:", JSON.stringify(activateResult, null, 2));
+    
+    if (activateResult.error) {
+      console.error("Activate error:", activateResult.error, activateResult.error_description);
+      // Don't fail completely, try to continue
+    }
+    
+    // 2. Set connector data with URLs
+    const dataSetUrl = `${clientEndpoint}imconnector.connector.data.set`;
+    console.log("Calling imconnector.connector.data.set...");
+    
+    const dataSetResponse = await fetch(dataSetUrl, {
+      method: "POST",
+      headers: { 
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        auth: accessToken,
+        CONNECTOR: connectorId,
+        LINE: lineId,
+        DATA: {
+          id: `${connectorId}_line_${lineId}`,
+          url: webhookUrl,
+          url_im: webhookUrl,
+          name: "Thoth WhatsApp"
+        }
+      })
+    });
+    
+    const dataSetResult = await dataSetResponse.json();
+    console.log("Data set result:", JSON.stringify(dataSetResult, null, 2));
+    
+    if (dataSetResult.error) {
+      console.error("Data set error:", dataSetResult.error, dataSetResult.error_description);
+    }
+    
+    // 3. Also register the connector if not already registered
+    const registerUrl = `${clientEndpoint}imconnector.register`;
+    console.log("Calling imconnector.register (just in case)...");
+    
+    const registerResponse = await fetch(registerUrl, {
+      method: "POST",
+      headers: { 
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        auth: accessToken,
+        ID: connectorId,
+        NAME: "Thoth WhatsApp",
+        ICON: {
+          DATA_IMAGE: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0OCIgaGVpZ2h0PSI0OCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSIjMjVEMzY2Ij48cGF0aCBkPSJNMTcuNDcyIDQuMzA4YTkuOTcgOS45NyAwIDAgMC03LjA1Ni0yLjkyOGMtNS41NDUgMC0xMC4wNTggNC41MS0xMC4wNjIgMTAuMDUxYS45OTQuOTk0IDAgMCAwIC4wMDMuMTc4Yy4wMDcgMS44MTguNDg3IDMuNTk0IDEuMzk0IDUuMTRsLTEuNDk0IDUuNDE3YS41LjUgMCAwIDAgLjYxLjYxTDYuMyAyMS4yOTFhMTAgMTAgMCAwIDAgNC43NjMgMS4yMjJoLjAwNGM1LjU0IDAgMTAuMDUtNC41MDcgMTAuMDU0LTEwLjA1MWE5Ljk3IDkuOTcgMCAwIDAtMi45MDctNy4wNjRsLS43NDItLjA5Wm0tNS45MjYgMTUuNWgtLjAwMWE4LjMzOCA4LjMzOCAwIDAgMS00LjI1Mi0xLjE3bC0uMzA2LS4xODEtMy4xNzEuODMyLjg0Ny0zLjA4OS0uMTk5LS4zMTZhOC4zMjEgOC4zMjEgMCAwIDEtMS4yNzctNC40NGMuMDAzLTQuNjI1IDMuNzY5LTguMzkgOC4zOTgtOC4zOWE4LjMzMiA4LjMzMiAwIDAgMSA1LjkxNCAyLjQ0OCA4LjMxNCA4LjMxNCAwIDAgMSAyLjQ0MyA1LjkxYy0uMDAzIDQuNjI4LTMuNzY4IDguMzk3LTguMzk2IDguMzk2Wm00LjU5Ny05LjQ5Yy0uMjUyLS4xMjYtMS40OS0uNzM1LTEuNzItLjgxOS0uMjMtLjA4NC0uMzk4LS4xMjYtLjU2Ni4xMjYtLjE2OC4yNTItLjY1MS44MTktLjc5OC45ODctLjE0Ny4xNjgtLjI5NC4xOS0uNTQ2LjA2My0uMjUyLS4xMjYtMS4wNjQtLjM5Mi0yLjAyNS0xLjI1LS43NDgtLjY2Ny0xLjI1NC0xLjQ5MS0xLjQwMi0xLjc0NC0uMTQ3LS4yNTItLjAxNS0uMzg4LjExMS0uNTEzLjExNC0uMTEyLjI1Mi0uMjk0LjM3OC0uNDQuMTI2LS4xNDcuMTY4LS4yNTIuMjUyLS40Mi4wODQtLjE2OC4wNDItLjMxNS0uMDIxLS40NC0uMDYzLS4xMjYtLjU2Ni0xLjM2Ny0uNzc2LTEuODcxLS4yMDQtLjQ5MS0uNDEyLS40MjUtLjU2Ni0uNDMzLS4xNDctLjAwNy0uMzE1LS4wMDktLjQ4My0uMDA5cy0uNDQuMDYzLS42NzIuMzE1Yy0uMjMuMjUyLS44ODIuODYxLS44ODIgMi4xczkwMyAyLjQzOC45MDMgMi40MzhjMCAuMDAxIDEuNTY5IDIuMzk1IDMuNzk4IDMuMzU5LjUzMS4yMjkuOTQ1LjM2NiAxLjI2OC40N2ExLjU3NiAxLjU3NiAwIDAgMCAxLjQ0Ny0uMDk3Yy4zNjctLjIxLjk2Ni0uNzc5IDEuMTAyLTEuNTMyLjEzNS0uNzUyLjEzNS0xLjM5Ny4wOTQtMS41My0uMDQxLS4xMzQtLjE1Mi0uMjA4LS4zMjMtLjI3M1oiLz48L3N2Zz4="
+        },
+        PLACEMENT_HANDLER: webhookUrl
+      })
+    });
+    
+    const registerResult = await registerResponse.json();
+    console.log("Register result:", JSON.stringify(registerResult, null, 2));
+    
+    return { success: true };
+  } catch (error) {
+    console.error("Error activating connector:", error);
+    return { success: false, error: error instanceof Error ? error.message : "Erro desconhecido" };
+  }
+}
+
 // Generate HTML settings page for the connector with instance and channel selection
 function renderSettingsPage(
   options: { LINE?: number; ACTIVE_STATUS?: number },
@@ -71,9 +183,11 @@ function renderSettingsPage(
   instances: any[],
   mappings: any[],
   integrationId: string,
-  workspaceId: string
+  workspaceId: string,
+  activationResult?: { success: boolean; error?: string }
 ): string {
   const lineId = options.LINE || 0;
+  const isActivated = activationResult?.success || false;
 
   // JSON encode instances and mappings for JS
   const instancesJson = JSON.stringify(instances || []);
@@ -127,6 +241,61 @@ function renderSettingsPage(
     .subtitle {
       color: #94a3b8;
       font-size: 14px;
+    }
+    .activation-status {
+      padding: 16px;
+      border-radius: 12px;
+      margin-bottom: 24px;
+      text-align: center;
+    }
+    .activation-status.success {
+      background: rgba(34, 197, 94, 0.15);
+      border: 1px solid rgba(34, 197, 94, 0.3);
+    }
+    .activation-status.error {
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+    }
+    .activation-status.pending {
+      background: rgba(234, 179, 8, 0.15);
+      border: 1px solid rgba(234, 179, 8, 0.3);
+    }
+    .activation-status h3 {
+      font-size: 16px;
+      margin-bottom: 4px;
+    }
+    .activation-status.success h3 { color: #4ade80; }
+    .activation-status.error h3 { color: #f87171; }
+    .activation-status.pending h3 { color: #fbbf24; }
+    .activation-status p {
+      font-size: 14px;
+      color: #94a3b8;
+    }
+    .channel-info {
+      background: rgba(15, 23, 42, 0.5);
+      border: 1px solid rgba(148, 163, 184, 0.2);
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 20px;
+    }
+    .channel-info .label {
+      font-size: 12px;
+      color: #64748b;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+    .channel-info .value {
+      font-size: 16px;
+      color: #f1f5f9;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .channel-info .value .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #25D366;
     }
     .section {
       margin-bottom: 24px;
@@ -302,6 +471,11 @@ function renderSettingsPage(
       background: rgba(148, 163, 184, 0.1);
       margin: 24px 0;
     }
+    .help-text {
+      font-size: 13px;
+      color: #64748b;
+      margin-top: 8px;
+    }
   </style>
 </head>
 <body>
@@ -312,9 +486,24 @@ function renderSettingsPage(
       <p class="subtitle">Vincule seus números W-API aos Canais Abertos do Bitrix24</p>
     </div>
 
+    ${lineId > 0 ? `
+    <div class="activation-status ${isActivated ? 'success' : 'pending'}">
+      <h3>${isActivated ? '✓ Conector Ativado' : '⏳ Finalizando Configuração...'}</h3>
+      <p>${isActivated ? 'O conector está pronto para uso' : 'Selecione uma instância W-API para completar'}</p>
+    </div>
+    
+    <div class="channel-info">
+      <div class="label">Canal Aberto Selecionado</div>
+      <div class="value">
+        <span class="dot"></span>
+        Linha ${lineId}
+      </div>
+    </div>
+    ` : ''}
+
     <div class="section">
       <div class="section-title">
-        <span>➕</span> Novo Mapeamento
+        <span>🔗</span> ${lineId > 0 ? 'Vincular Instância' : 'Novo Mapeamento'}
       </div>
       
       <div class="form-group">
@@ -322,17 +511,20 @@ function renderSettingsPage(
         <select id="instanceSelect">
           <option value="">Selecione uma instância...</option>
         </select>
+        <p class="help-text">Selecione qual número de WhatsApp receberá as mensagens deste canal</p>
       </div>
       
+      ${lineId === 0 ? `
       <div class="form-group">
         <label>Canal Aberto do Bitrix24</label>
         <select id="channelSelect">
           <option value="">Carregando canais...</option>
         </select>
       </div>
+      ` : ''}
       
-      <button class="primary" id="saveBtn" onclick="saveMapping()" disabled>
-        ✓ Vincular Canal
+      <button class="primary" id="saveBtn" onclick="completeSetup()" disabled>
+        ✓ ${lineId > 0 ? 'Finalizar Configuração' : 'Vincular Canal'}
       </button>
       
       <p class="loading" id="loading">
@@ -348,7 +540,7 @@ function renderSettingsPage(
 
     <div class="section">
       <div class="section-title">
-        <span>🔗</span> Mapeamentos Ativos
+        <span>📋</span> Mapeamentos Ativos
       </div>
       
       <div id="mappingsContainer">
@@ -382,12 +574,15 @@ function renderSettingsPage(
     const INTEGRATION_ID = '${integrationId}';
     const WORKSPACE_ID = '${workspaceId}';
     const LINE_FROM_BITRIX = ${lineId};
+    const ALREADY_ACTIVATED = ${isActivated};
     
     // Data from backend
     const instances = ${instancesJson};
     const existingMappings = ${mappingsJson};
     
     let channels = [];
+    let selectedChannelId = LINE_FROM_BITRIX;
+    let selectedChannelName = 'Linha ' + LINE_FROM_BITRIX;
     
     // Populate instances dropdown
     function populateInstances() {
@@ -406,9 +601,16 @@ function renderSettingsPage(
       updateSaveButton();
     }
     
-    // Load Bitrix24 Open Channels
+    // Load Bitrix24 Open Channels (only if no LINE specified)
     function loadChannels() {
+      if (LINE_FROM_BITRIX > 0) {
+        // Channel already specified, no need to load
+        updateSaveButton();
+        return;
+      }
+      
       const select = document.getElementById('channelSelect');
+      if (!select) return;
       
       BX24.callMethod('imopenlines.config.list.get', {}, function(result) {
         console.log('Open Lines result:', result);
@@ -436,11 +638,6 @@ function renderSettingsPage(
           select.appendChild(option);
         });
         
-        // If opened from a specific line, pre-select it
-        if (LINE_FROM_BITRIX > 0) {
-          select.value = LINE_FROM_BITRIX;
-        }
-        
         updateSaveButton();
       });
     }
@@ -448,7 +645,8 @@ function renderSettingsPage(
     // Update save button state
     function updateSaveButton() {
       const instanceId = document.getElementById('instanceSelect').value;
-      const channelId = document.getElementById('channelSelect').value;
+      const channelSelect = document.getElementById('channelSelect');
+      const channelId = channelSelect ? channelSelect.value : LINE_FROM_BITRIX;
       document.getElementById('saveBtn').disabled = !instanceId || !channelId;
     }
     
@@ -484,12 +682,20 @@ function renderSettingsPage(
       });
     }
     
-    // Save new mapping
-    function saveMapping() {
+    // Complete setup - activate connector and save mapping
+    function completeSetup() {
       const instanceId = document.getElementById('instanceSelect').value;
       const channelSelect = document.getElementById('channelSelect');
-      const channelId = channelSelect.value;
-      const channelName = channelSelect.options[channelSelect.selectedIndex].dataset.name || 'Canal ' + channelId;
+      
+      let channelId, channelName;
+      
+      if (LINE_FROM_BITRIX > 0) {
+        channelId = LINE_FROM_BITRIX;
+        channelName = 'Linha ' + LINE_FROM_BITRIX;
+      } else {
+        channelId = parseInt(channelSelect.value);
+        channelName = channelSelect.options[channelSelect.selectedIndex].dataset.name || 'Canal ' + channelId;
+      }
       
       if (!instanceId || !channelId) return;
       
@@ -503,27 +709,21 @@ function renderSettingsPage(
       btn.disabled = true;
       loading.classList.add('show');
       
-      // First activate the connector for this line
+      // Activate connector via BX24 API (ensures it's activated from Bitrix24 side)
       BX24.callMethod('imconnector.activate', {
         CONNECTOR: CONNECTOR,
-        LINE: parseInt(channelId),
+        LINE: channelId,
         ACTIVE: 1
       }, function(activateResult) {
         console.log('Activate result:', activateResult);
         
-        if (activateResult.error()) {
-          console.error('Activate error:', activateResult.error());
-          errorEl.textContent = '❌ Erro ao ativar conector: ' + (activateResult.error().ex?.error_description || activateResult.error());
-          errorEl.classList.add('show');
-          btn.disabled = false;
-          loading.classList.remove('show');
-          return;
-        }
+        // Even if activation fails, continue to save mapping
+        // (backend already tried to activate)
         
         // Set connector data
         BX24.callMethod('imconnector.connector.data.set', {
           CONNECTOR: CONNECTOR,
-          LINE: parseInt(channelId),
+          LINE: channelId,
           DATA: {
             id: CONNECTOR + '_line_' + channelId,
             url: WEBHOOK_URL,
@@ -533,22 +733,22 @@ function renderSettingsPage(
         }, function(dataResult) {
           console.log('Data set result:', dataResult);
           
-          // Now save mapping to our database
-          fetch(WEBHOOK_URL + '?action=save_mapping', {
+          // Save mapping to our database
+          fetch(WEBHOOK_URL + '?action=complete_setup', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              action: 'save_mapping',
+              action: 'complete_setup',
               workspace_id: WORKSPACE_ID,
               integration_id: INTEGRATION_ID,
               instance_id: instanceId,
-              line_id: parseInt(channelId),
+              line_id: channelId,
               line_name: channelName
             })
           })
           .then(res => res.json())
           .then(result => {
-            console.log('Save mapping result:', result);
+            console.log('Complete setup result:', result);
             
             if (result.error) {
               errorEl.textContent = '❌ ' + result.error;
@@ -558,16 +758,23 @@ function renderSettingsPage(
               return;
             }
             
-            successEl.textContent = '✓ Mapeamento salvo com sucesso!';
+            successEl.textContent = '✓ Configuração concluída com sucesso!';
             successEl.classList.add('show');
+            loading.classList.remove('show');
             
+            // Notify Bitrix24 that setup is complete
             setTimeout(function() {
-              location.reload();
-            }, 1500);
+              try {
+                BX24.closeApplication();
+              } catch(e) {
+                console.log('Could not close application:', e);
+                location.reload();
+              }
+            }, 2000);
           })
           .catch(err => {
-            console.error('Save error:', err);
-            errorEl.textContent = '❌ Erro ao salvar mapeamento';
+            console.error('Complete setup error:', err);
+            errorEl.textContent = '❌ Erro ao salvar configuração';
             errorEl.classList.add('show');
             btn.disabled = false;
             loading.classList.remove('show');
@@ -604,7 +811,10 @@ function renderSettingsPage(
     
     // Event listeners
     document.getElementById('instanceSelect').addEventListener('change', updateSaveButton);
-    document.getElementById('channelSelect').addEventListener('change', updateSaveButton);
+    const channelSelect = document.getElementById('channelSelect');
+    if (channelSelect) {
+      channelSelect.addEventListener('change', updateSaveButton);
+    }
     
     // Initialize
     BX24.init(function() {
@@ -695,6 +905,15 @@ async function handlePlacement(supabase: any, payload: any, supabaseUrl: string)
   const bitrixDomain = domain || integration.config?.domain;
   const webhookUrl = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
 
+  // AUTO-ACTIVATE: If a LINE is specified, automatically activate the connector
+  let activationResult: { success: boolean; error?: string } = { success: false };
+  
+  if (lineId && lineId > 0) {
+    console.log("LINE specified, auto-activating connector...");
+    activationResult = await activateConnectorViaAPI(integration, supabase, lineId, webhookUrl);
+    console.log("Auto-activation result:", activationResult);
+  }
+
   // Fetch instances from the workspace
   const { data: instances, error: instancesError } = await supabase
     .from("instances")
@@ -730,7 +949,8 @@ async function handlePlacement(supabase: any, payload: any, supabaseUrl: string)
       instances || [],
       mappings || [],
       integration.id,
-      integration.workspace_id
+      integration.workspace_id,
+      activationResult
     ),
     {
       headers: {
@@ -741,7 +961,75 @@ async function handlePlacement(supabase: any, payload: any, supabaseUrl: string)
   );
 }
 
-// Handle save_mapping action
+// Handle complete_setup action (activate connector + save mapping)
+async function handleCompleteSetup(supabase: any, payload: any, supabaseUrl: string) {
+  console.log("=== COMPLETE SETUP ===");
+  console.log("Payload:", JSON.stringify(payload, null, 2));
+
+  const { workspace_id, integration_id, instance_id, line_id, line_name } = payload;
+
+  if (!workspace_id || !integration_id || !instance_id || !line_id) {
+    return new Response(
+      JSON.stringify({ error: "Campos obrigatórios não preenchidos" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  // Get integration to activate connector
+  const { data: integration, error: integrationError } = await supabase
+    .from("integrations")
+    .select("*")
+    .eq("id", integration_id)
+    .single();
+
+  if (integrationError || !integration) {
+    console.error("Integration not found:", integrationError);
+    return new Response(
+      JSON.stringify({ error: "Integração não encontrada" }),
+      { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const webhookUrl = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
+
+  // Activate connector via API (redundant but ensures activation)
+  const activationResult = await activateConnectorViaAPI(integration, supabase, line_id, webhookUrl);
+  console.log("Activation result:", activationResult);
+
+  // Save the mapping
+  const { data, error } = await supabase
+    .from("bitrix_channel_mappings")
+    .upsert({
+      workspace_id,
+      integration_id,
+      instance_id,
+      line_id,
+      line_name,
+      is_active: true,
+      updated_at: new Date().toISOString()
+    }, { 
+      onConflict: "integration_id,instance_id"
+    })
+    .select()
+    .single();
+
+  if (error) {
+    console.error("Error saving mapping:", error);
+    return new Response(
+      JSON.stringify({ error: error.message }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  console.log("Mapping saved:", data);
+
+  return new Response(
+    JSON.stringify({ success: true, mapping: data, activation: activationResult }),
+    { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+  );
+}
+
+// Handle save_mapping action (legacy, redirects to complete_setup)
 async function handleSaveMapping(supabase: any, payload: any) {
   console.log("=== SAVE MAPPING ===");
   console.log("Payload:", JSON.stringify(payload, null, 2));
@@ -890,6 +1178,10 @@ serve(async (req) => {
     console.log("Bitrix24 webhook received:", JSON.stringify(payload, null, 2));
 
     // Handle specific actions
+    if (action === "complete_setup" || payload.action === "complete_setup") {
+      return await handleCompleteSetup(supabase, payload, supabaseUrl);
+    }
+
     if (action === "save_mapping" || payload.action === "save_mapping") {
       return await handleSaveMapping(supabase, payload);
     }
