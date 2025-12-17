@@ -191,6 +191,13 @@ export default function Integrations() {
   const [savingMapping, setSavingMapping] = useState(false);
   const [cleaningConnectors, setCleaningConnectors] = useState(false);
 
+  // Bitrix24 Channels
+  const [bitrixChannels, setBitrixChannels] = useState<Array<{ id: number; name: string; active: boolean }>>([]);
+  const [loadingChannels, setLoadingChannels] = useState(false);
+  const [showCreateChannelDialog, setShowCreateChannelDialog] = useState(false);
+  const [newChannelName, setNewChannelName] = useState("");
+  const [creatingChannel, setCreatingChannel] = useState(false);
+
   useEffect(() => {
     if (workspace) {
       fetchIntegrations();
@@ -282,6 +289,80 @@ export default function Integrations() {
     } catch (error) {
       console.error("Error fetching channel mappings:", error);
     }
+  };
+
+  // Fetch Bitrix24 channels
+  const fetchBitrixChannels = async () => {
+    const bitrix = integrations.find((i) => i.type === "bitrix24");
+    if (!bitrix?.config?.access_token && !bitrix?.config?.webhook_url) return;
+
+    setLoadingChannels(true);
+    try {
+      const response = await supabase.functions.invoke("bitrix24-webhook", {
+        body: {
+          action: "list_channels",
+          integration_id: bitrix.id
+        }
+      });
+
+      if (response.data?.channels) {
+        setBitrixChannels(response.data.channels);
+      } else if (response.data?.error) {
+        console.error("Error fetching channels:", response.data.error);
+      }
+    } catch (error) {
+      console.error("Error fetching Bitrix channels:", error);
+    } finally {
+      setLoadingChannels(false);
+    }
+  };
+
+  // Create new Bitrix24 channel
+  const handleCreateChannel = async () => {
+    if (!newChannelName.trim()) {
+      toast.error("Digite o nome do canal");
+      return;
+    }
+
+    const bitrix = integrations.find((i) => i.type === "bitrix24");
+    if (!bitrix) {
+      toast.error("Integração Bitrix24 não encontrada");
+      return;
+    }
+
+    setCreatingChannel(true);
+    try {
+      const response = await supabase.functions.invoke("bitrix24-webhook", {
+        body: {
+          action: "create_channel",
+          integration_id: bitrix.id,
+          channel_name: newChannelName
+        }
+      });
+
+      if (response.data?.success) {
+        toast.success(`Canal "${newChannelName}" criado com sucesso!`);
+        setNewChannelName("");
+        setShowCreateChannelDialog(false);
+        fetchBitrixChannels();
+      } else {
+        toast.error(response.data?.error || "Erro ao criar canal");
+      }
+    } catch (error) {
+      console.error("Error creating channel:", error);
+      toast.error("Erro ao criar canal");
+    } finally {
+      setCreatingChannel(false);
+    }
+  };
+
+  // Fetch channels when Bitrix24 integration is loaded
+  useEffect(() => {
+    const bitrix = integrations.find((i) => i.type === "bitrix24");
+    if (bitrix?.is_active && (bitrix?.config?.access_token || bitrix?.config?.webhook_url)) {
+      fetchBitrixChannels();
+    }
+  }, [integrations]);
   };
 
   const handleCleanConnectors = async () => {
@@ -1663,25 +1744,55 @@ export default function Integrations() {
               </div>
 
               <div className="space-y-2">
-                <Label>Line ID (Canal Aberto)</Label>
-                <Input
-                  type="number"
-                  placeholder="Ex: 1, 2, 3..."
-                  value={newMappingLineId}
-                  onChange={(e) => setNewMappingLineId(e.target.value)}
-                />
-                <p className="text-xs text-muted-foreground">
-                  O número da linha do Canal Aberto no Bitrix24 (encontrado nas configurações do canal)
-                </p>
-              </div>
-
-              <div className="space-y-2">
-                <Label>Nome do Canal (opcional)</Label>
-                <Input
-                  placeholder="Ex: Vendas, Suporte..."
-                  value={newMappingLineName}
-                  onChange={(e) => setNewMappingLineName(e.target.value)}
-                />
+                <Label>Canal Aberto do Bitrix24</Label>
+                <div className="flex gap-2">
+                  <Select 
+                    value={newMappingLineId} 
+                    onValueChange={(val) => {
+                      setNewMappingLineId(val);
+                      const channel = bitrixChannels.find(ch => ch.id.toString() === val);
+                      if (channel) {
+                        setNewMappingLineName(channel.name);
+                      }
+                    }}
+                  >
+                    <SelectTrigger className="flex-1">
+                      <SelectValue placeholder={loadingChannels ? "Carregando canais..." : "Selecione um canal"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {bitrixChannels.map((channel) => (
+                        <SelectItem key={channel.id} value={channel.id.toString()}>
+                          <div className="flex items-center gap-2">
+                            <span className={`h-2 w-2 rounded-full ${channel.active ? "bg-green-500" : "bg-muted-foreground"}`} />
+                            {channel.name} (ID: {channel.id})
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={() => setShowCreateChannelDialog(true)}
+                    title="Criar novo canal"
+                  >
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={fetchBitrixChannels}
+                    disabled={loadingChannels}
+                    title="Atualizar lista"
+                  >
+                    <RefreshCw className={`h-4 w-4 ${loadingChannels ? "animate-spin" : ""}`} />
+                  </Button>
+                </div>
+                {bitrixChannels.length === 0 && !loadingChannels && (
+                  <p className="text-xs text-muted-foreground">
+                    Nenhum canal encontrado. Clique em + para criar um novo.
+                  </p>
+                )}
               </div>
             </div>
 
@@ -1697,6 +1808,54 @@ export default function Integrations() {
                   </>
                 ) : (
                   "Adicionar Mapeamento"
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Create Channel Dialog */}
+        <Dialog open={showCreateChannelDialog} onOpenChange={setShowCreateChannelDialog}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Plus className="h-5 w-5" />
+                Criar Novo Canal Aberto
+              </DialogTitle>
+              <DialogDescription>
+                Crie um novo Canal Aberto no Bitrix24 para conectar ao WhatsApp
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label>Nome do Canal</Label>
+                <Input
+                  placeholder="Ex: WhatsApp Vendas, WhatsApp Suporte..."
+                  value={newChannelName}
+                  onChange={(e) => setNewChannelName(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Este nome aparecerá no Contact Center do Bitrix24
+                </p>
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setShowCreateChannelDialog(false)}>
+                Cancelar
+              </Button>
+              <Button onClick={handleCreateChannel} disabled={creatingChannel || !newChannelName.trim()}>
+                {creatingChannel ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Criando...
+                  </>
+                ) : (
+                  <>
+                    <Plus className="h-4 w-4 mr-2" />
+                    Criar Canal
+                  </>
                 )}
               </Button>
             </DialogFooter>
