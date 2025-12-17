@@ -198,25 +198,40 @@ serve(async (req) => {
     const config = integration.config;
     const connectorId = config?.connector_id || "thoth_whatsapp";
     
-    // Get fresh access token
+    // Get fresh access token with proactive refresh
     let accessToken = config.access_token;
     
-    // Check if token needs refresh
+    // Check if token needs refresh (10 minute buffer)
     if (config.token_expires_at) {
       const expiresAt = new Date(config.token_expires_at);
       const now = new Date();
-      const bufferMs = 5 * 60 * 1000;
+      const bufferMs = 10 * 60 * 1000; // 10 minutes
       
       if (expiresAt.getTime() - now.getTime() <= bufferMs && config.refresh_token) {
-        console.log("Refreshing token...");
+        console.log("Token expiring soon, refreshing proactively...");
         const refreshUrl = `https://oauth.bitrix.info/oauth/token/?grant_type=refresh_token&client_id=${config.client_id || ""}&client_secret=${config.client_secret || ""}&refresh_token=${config.refresh_token}`;
         
         try {
           const tokenResponse = await fetch(refreshUrl);
           const tokenData = await tokenResponse.json();
           
-          if (tokenData.access_token) {
+          if (tokenData.error) {
+            console.error("Token refresh failed:", tokenData.error, tokenData.error_description);
+            // Mark refresh failure but continue with existing token
+            await supabase
+              .from("integrations")
+              .update({
+                config: {
+                  ...config,
+                  token_refresh_failed: true,
+                  token_refresh_error: tokenData.error_description || tokenData.error,
+                  token_refresh_failed_at: new Date().toISOString(),
+                },
+              })
+              .eq("id", integration_id);
+          } else if (tokenData.access_token) {
             accessToken = tokenData.access_token;
+            const newExpiresAt = new Date(Date.now() + (tokenData.expires_in || 3600) * 1000).toISOString();
             // Update token in database
             await supabase
               .from("integrations")
@@ -225,15 +240,25 @@ serve(async (req) => {
                   ...config,
                   access_token: tokenData.access_token,
                   refresh_token: tokenData.refresh_token || config.refresh_token,
-                  token_expires_at: new Date(Date.now() + (tokenData.expires_in || 3600) * 1000).toISOString(),
+                  token_expires_at: newExpiresAt,
+                  token_refresh_failed: false,
+                  token_refresh_error: null,
+                  last_token_refresh_at: new Date().toISOString(),
                 },
               })
               .eq("id", integration_id);
+            console.log("Token refreshed successfully, new expiry:", newExpiresAt);
           }
         } catch (e) {
           console.error("Token refresh error:", e);
         }
       }
+    }
+    
+    // Check if token is available
+    if (!accessToken) {
+      console.error("No access token available to send message to Bitrix24");
+      throw new Error("Token de acesso não disponível. Reconecte o Bitrix24.");
     }
 
     const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
