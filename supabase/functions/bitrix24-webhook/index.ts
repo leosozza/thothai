@@ -548,10 +548,10 @@ async function handleDeleteMapping(supabase: any, payload: any) {
   );
 }
 
-// Handle list_channels action - List all Open Channels from Bitrix24
+// Handle list_channels action - List all Open Channels from Bitrix24 with connector status
 async function handleListChannels(supabase: any, payload: any) {
   console.log("=== LIST CHANNELS ===");
-  const { integration_id } = payload;
+  const { integration_id, include_connector_status } = payload;
 
   if (!integration_id) {
     return new Response(
@@ -584,6 +584,7 @@ async function handleListChannels(supabase: any, payload: any) {
 
   const config = integration.config;
   const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
+  const connectorId = config.connector_id || "thoth_whatsapp";
 
   try {
     // Call imopenlines.config.list.get to get all open channels
@@ -613,10 +614,62 @@ async function handleListChannels(supabase: any, payload: any) {
     const channels = (result.result || []).map((ch: any) => ({
       id: parseInt(ch.ID),
       name: ch.LINE_NAME || `Canal ${ch.ID}`,
-      active: ch.ACTIVE === "Y"
+      active: ch.ACTIVE === "Y",
+      connector_active: false, // Will be updated below if include_connector_status
     }));
 
-    console.log("Mapped channels:", channels);
+    // If requested, check connector status for each line
+    if (include_connector_status) {
+      for (const channel of channels) {
+        try {
+          const statusResponse = await fetch(`${clientEndpoint}imconnector.status`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              auth: accessToken,
+              CONNECTOR: connectorId,
+              LINE: channel.id
+            })
+          });
+          const statusResult = await statusResponse.json();
+          console.log(`Connector status for line ${channel.id}:`, statusResult);
+          
+          if (statusResult.result) {
+            channel.connector_active = statusResult.result.active === true || statusResult.result.ACTIVE === "Y";
+            channel.connector_registered = statusResult.result.register === true || statusResult.result.REGISTER === "Y";
+            channel.connector_connection = statusResult.result.connection === true || statusResult.result.CONNECTION === "Y";
+          }
+        } catch (e) {
+          console.error(`Error getting connector status for line ${channel.id}:`, e);
+        }
+      }
+    }
+
+    // Get mappings from database to add instance info
+    const { data: mappings } = await supabase
+      .from("bitrix_channel_mappings")
+      .select(`
+        line_id,
+        instance_id,
+        is_active,
+        instances (id, name, phone_number)
+      `)
+      .eq("integration_id", integration_id);
+
+    // Enrich channels with mapping info
+    for (const channel of channels) {
+      const mapping = mappings?.find((m: any) => m.line_id === channel.id);
+      if (mapping) {
+        channel.mapping = {
+          instance_id: mapping.instance_id,
+          instance_name: mapping.instances?.name,
+          phone_number: mapping.instances?.phone_number,
+          is_active: mapping.is_active
+        };
+      }
+    }
+
+    console.log("Final channels with status:", channels);
 
     return new Response(
       JSON.stringify({ success: true, channels }),
@@ -626,6 +679,56 @@ async function handleListChannels(supabase: any, payload: any) {
     console.error("Error listing channels:", error);
     return new Response(
       JSON.stringify({ error: error instanceof Error ? error.message : "Erro ao listar canais" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+}
+
+// Handle activate_connector_for_line action - Activate/deactivate connector for a specific line
+async function handleActivateConnectorForLine(supabase: any, payload: any, supabaseUrl: string) {
+  console.log("=== ACTIVATE CONNECTOR FOR LINE ===");
+  const { integration_id, line_id, active } = payload;
+
+  if (!integration_id || !line_id) {
+    return new Response(
+      JSON.stringify({ error: "Integration ID e Line ID são obrigatórios" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const { data: integration, error: integrationError } = await supabase
+    .from("integrations")
+    .select("*")
+    .eq("id", integration_id)
+    .single();
+
+  if (integrationError || !integration) {
+    console.error("Integration not found:", integrationError);
+    return new Response(
+      JSON.stringify({ error: "Integração não encontrada" }),
+      { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const webhookUrl = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
+  const activeValue = active === true || active === 1 ? 1 : 0;
+
+  // Use the existing activateConnectorViaAPI function
+  const result = await activateConnectorViaAPI(integration, supabase, line_id, activeValue, webhookUrl);
+
+  if (result.success) {
+    return new Response(
+      JSON.stringify({ 
+        success: true, 
+        message: activeValue === 1 ? "Conector ativado com sucesso" : "Conector desativado com sucesso",
+        line_id,
+        active: activeValue === 1
+      }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  } else {
+    return new Response(
+      JSON.stringify({ error: result.error || "Erro ao ativar/desativar conector" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
@@ -805,6 +908,10 @@ serve(async (req) => {
 
     if (action === "create_channel" || payload.action === "create_channel") {
       return await handleCreateChannel(supabase, payload);
+    }
+
+    if (action === "activate_connector_for_line" || payload.action === "activate_connector_for_line") {
+      return await handleActivateConnectorForLine(supabase, payload, supabaseUrl);
     }
 
     // Check if this is a PLACEMENT call

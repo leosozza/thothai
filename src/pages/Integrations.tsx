@@ -195,12 +195,26 @@ export default function Integrations() {
   const [savingMapping, setSavingMapping] = useState(false);
   const [cleaningConnectors, setCleaningConnectors] = useState(false);
 
-  // Bitrix24 Channels
-  const [bitrixChannels, setBitrixChannels] = useState<Array<{ id: number; name: string; active: boolean }>>([]);
+  // Bitrix24 Channels with enhanced status
+  const [bitrixChannels, setBitrixChannels] = useState<Array<{ 
+    id: number; 
+    name: string; 
+    active: boolean;
+    connector_active?: boolean;
+    connector_registered?: boolean;
+    connector_connection?: boolean;
+    mapping?: {
+      instance_id: string;
+      instance_name?: string;
+      phone_number?: string | null;
+      is_active: boolean;
+    };
+  }>>([]);
   const [loadingChannels, setLoadingChannels] = useState(false);
   const [showCreateChannelDialog, setShowCreateChannelDialog] = useState(false);
   const [newChannelName, setNewChannelName] = useState("");
   const [creatingChannel, setCreatingChannel] = useState(false);
+  const [activatingLineId, setActivatingLineId] = useState<number | null>(null);
 
   // Chatbot AI states
   const [personas, setPersonas] = useState<Array<{ id: string; name: string; description: string | null }>>([]);
@@ -327,8 +341,8 @@ export default function Integrations() {
     }
   };
 
-  // Fetch Bitrix24 channels
-  const fetchBitrixChannels = async () => {
+  // Fetch Bitrix24 channels with connector status
+  const fetchBitrixChannels = async (includeConnectorStatus = false) => {
     const bitrix = integrations.find((i) => i.type === "bitrix24");
     if (!bitrix?.config?.access_token && !bitrix?.config?.webhook_url) return;
 
@@ -337,7 +351,8 @@ export default function Integrations() {
       const response = await supabase.functions.invoke("bitrix24-webhook", {
         body: {
           action: "list_channels",
-          integration_id: bitrix.id
+          integration_id: bitrix.id,
+          include_connector_status: includeConnectorStatus
         }
       });
 
@@ -351,6 +366,47 @@ export default function Integrations() {
     } finally {
       setLoadingChannels(false);
     }
+  };
+
+  // Activate/deactivate connector for a specific line
+  const handleActivateConnectorForLine = async (lineId: number, active: boolean) => {
+    const bitrix = integrations.find((i) => i.type === "bitrix24");
+    if (!bitrix) {
+      toast.error("Integração Bitrix24 não encontrada");
+      return;
+    }
+
+    setActivatingLineId(lineId);
+    try {
+      const response = await supabase.functions.invoke("bitrix24-webhook", {
+        body: {
+          action: "activate_connector_for_line",
+          integration_id: bitrix.id,
+          line_id: lineId,
+          active
+        }
+      });
+
+      if (response.data?.success) {
+        toast.success(response.data.message || (active ? "Conector ativado!" : "Conector desativado!"));
+        // Refresh channels with status
+        await fetchBitrixChannels(true);
+      } else {
+        toast.error(response.data?.error || "Erro ao alterar status do conector");
+      }
+    } catch (error) {
+      console.error("Error activating connector:", error);
+      toast.error("Erro ao ativar/desativar conector");
+    } finally {
+      setActivatingLineId(null);
+    }
+  };
+
+  // Quick mapping for a line
+  const handleQuickMapping = (lineId: number, lineName: string) => {
+    setNewMappingLineId(lineId.toString());
+    setNewMappingLineName(lineName);
+    setShowMappingDialog(true);
   };
 
   // Fetch personas for chatbot
@@ -2099,6 +2155,167 @@ export default function Integrations() {
               </Card>
             )}
 
+            {/* Open Lines Status Card */}
+            {bitrixIntegration?.is_active && (
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="h-12 w-12 rounded-xl bg-cyan-500/10 flex items-center justify-center">
+                        <Phone className="h-6 w-6 text-cyan-500" />
+                      </div>
+                      <div>
+                        <CardTitle>Status dos Open Lines</CardTitle>
+                        <CardDescription>
+                          Visão geral dos canais Bitrix24 e status dos conectores
+                        </CardDescription>
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button 
+                        size="sm" 
+                        variant="outline"
+                        onClick={() => fetchBitrixChannels(true)}
+                        disabled={loadingChannels}
+                      >
+                        {loadingChannels ? (
+                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                        ) : (
+                          <RefreshCw className="h-4 w-4 mr-2" />
+                        )}
+                        Atualizar Status
+                      </Button>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {bitrixChannels.length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <Phone className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                      <p>Nenhum canal encontrado</p>
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        className="mt-3"
+                        onClick={() => fetchBitrixChannels(true)}
+                        disabled={loadingChannels}
+                      >
+                        {loadingChannels ? (
+                          <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                        ) : (
+                          <RefreshCw className="h-4 w-4 mr-2" />
+                        )}
+                        Carregar Canais
+                      </Button>
+                    </div>
+                  ) : (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Canal</TableHead>
+                          <TableHead>Status Bitrix</TableHead>
+                          <TableHead>Conector</TableHead>
+                          <TableHead>WhatsApp Mapeado</TableHead>
+                          <TableHead className="w-[180px]">Ações</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {bitrixChannels.map((channel) => (
+                          <TableRow key={channel.id}>
+                            <TableCell className="font-medium">
+                              {channel.name}
+                              <span className="text-xs text-muted-foreground ml-2">(ID: {channel.id})</span>
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant={channel.active ? "default" : "secondary"}>
+                                {channel.active ? "Ativo" : "Inativo"}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              <Badge variant={channel.connector_active ? "default" : "destructive"}>
+                                {channel.connector_active ? "Conectado" : "Desconectado"}
+                              </Badge>
+                            </TableCell>
+                            <TableCell>
+                              {channel.mapping ? (
+                                <div className="flex items-center gap-1.5">
+                                  <Phone className="h-3.5 w-3.5 text-muted-foreground" />
+                                  <span className="text-sm">{channel.mapping.instance_name}</span>
+                                  {channel.mapping.phone_number && (
+                                    <span className="text-xs text-muted-foreground">({channel.mapping.phone_number})</span>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-muted-foreground text-sm">Não mapeado</span>
+                              )}
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex gap-1">
+                                {!channel.connector_active ? (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => handleActivateConnectorForLine(channel.id, true)}
+                                    disabled={activatingLineId === channel.id}
+                                  >
+                                    {activatingLineId === channel.id ? (
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    ) : (
+                                      <Zap className="h-3.5 w-3.5 mr-1" />
+                                    )}
+                                    Ativar
+                                  </Button>
+                                ) : (
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => handleActivateConnectorForLine(channel.id, false)}
+                                    disabled={activatingLineId === channel.id}
+                                    className="text-destructive hover:bg-destructive/10"
+                                  >
+                                    {activatingLineId === channel.id ? (
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    ) : (
+                                      <XCircle className="h-3.5 w-3.5 mr-1" />
+                                    )}
+                                    Desativar
+                                  </Button>
+                                )}
+                                {!channel.mapping && (
+                                  <Button
+                                    size="sm"
+                                    variant="secondary"
+                                    onClick={() => handleQuickMapping(channel.id, channel.name)}
+                                  >
+                                    <ArrowLeftRight className="h-3.5 w-3.5 mr-1" />
+                                    Mapear
+                                  </Button>
+                                )}
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  )}
+
+                  <div className="bg-muted/50 rounded-lg p-4 text-sm">
+                    <div className="flex items-start gap-2">
+                      <AlertCircle className="h-5 w-5 text-cyan-500 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-medium">Legenda:</p>
+                        <ul className="text-muted-foreground mt-1 space-y-1">
+                          <li>• <strong>Conector Conectado:</strong> O canal está pronto para receber mensagens do WhatsApp</li>
+                          <li>• <strong>Conector Desconectado:</strong> Precisa ativar o conector para vincular ao WhatsApp</li>
+                          <li>• <strong>Não mapeado:</strong> Precisa vincular uma instância WhatsApp ao canal</li>
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {/* Channel Mappings Card */}
             {bitrixIntegration?.is_active && (
               <Card>
@@ -2613,7 +2830,7 @@ export default function Integrations() {
                   <Button
                     variant="outline"
                     size="icon"
-                    onClick={fetchBitrixChannels}
+                    onClick={() => fetchBitrixChannels(false)}
                     disabled={loadingChannels}
                     title="Atualizar lista"
                   >
