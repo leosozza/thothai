@@ -363,7 +363,6 @@ export default function Integrations() {
       fetchBitrixChannels();
     }
   }, [integrations]);
-  };
 
   const handleCleanConnectors = async () => {
     if (!workspace?.id) {
@@ -421,19 +420,35 @@ export default function Integrations() {
 
     setSavingMapping(true);
     try {
-      const { error } = await supabase
-        .from("bitrix_channel_mappings")
-        .insert({
+      // Chamar complete_setup que ativa o conector E salva o mapeamento
+      const response = await supabase.functions.invoke("bitrix24-webhook", {
+        body: {
+          action: "complete_setup",
           workspace_id: workspace.id,
           integration_id: bitrix.id,
           instance_id: newMappingInstanceId,
           line_id: parseInt(newMappingLineId),
           line_name: newMappingLineName || `Linha ${newMappingLineId}`,
-        });
+        }
+      });
 
-      if (error) throw error;
+      if (response.error) {
+        throw new Error(response.error.message || "Erro ao criar mapeamento");
+      }
 
-      toast.success("Mapeamento adicionado com sucesso!");
+      if (response.data?.error) {
+        throw new Error(response.data.error);
+      }
+
+      // Mostrar resultado da ativação
+      if (response.data?.activation?.success) {
+        toast.success("Mapeamento criado e conector ativado no Bitrix24!");
+      } else if (response.data?.success) {
+        toast.warning("Mapeamento salvo, mas houve um problema na ativação do conector");
+      } else {
+        toast.success("Mapeamento adicionado com sucesso!");
+      }
+
       setShowMappingDialog(false);
       setNewMappingInstanceId("");
       setNewMappingLineId("");
@@ -441,10 +456,10 @@ export default function Integrations() {
       fetchChannelMappings();
     } catch (error: any) {
       console.error("Error adding mapping:", error);
-      if (error.code === "23505") {
+      if (error.message?.includes("já está mapeada") || error.message?.includes("23505")) {
         toast.error("Esta instância ou linha já está mapeada");
       } else {
-        toast.error("Erro ao adicionar mapeamento");
+        toast.error(error.message || "Erro ao adicionar mapeamento");
       }
     } finally {
       setSavingMapping(false);
