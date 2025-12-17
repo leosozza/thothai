@@ -21,11 +21,14 @@ serve(async (req) => {
       instance_id,
       bitrix24_user_id,
       bitrix24_chat_id,
-      line_id
+      bitrix24_bot_id,
+      bitrix24_dialog_id,
+      line_id,
+      message_type = "connector" // "connector" or "bot"
     } = await req.json();
     
     console.log("=== AI PROCESS BITRIX24 ===");
-    console.log("Input:", { conversation_id, contact_id, content, workspace_id, line_id });
+    console.log("Input:", { conversation_id, contact_id, content, workspace_id, line_id, message_type });
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
@@ -42,6 +45,7 @@ serve(async (req) => {
     let temperature = 0.7;
 
     // First check if integration has a specific persona configured
+    // For bot messages, use bot_persona_id; for connector, use persona_id
     if (integration_id) {
       const { data: integration } = await supabase
         .from("integrations")
@@ -49,18 +53,22 @@ serve(async (req) => {
         .eq("id", integration_id)
         .single();
 
-      if (integration?.config?.persona_id) {
+      const personaIdToUse = message_type === "bot" 
+        ? integration?.config?.bot_persona_id 
+        : integration?.config?.persona_id;
+
+      if (personaIdToUse) {
         const { data: persona } = await supabase
           .from("personas")
           .select("*")
-          .eq("id", integration.config.persona_id)
+          .eq("id", personaIdToUse)
           .single();
 
         if (persona) {
           systemPrompt = persona.system_prompt || systemPrompt;
           personaName = persona.name || personaName;
           temperature = persona.temperature || temperature;
-          console.log("Using integration persona:", personaName);
+          console.log("Using integration persona:", personaName, "for message_type:", message_type);
         }
       }
     }
@@ -230,33 +238,69 @@ serve(async (req) => {
 
     const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
     
-    // Send message via imconnector.send.messages
-    const messagePayload = {
-      auth: accessToken,
-      CONNECTOR: connectorId,
-      LINE: line_id,
-      MESSAGES: [{
-        user: { id: bitrix24_user_id },
-        chat: { id: bitrix24_chat_id },
-        message: {
-          id: `ai_${Date.now()}`,
-          date: Math.floor(Date.now() / 1000),
-          text: aiContent
-        }
-      }]
-    };
+    let sendResult: any;
 
-    console.log("Sending to Bitrix24:", JSON.stringify(messagePayload, null, 2));
+    // Send message based on message_type
+    if (message_type === "bot") {
+      // Send via imbot.message.add
+      const botId = bitrix24_bot_id || config.bot_id;
+      const dialogId = bitrix24_dialog_id;
 
-    const sendUrl = `${clientEndpoint}imconnector.send.messages`;
-    const sendResponse = await fetch(sendUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(messagePayload)
-    });
+      if (!botId) {
+        throw new Error("Bot ID not configured");
+      }
 
-    const sendResult = await sendResponse.json();
-    console.log("Bitrix24 send result:", JSON.stringify(sendResult, null, 2));
+      const botMessagePayload = {
+        auth: accessToken,
+        BOT_ID: botId,
+        DIALOG_ID: dialogId,
+        MESSAGE: aiContent,
+        // Optional: Add keyboard or attachments
+        // KEYBOARD: [],
+        // ATTACH: []
+      };
+
+      console.log("Sending to Bitrix24 via imbot.message.add:", JSON.stringify(botMessagePayload, null, 2));
+
+      const sendUrl = `${clientEndpoint}imbot.message.add`;
+      const sendResponse = await fetch(sendUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(botMessagePayload)
+      });
+
+      sendResult = await sendResponse.json();
+      console.log("Bitrix24 imbot.message.add result:", JSON.stringify(sendResult, null, 2));
+
+    } else {
+      // Send via imconnector.send.messages (default for connector)
+      const messagePayload = {
+        auth: accessToken,
+        CONNECTOR: connectorId,
+        LINE: line_id,
+        MESSAGES: [{
+          user: { id: bitrix24_user_id },
+          chat: { id: bitrix24_chat_id },
+          message: {
+            id: `ai_${Date.now()}`,
+            date: Math.floor(Date.now() / 1000),
+            text: aiContent
+          }
+        }]
+      };
+
+      console.log("Sending to Bitrix24 via imconnector.send.messages:", JSON.stringify(messagePayload, null, 2));
+
+      const sendUrl = `${clientEndpoint}imconnector.send.messages`;
+      const sendResponse = await fetch(sendUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(messagePayload)
+      });
+
+      sendResult = await sendResponse.json();
+      console.log("Bitrix24 imconnector.send.messages result:", JSON.stringify(sendResult, null, 2));
+    }
 
     // Update message status
     if (sendResult.result) {
@@ -277,12 +321,13 @@ serve(async (req) => {
       })
       .eq("id", conversation_id);
 
-    console.log("AI message sent successfully to Bitrix24");
+    console.log("AI message sent successfully to Bitrix24 via", message_type);
 
     return new Response(JSON.stringify({ 
       success: true, 
       response: aiContent,
       persona: personaName,
+      message_type,
       bitrix_result: sendResult
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
