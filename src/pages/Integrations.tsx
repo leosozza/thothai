@@ -1109,6 +1109,49 @@ export default function Integrations() {
     }
   };
 
+  // Simulate PLACEMENT call (debug)
+  const handleSimulatePlacement = async () => {
+    const bitrix = integrations.find((i) => i.type === "bitrix24");
+    if (!bitrix) {
+      toast.error("Integração Bitrix24 não encontrada");
+      return;
+    }
+
+    setCheckingConnector(true);
+    try {
+      const response = await supabase.functions.invoke("bitrix24-test", {
+        body: {
+          action: "simulate_placement",
+          integration_id: bitrix.id,
+          workspace_id: workspace?.id
+        }
+      });
+
+      if (response.data?.success) {
+        toast.success(response.data.message);
+        setConnectorDiagnosis({
+          registered: true,
+          activated: true,
+          diagnosis: `PLACEMENT simulado! Resposta: ${response.data.webhook_response}`
+        });
+        // Refresh integrations to see updated config
+        fetchIntegrations();
+      } else {
+        toast.error(response.data?.message || "Falha ao simular PLACEMENT");
+        setConnectorDiagnosis({
+          registered: true,
+          activated: false,
+          diagnosis: `Erro: ${response.data?.webhook_response || "resposta inesperada"}`
+        });
+      }
+    } catch (error) {
+      console.error("Error simulating placement:", error);
+      toast.error("Erro ao simular PLACEMENT");
+    } finally {
+      setCheckingConnector(false);
+    }
+  };
+
   const bitrixIntegration = getIntegrationStatus("bitrix24");
   const bitrixConfig = bitrixIntegration?.config || {};
 
@@ -1653,12 +1696,13 @@ export default function Integrations() {
                             </Select>
                           </div>
                           
-                          <div className="flex gap-2 mt-5">
+                          <div className="flex flex-wrap gap-2 mt-5">
                             <Button
                               variant="outline"
                               size="sm"
                               onClick={handleCheckConnector}
                               disabled={checkingConnector}
+                              title="Verificar status do conector"
                             >
                               {checkingConnector ? (
                                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -1677,6 +1721,20 @@ export default function Integrations() {
                                 <Zap className="h-4 w-4 mr-1" />
                               )}
                               {bitrixConfig.activated ? "Reativar" : "Ativar Conector"}
+                            </Button>
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={handleSimulatePlacement}
+                              disabled={checkingConnector}
+                              title="Simular chamada PLACEMENT do Bitrix24"
+                            >
+                              {checkingConnector ? (
+                                <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                              ) : (
+                                <RefreshCw className="h-4 w-4 mr-1" />
+                              )}
+                              Simular PLACEMENT
                             </Button>
                           </div>
                         </div>
