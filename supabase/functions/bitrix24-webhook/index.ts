@@ -6,35 +6,61 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Helper to refresh Bitrix24 OAuth token
+// Helper to refresh Bitrix24 OAuth token with proactive refresh
 async function refreshBitrixToken(integration: any, supabase: any): Promise<string | null> {
   const config = integration.config;
   
+  // Check if token exists
+  if (!config.access_token) {
+    console.log("No access token configured");
+    return null;
+  }
+
+  // Check token expiration with 10 minute buffer for proactive refresh
   if (config.token_expires_at) {
     const expiresAt = new Date(config.token_expires_at);
     const now = new Date();
-    const bufferMs = 5 * 60 * 1000;
+    const bufferMs = 10 * 60 * 1000; // 10 minutes buffer
     
     if (expiresAt.getTime() - now.getTime() > bufferMs) {
-      console.log("Token still valid");
+      console.log("Token still valid, expires at:", config.token_expires_at);
       return config.access_token;
     }
-  } else if (config.access_token) {
+    
+    console.log("Token expired or expiring soon, attempting refresh...");
+  }
+
+  // No refresh token available
+  if (!config.refresh_token) {
+    console.log("No refresh token available, returning existing access_token");
     return config.access_token;
   }
 
-  console.log("Token expired or missing, attempting refresh...");
-
-  if (!config.refresh_token) {
-    console.log("No refresh token, returning existing access_token");
-    return config.access_token || null;
-  }
-
+  // Try to refresh the token
   const refreshUrl = `https://oauth.bitrix.info/oauth/token/?grant_type=refresh_token&client_id=${config.client_id || ""}&client_secret=${config.client_secret || ""}&refresh_token=${config.refresh_token}`;
   
   try {
+    console.log("Calling OAuth refresh endpoint...");
     const response = await fetch(refreshUrl);
     const data = await response.json();
+
+    if (data.error) {
+      console.error("OAuth refresh error:", data.error, data.error_description);
+      // Mark token as invalid if refresh fails
+      await supabase
+        .from("integrations")
+        .update({
+          config: {
+            ...config,
+            token_refresh_failed: true,
+            token_refresh_error: data.error_description || data.error,
+            token_refresh_failed_at: new Date().toISOString(),
+          },
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", integration.id);
+      return config.access_token; // Return old token as fallback
+    }
 
     if (data.access_token) {
       const newExpiresAt = new Date(Date.now() + (data.expires_in || 3600) * 1000).toISOString();
@@ -47,19 +73,55 @@ async function refreshBitrixToken(integration: any, supabase: any): Promise<stri
             access_token: data.access_token,
             refresh_token: data.refresh_token || config.refresh_token,
             token_expires_at: newExpiresAt,
+            token_refresh_failed: false,
+            token_refresh_error: null,
+            last_token_refresh_at: new Date().toISOString(),
           },
           updated_at: new Date().toISOString(),
         })
         .eq("id", integration.id);
 
-      console.log("Token refreshed successfully");
+      console.log("Token refreshed successfully, new expiry:", newExpiresAt);
       return data.access_token;
     }
   } catch (error) {
     console.error("Error refreshing token:", error);
   }
 
-  return config.access_token || null;
+  return config.access_token;
+}
+
+// Helper to send bot message
+async function sendBotMessage(integration: any, supabase: any, dialogId: string, message: string): Promise<boolean> {
+  const config = integration.config;
+  const accessToken = await refreshBitrixToken(integration, supabase);
+  
+  if (!accessToken || !config.bot_id) {
+    console.error("Cannot send bot message: no token or bot_id");
+    return false;
+  }
+
+  const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
+  
+  try {
+    const response = await fetch(`${clientEndpoint}imbot.message.add`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        auth: accessToken,
+        BOT_ID: config.bot_id,
+        DIALOG_ID: dialogId,
+        MESSAGE: message
+      })
+    });
+
+    const result = await response.json();
+    console.log("Bot message sent:", result.result ? "success" : "failed", result.error || "");
+    return !!result.result;
+  } catch (error) {
+    console.error("Error sending bot message:", error);
+    return false;
+  }
 }
 
 // Activate/Deactivate connector via Bitrix24 REST API
@@ -1294,9 +1356,73 @@ serve(async (req) => {
         break;
       }
 
+      // Handle bot join open event (when user starts conversation with bot)
+      case "ONIMBOTJOINOPEN": {
+        console.log("=== BOT JOIN OPEN (User started conversation) ===");
+        const data = payload.data || {};
+        const dialogId = data.DIALOG_ID || data.dialog_id;
+        const botId = data.BOT_ID || data.bot_id;
+        const userId = data.USER_ID || data.user_id;
+
+        console.log("Bot join open data:", { dialogId, botId, userId });
+
+        if (!dialogId) {
+          console.log("No dialog ID, skipping welcome message");
+          break;
+        }
+
+        // Find integration by bot_id
+        let integrationData: any = null;
+        const memberId = payload.auth?.member_id || payload.member_id;
+
+        if (botId) {
+          const { data: integration } = await supabase
+            .from("integrations")
+            .select("*")
+            .eq("type", "bitrix24")
+            .eq("config->>bot_id", String(botId))
+            .eq("is_active", true)
+            .maybeSingle();
+          integrationData = integration;
+        }
+
+        if (!integrationData && memberId) {
+          const { data: integration } = await supabase
+            .from("integrations")
+            .select("*")
+            .eq("type", "bitrix24")
+            .eq("config->>member_id", memberId)
+            .eq("is_active", true)
+            .maybeSingle();
+          integrationData = integration;
+        }
+
+        if (!integrationData) {
+          console.log("No integration found for bot join event");
+          break;
+        }
+
+        // Check if bot is enabled and has welcome message
+        if (!integrationData.config?.bot_enabled) {
+          console.log("Bot not enabled, skipping welcome");
+          break;
+        }
+
+        const welcomeMessage = integrationData.config?.bot_welcome_message;
+        if (welcomeMessage) {
+          console.log("Sending welcome message to dialog:", dialogId);
+          await sendBotMessage(integrationData, supabase, dialogId, welcomeMessage);
+        } else {
+          console.log("No welcome message configured");
+        }
+
+        break;
+      }
+
       case "ONIMCONNECTORTYPING":
       case "ONIMCONNECTORDIALOGFINISH":
       case "ONIMCONNECTORSTATUSDELETE":
+      case "ONIMBOTDELETE":
         console.log("Event handled:", event);
         break;
 

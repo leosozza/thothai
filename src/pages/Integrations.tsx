@@ -7,6 +7,8 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -53,6 +55,7 @@ import {
   Plus,
   Phone,
   Bot,
+  AlertTriangle,
 } from "lucide-react";
 import {
   Table,
@@ -210,9 +213,14 @@ export default function Integrations() {
   const [botId, setBotId] = useState<number | null>(null);
   const [botEnabled, setBotEnabled] = useState(false);
   const [botPersonaId, setBotPersonaId] = useState("");
+  const [botWelcomeMessage, setBotWelcomeMessage] = useState("");
   const [registeringBot, setRegisteringBot] = useState(false);
   const [unregisteringBot, setUnregisteringBot] = useState(false);
   const [savingBotConfig, setSavingBotConfig] = useState(false);
+
+  // Token status
+  const [tokenExpired, setTokenExpired] = useState(false);
+  const [tokenRefreshFailed, setTokenRefreshFailed] = useState(false);
 
   useEffect(() => {
     if (workspace) {
@@ -346,11 +354,26 @@ export default function Integrations() {
       if (error) throw error;
       setPersonas(data || []);
 
-      // Load chatbot config from integration
+      // Load chatbot and bot config from integration
       const bitrix = integrations.find((i) => i.type === "bitrix24");
       if (bitrix?.config) {
+        // Connector chatbot config
         setChatbotEnabled(!!bitrix.config.chatbot_enabled);
         setSelectedPersonaId((bitrix.config.persona_id as string) || "");
+        
+        // Universal bot config
+        setBotRegistered(!!bitrix.config.bot_id);
+        setBotId(bitrix.config.bot_id ? Number(bitrix.config.bot_id) : null);
+        setBotEnabled(!!bitrix.config.bot_enabled);
+        setBotPersonaId((bitrix.config.bot_persona_id as string) || "");
+        setBotWelcomeMessage((bitrix.config.bot_welcome_message as string) || "");
+        
+        // Token status
+        if (bitrix.config.token_expires_at) {
+          const expiresAt = new Date(bitrix.config.token_expires_at as string);
+          setTokenExpired(expiresAt < new Date());
+        }
+        setTokenRefreshFailed(!!bitrix.config.token_refresh_failed);
       }
     } catch (error) {
       console.error("Error fetching personas:", error);
@@ -478,7 +501,8 @@ export default function Integrations() {
           config: {
             ...(bitrix.config as Record<string, unknown>),
             bot_enabled: botEnabled,
-            bot_persona_id: botPersonaId || null
+            bot_persona_id: botPersonaId || null,
+            bot_welcome_message: botWelcomeMessage || null
           },
           updated_at: new Date().toISOString()
         })
@@ -1366,6 +1390,27 @@ export default function Integrations() {
                         </div>
                       </div>
                     )}
+
+                    {/* Token Expired Alert */}
+                    {(tokenExpired || tokenRefreshFailed) && bitrixConfig.member_id && (
+                      <Alert variant="destructive">
+                        <AlertTriangle className="h-4 w-4" />
+                        <AlertTitle>
+                          {tokenRefreshFailed ? "Falha ao Renovar Token" : "Token Expirado"}
+                        </AlertTitle>
+                        <AlertDescription className="space-y-2">
+                          <p>
+                            {tokenRefreshFailed 
+                              ? `Não foi possível renovar o token OAuth. Erro: ${bitrixConfig.token_refresh_error || "desconhecido"}`
+                              : "O token de acesso ao Bitrix24 expirou. Mensagens não serão enviadas até reconectar."
+                            }
+                          </p>
+                          <p className="text-xs">
+                            Use a <strong>Configuração OAuth Manual</strong> acima para reconectar, ou reinstale o aplicativo no Bitrix24.
+                          </p>
+                        </AlertDescription>
+                      </Alert>
+                    )}
                   </div>
                 )}
 
@@ -1925,18 +1970,33 @@ export default function Integrations() {
                       </div>
 
                       {botEnabled && (
-                        <div className="space-y-2">
-                          <Label>Persona do Bot</Label>
-                          <Select value={botPersonaId} onValueChange={setBotPersonaId}>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Selecione uma persona" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {personas.map((p) => (
-                                <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
+                        <div className="space-y-4">
+                          <div className="space-y-2">
+                            <Label>Persona do Bot</Label>
+                            <Select value={botPersonaId} onValueChange={setBotPersonaId}>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Selecione uma persona" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {personas.map((p) => (
+                                  <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label>Mensagem de Boas-Vindas</Label>
+                            <Textarea
+                              placeholder="Olá! Sou o assistente de IA da empresa. Como posso ajudar?"
+                              value={botWelcomeMessage}
+                              onChange={(e) => setBotWelcomeMessage(e.target.value)}
+                              rows={3}
+                            />
+                            <p className="text-xs text-muted-foreground">
+                              Enviada automaticamente quando um usuário inicia uma conversa com o bot
+                            </p>
+                          </div>
                         </div>
                       )}
 
