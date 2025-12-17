@@ -226,6 +226,12 @@ export default function Integrations() {
   const [testingConnection, setTestingConnection] = useState(false);
   const [refreshingToken, setRefreshingToken] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message?: string; details?: any } | null>(null);
+  
+  // Connector activation states
+  const [activatingConnector, setActivatingConnector] = useState(false);
+  const [checkingConnector, setCheckingConnector] = useState(false);
+  const [connectorDiagnosis, setConnectorDiagnosis] = useState<{ registered: boolean; activated: boolean; diagnosis: string } | null>(null);
+  const [selectedLineIdForActivation, setSelectedLineIdForActivation] = useState("1");
 
   useEffect(() => {
     if (workspace) {
@@ -1033,6 +1039,76 @@ export default function Integrations() {
     }
   };
 
+  // Check connector status (diagnostic)
+  const handleCheckConnector = async () => {
+    const bitrix = integrations.find((i) => i.type === "bitrix24");
+    if (!bitrix) {
+      toast.error("Integração Bitrix24 não encontrada");
+      return;
+    }
+
+    setCheckingConnector(true);
+    try {
+      const response = await supabase.functions.invoke("bitrix24-test", {
+        body: {
+          action: "check_connector",
+          integration_id: bitrix.id,
+          workspace_id: workspace?.id
+        }
+      });
+
+      if (response.data?.success) {
+        setConnectorDiagnosis({
+          registered: response.data.registered,
+          activated: response.data.activation_status?.ACTIVE,
+          diagnosis: response.data.diagnosis
+        });
+        toast.info(response.data.diagnosis);
+      } else {
+        toast.error(response.data?.error || "Falha ao verificar conector");
+      }
+    } catch (error) {
+      console.error("Error checking connector:", error);
+      toast.error("Erro ao verificar status do conector");
+    } finally {
+      setCheckingConnector(false);
+    }
+  };
+
+  // Activate connector manually
+  const handleActivateConnector = async () => {
+    const bitrix = integrations.find((i) => i.type === "bitrix24");
+    if (!bitrix) {
+      toast.error("Integração Bitrix24 não encontrada");
+      return;
+    }
+
+    setActivatingConnector(true);
+    try {
+      const response = await supabase.functions.invoke("bitrix24-test", {
+        body: {
+          action: "activate_connector",
+          integration_id: bitrix.id,
+          workspace_id: workspace?.id,
+          line_id: parseInt(selectedLineIdForActivation) || 1
+        }
+      });
+
+      if (response.data?.success) {
+        toast.success("Conector ativado com sucesso!");
+        setConnectorDiagnosis(null);
+        fetchIntegrations();
+      } else {
+        toast.error(response.data?.message || "Falha ao ativar conector");
+      }
+    } catch (error) {
+      console.error("Error activating connector:", error);
+      toast.error("Erro ao ativar conector");
+    } finally {
+      setActivatingConnector(false);
+    }
+  };
+
   const bitrixIntegration = getIntegrationStatus("bitrix24");
   const bitrixConfig = bitrixIntegration?.config || {};
 
@@ -1539,6 +1615,87 @@ export default function Integrations() {
                           )}
                         </AlertDescription>
                       </Alert>
+                    )}
+
+                    {/* Connector Activation Section */}
+                    {bitrixConfig.member_id && bitrixConfig.registered && (
+                      <div className="border rounded-lg p-4 space-y-4">
+                        <div className="flex items-start gap-3">
+                          <Zap className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
+                          <div>
+                            <p className="font-medium">Ativação do Conector no Contact Center</p>
+                            <p className="text-sm text-muted-foreground">
+                              {bitrixConfig.activated 
+                                ? "O conector está ativo e pronto para receber mensagens."
+                                : "O conector está registrado mas precisa ser ativado para receber mensagens."}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-3">
+                          <div className="flex-1">
+                            <Label className="text-xs text-muted-foreground">Open Line (Canal Aberto)</Label>
+                            <Select value={selectedLineIdForActivation} onValueChange={setSelectedLineIdForActivation}>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Selecione o canal" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {bitrixChannels.length > 0 ? (
+                                  bitrixChannels.map((ch) => (
+                                    <SelectItem key={ch.id} value={String(ch.id)}>
+                                      {ch.name} {ch.active && "✓"}
+                                    </SelectItem>
+                                  ))
+                                ) : (
+                                  <SelectItem value="1">Canal 1 (Padrão)</SelectItem>
+                                )}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          
+                          <div className="flex gap-2 mt-5">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={handleCheckConnector}
+                              disabled={checkingConnector}
+                            >
+                              {checkingConnector ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <Settings className="h-4 w-4" />
+                              )}
+                            </Button>
+                            <Button
+                              size="sm"
+                              onClick={handleActivateConnector}
+                              disabled={activatingConnector}
+                            >
+                              {activatingConnector ? (
+                                <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                              ) : (
+                                <Zap className="h-4 w-4 mr-1" />
+                              )}
+                              {bitrixConfig.activated ? "Reativar" : "Ativar Conector"}
+                            </Button>
+                          </div>
+                        </div>
+
+                        {/* Connector Diagnosis */}
+                        {connectorDiagnosis && (
+                          <Alert variant={connectorDiagnosis.activated ? "default" : "destructive"}>
+                            <AlertCircle className="h-4 w-4" />
+                            <AlertTitle>Diagnóstico do Conector</AlertTitle>
+                            <AlertDescription>
+                              <p className="text-sm">{connectorDiagnosis.diagnosis}</p>
+                              <div className="text-xs mt-1 space-y-0.5">
+                                <p>• Registrado: {connectorDiagnosis.registered ? "Sim" : "Não"}</p>
+                                <p>• Ativado: {connectorDiagnosis.activated ? "Sim" : "Não"}</p>
+                              </div>
+                            </AlertDescription>
+                          </Alert>
+                        )}
+                      </div>
                     )}
 
                     {/* Token Expired Alert */}
