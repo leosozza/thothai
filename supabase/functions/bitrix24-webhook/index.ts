@@ -418,6 +418,179 @@ async function handleDeleteMapping(supabase: any, payload: any) {
   );
 }
 
+// Handle list_channels action - List all Open Channels from Bitrix24
+async function handleListChannels(supabase: any, payload: any) {
+  console.log("=== LIST CHANNELS ===");
+  const { integration_id } = payload;
+
+  if (!integration_id) {
+    return new Response(
+      JSON.stringify({ error: "Integration ID não fornecido" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const { data: integration, error: integrationError } = await supabase
+    .from("integrations")
+    .select("*")
+    .eq("id", integration_id)
+    .single();
+
+  if (integrationError || !integration) {
+    console.error("Integration not found:", integrationError);
+    return new Response(
+      JSON.stringify({ error: "Integração não encontrada" }),
+      { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const accessToken = await refreshBitrixToken(integration, supabase);
+  if (!accessToken) {
+    return new Response(
+      JSON.stringify({ error: "Token de acesso não disponível" }),
+      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const config = integration.config;
+  const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
+
+  try {
+    // Call imopenlines.config.list.get to get all open channels
+    const response = await fetch(`${clientEndpoint}imopenlines.config.list.get`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        auth: accessToken,
+        PARAMS: {
+          select: ["ID", "LINE_NAME", "ACTIVE"]
+        }
+      })
+    });
+
+    const result = await response.json();
+    console.log("imopenlines.config.list.get result:", JSON.stringify(result, null, 2));
+
+    if (result.error) {
+      console.error("Bitrix API error:", result.error, result.error_description);
+      return new Response(
+        JSON.stringify({ error: result.error_description || result.error }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Map the result to a simpler format
+    const channels = (result.result || []).map((ch: any) => ({
+      id: parseInt(ch.ID),
+      name: ch.LINE_NAME || `Canal ${ch.ID}`,
+      active: ch.ACTIVE === "Y"
+    }));
+
+    console.log("Mapped channels:", channels);
+
+    return new Response(
+      JSON.stringify({ success: true, channels }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  } catch (error) {
+    console.error("Error listing channels:", error);
+    return new Response(
+      JSON.stringify({ error: error instanceof Error ? error.message : "Erro ao listar canais" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+}
+
+// Handle create_channel action - Create a new Open Channel in Bitrix24
+async function handleCreateChannel(supabase: any, payload: any) {
+  console.log("=== CREATE CHANNEL ===");
+  const { integration_id, channel_name } = payload;
+
+  if (!integration_id || !channel_name) {
+    return new Response(
+      JSON.stringify({ error: "Integration ID e nome do canal são obrigatórios" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const { data: integration, error: integrationError } = await supabase
+    .from("integrations")
+    .select("*")
+    .eq("id", integration_id)
+    .single();
+
+  if (integrationError || !integration) {
+    console.error("Integration not found:", integrationError);
+    return new Response(
+      JSON.stringify({ error: "Integração não encontrada" }),
+      { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const accessToken = await refreshBitrixToken(integration, supabase);
+  if (!accessToken) {
+    return new Response(
+      JSON.stringify({ error: "Token de acesso não disponível" }),
+      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const config = integration.config;
+  const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
+
+  try {
+    // Call imopenlines.config.add to create a new channel
+    const response = await fetch(`${clientEndpoint}imopenlines.config.add`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        auth: accessToken,
+        PARAMS: {
+          LINE_NAME: channel_name,
+          ACTIVE: "Y"
+        }
+      })
+    });
+
+    const result = await response.json();
+    console.log("imopenlines.config.add result:", JSON.stringify(result, null, 2));
+
+    if (result.error) {
+      console.error("Bitrix API error:", result.error, result.error_description);
+      return new Response(
+        JSON.stringify({ error: result.error_description || result.error }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const channelId = result.result;
+    if (channelId) {
+      return new Response(
+        JSON.stringify({ 
+          success: true, 
+          channel: {
+            id: channelId,
+            name: channel_name,
+            active: true
+          }
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    } else {
+      return new Response(
+        JSON.stringify({ error: "Canal criado mas ID não retornado" }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+  } catch (error) {
+    console.error("Error creating channel:", error);
+    return new Response(
+      JSON.stringify({ error: error instanceof Error ? error.message : "Erro ao criar canal" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+}
+
 serve(async (req) => {
   console.log("=== BITRIX24-WEBHOOK REQUEST ===");
   console.log("Method:", req.method);
@@ -494,6 +667,14 @@ serve(async (req) => {
 
     if (action === "delete_mapping" || payload.action === "delete_mapping") {
       return await handleDeleteMapping(supabase, payload);
+    }
+
+    if (action === "list_channels" || payload.action === "list_channels") {
+      return await handleListChannels(supabase, payload);
+    }
+
+    if (action === "create_channel" || payload.action === "create_channel") {
+      return await handleCreateChannel(supabase, payload);
     }
 
     // Check if this is a PLACEMENT call
