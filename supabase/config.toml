@@ -47,3 +47,6 @@ verify_jwt = true
 
 [functions.bitrix24-sync-contacts]
 verify_jwt = true
+
+[functions.bitrix24-bot-register]
+verify_jwt = true

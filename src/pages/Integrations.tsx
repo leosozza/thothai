@@ -205,6 +205,15 @@ export default function Integrations() {
   const [selectedPersonaId, setSelectedPersonaId] = useState("");
   const [savingChatbot, setSavingChatbot] = useState(false);
 
+  // Universal Bot states
+  const [botRegistered, setBotRegistered] = useState(false);
+  const [botId, setBotId] = useState<number | null>(null);
+  const [botEnabled, setBotEnabled] = useState(false);
+  const [botPersonaId, setBotPersonaId] = useState("");
+  const [registeringBot, setRegisteringBot] = useState(false);
+  const [unregisteringBot, setUnregisteringBot] = useState(false);
+  const [savingBotConfig, setSavingBotConfig] = useState(false);
+
   useEffect(() => {
     if (workspace) {
       fetchIntegrations();
@@ -348,7 +357,7 @@ export default function Integrations() {
     }
   };
 
-  // Save chatbot configuration
+  // Save chatbot configuration (connector chatbot)
   const handleSaveChatbotConfig = async () => {
     const bitrix = integrations.find((i) => i.type === "bitrix24");
     if (!bitrix) {
@@ -371,13 +380,118 @@ export default function Integrations() {
         .eq("id", bitrix.id);
 
       if (error) throw error;
-      toast.success("Configurações do chatbot salvas!");
+      toast.success("Configurações do chatbot de conector salvas!");
       fetchIntegrations();
     } catch (error) {
       console.error("Error saving chatbot config:", error);
       toast.error("Erro ao salvar configurações do chatbot");
     } finally {
       setSavingChatbot(false);
+    }
+  };
+
+  // Register universal bot
+  const handleRegisterBot = async () => {
+    const bitrix = integrations.find((i) => i.type === "bitrix24");
+    if (!bitrix) {
+      toast.error("Integração Bitrix24 não encontrada");
+      return;
+    }
+
+    setRegisteringBot(true);
+    try {
+      const response = await supabase.functions.invoke("bitrix24-bot-register", {
+        body: {
+          action: "register",
+          integration_id: bitrix.id,
+          workspace_id: workspace?.id,
+          bot_name: "Thoth AI",
+          bot_description: "Assistente Virtual com IA"
+        }
+      });
+
+      if (response.data?.success) {
+        toast.success("Bot universal registrado com sucesso!");
+        setBotRegistered(true);
+        setBotId(response.data.bot_id);
+        fetchIntegrations();
+      } else {
+        toast.error(response.data?.error || "Erro ao registrar bot");
+      }
+    } catch (error) {
+      console.error("Error registering bot:", error);
+      toast.error("Erro ao registrar bot");
+    } finally {
+      setRegisteringBot(false);
+    }
+  };
+
+  // Unregister universal bot
+  const handleUnregisterBot = async () => {
+    const bitrix = integrations.find((i) => i.type === "bitrix24");
+    if (!bitrix) {
+      toast.error("Integração Bitrix24 não encontrada");
+      return;
+    }
+
+    setUnregisteringBot(true);
+    try {
+      const response = await supabase.functions.invoke("bitrix24-bot-register", {
+        body: {
+          action: "unregister",
+          integration_id: bitrix.id,
+          workspace_id: workspace?.id
+        }
+      });
+
+      if (response.data?.success) {
+        toast.success("Bot removido com sucesso!");
+        setBotRegistered(false);
+        setBotId(null);
+        setBotEnabled(false);
+        setBotPersonaId("");
+        fetchIntegrations();
+      } else {
+        toast.error(response.data?.error || "Erro ao remover bot");
+      }
+    } catch (error) {
+      console.error("Error unregistering bot:", error);
+      toast.error("Erro ao remover bot");
+    } finally {
+      setUnregisteringBot(false);
+    }
+  };
+
+  // Save universal bot configuration
+  const handleSaveBotConfig = async () => {
+    const bitrix = integrations.find((i) => i.type === "bitrix24");
+    if (!bitrix) {
+      toast.error("Integração Bitrix24 não encontrada");
+      return;
+    }
+
+    setSavingBotConfig(true);
+    try {
+      const { error } = await supabase
+        .from("integrations")
+        .update({
+          config: {
+            ...(bitrix.config as Record<string, unknown>),
+            bot_enabled: botEnabled,
+            bot_persona_id: botPersonaId || null
+          },
+          updated_at: new Date().toISOString()
+        })
+        .eq("id", bitrix.id);
+
+      if (error) throw error;
+      toast.success("Configurações do bot universal salvas!");
+      fetchIntegrations();
+    } catch (error) {
+      console.error("Error saving bot config:", error);
+      toast.error("Erro ao salvar configurações do bot");
+    } finally {
+      setSavingBotConfig(false);
     }
   };
 
@@ -430,6 +544,11 @@ export default function Integrations() {
     if (bitrix?.config) {
       setChatbotEnabled(!!bitrix.config.chatbot_enabled);
       setSelectedPersonaId((bitrix.config.persona_id as string) || "");
+      // Update bot config from integration
+      setBotRegistered(!!bitrix.config.bot_id);
+      setBotId(bitrix.config.bot_id as number | null);
+      setBotEnabled(!!bitrix.config.bot_enabled);
+      setBotPersonaId((bitrix.config.bot_persona_id as string) || "");
     }
   }, [integrations]);
 
@@ -1737,6 +1856,100 @@ export default function Integrations() {
                       "Salvar Configurações do Chatbot"
                     )}
                   </Button>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Universal Bot Card */}
+            {bitrixIntegration?.is_active && (
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="h-12 w-12 rounded-xl bg-purple-500/10 flex items-center justify-center">
+                        <MessageSquare className="h-6 w-6 text-purple-500" />
+                      </div>
+                      <div>
+                        <CardTitle>Bot Universal (Todos os Canais)</CardTitle>
+                        <CardDescription>
+                          Bot de IA que funciona em qualquer chat do Bitrix24 para funcionários
+                        </CardDescription>
+                      </div>
+                    </div>
+                    {botRegistered && (
+                      <Badge variant="outline" className="gap-1.5">
+                        <span className="h-2 w-2 rounded-full bg-green-500" />
+                        Registrado
+                      </Badge>
+                    )}
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  {!botRegistered ? (
+                    <div className="space-y-4">
+                      <div className="bg-purple-500/5 border border-purple-500/20 rounded-lg p-4">
+                        <p className="text-sm text-muted-foreground">
+                          O Bot Universal aparece na lista de bots do Bitrix24 e pode ser usado por qualquer funcionário 
+                          diretamente nos chats internos. Diferente do conector (que atende clientes externos via WhatsApp).
+                        </p>
+                      </div>
+                      <Button onClick={handleRegisterBot} disabled={registeringBot} className="w-full">
+                        {registeringBot ? (
+                          <>
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            Registrando...
+                          </>
+                        ) : (
+                          <>
+                            <Bot className="h-4 w-4 mr-2" />
+                            Registrar Bot Universal
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <CheckCircle2 className="h-4 w-4 text-green-500" />
+                        Bot ID: {botId}
+                      </div>
+
+                      <div className="flex items-center justify-between p-4 rounded-lg border">
+                        <div className="space-y-0.5">
+                          <Label className="text-base">Ativar Respostas Automáticas</Label>
+                          <p className="text-sm text-muted-foreground">
+                            Quando ativado, o bot responde automaticamente usando IA
+                          </p>
+                        </div>
+                        <Switch checked={botEnabled} onCheckedChange={setBotEnabled} />
+                      </div>
+
+                      {botEnabled && (
+                        <div className="space-y-2">
+                          <Label>Persona do Bot</Label>
+                          <Select value={botPersonaId} onValueChange={setBotPersonaId}>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Selecione uma persona" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {personas.map((p) => (
+                                <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+
+                      <div className="flex gap-2">
+                        <Button onClick={handleSaveBotConfig} disabled={savingBotConfig} className="flex-1">
+                          {savingBotConfig ? <Loader2 className="h-4 w-4 animate-spin" /> : "Salvar Configurações"}
+                        </Button>
+                        <Button variant="destructive" onClick={handleUnregisterBot} disabled={unregisteringBot}>
+                          {unregisteringBot ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                        </Button>
+                      </div>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             )}
