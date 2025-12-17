@@ -270,7 +270,8 @@ serve(async (req) => {
         const connectorExists = Object.keys(connectors).includes(connectorId);
         const connectorDetails = connectorExists ? connectors[connectorId] : null;
 
-        // Check activation status via imconnector.status
+        // Check activation status via imconnector.status for LINE 1
+        const lineId = config.line_id || config.activated_line_id || 1;
         let activationStatus = null;
         if (connectorExists) {
           const statusResponse = await fetch(`${apiUrl}imconnector.status`, {
@@ -278,13 +279,25 @@ serve(async (req) => {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ 
               auth: validToken,
-              CONNECTOR: connectorId
+              CONNECTOR: connectorId,
+              LINE: lineId
             })
           });
           const statusResult = await statusResponse.json();
-          console.log("imconnector.status:", JSON.stringify(statusResult));
+          console.log("imconnector.status (LINE " + lineId + "):", JSON.stringify(statusResult));
           activationStatus = statusResult.result;
         }
+
+        // Also check imopenlines.config.list.get to see open lines
+        const openLinesResponse = await fetch(`${apiUrl}imopenlines.config.list.get`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ auth: validToken })
+        });
+        const openLinesResult = await openLinesResponse.json();
+        console.log("imopenlines.config.list.get:", JSON.stringify(openLinesResult));
+
+        const isActive = activationStatus?.STATUS === true || activationStatus?.ACTIVE === true;
 
         return new Response(
           JSON.stringify({ 
@@ -293,9 +306,11 @@ serve(async (req) => {
             registered: connectorExists,
             connector_details: connectorDetails,
             activation_status: activationStatus,
+            line_id_checked: lineId,
+            open_lines: openLinesResult.result || [],
             all_connectors: Object.keys(listResult.result || {}),
             diagnosis: connectorExists 
-              ? (activationStatus?.ACTIVE ? "Conector registrado e ATIVO" : "Conector registrado mas NÃO ATIVO - precisa ativar em Open Lines")
+              ? (isActive ? "Conector registrado e ATIVO na linha " + lineId : "Conector registrado mas NÃO ATIVO na linha " + lineId + " - verifique Open Lines no Bitrix24")
               : "Conector NÃO registrado - registre novamente"
           }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
