@@ -12,6 +12,9 @@ verify_jwt = true
 [functions.ai-process-message]
 verify_jwt = true
 
+[functions.ai-process-bitrix24]
+verify_jwt = true
+
 [functions.flow-engine]
 verify_jwt = true
 
