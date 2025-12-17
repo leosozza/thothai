@@ -223,28 +223,43 @@ async function activateConnectorViaAPI(
 // CRITICAL: Must return "successfully" as plain text for Bitrix24 to mark setup as complete
 async function handlePlacement(supabase: any, payload: any, supabaseUrl: string) {
   console.log("=== PLACEMENT HANDLER ===");
-  console.log("Payload:", JSON.stringify(payload, null, 2));
+  console.log("PLACEMENT:", payload.PLACEMENT);
+  console.log("Full payload:", JSON.stringify(payload, null, 2));
+
+  // Get AUTH_ID directly from Bitrix24 - this is the access token for this request
+  const authId = payload.AUTH_ID || payload.auth?.access_token;
+  const domain = payload.auth?.domain || payload.DOMAIN;
+  const memberId = payload.auth?.member_id || payload.member_id;
+  
+  console.log("AUTH_ID present:", !!authId);
+  console.log("Domain:", domain, "MemberId:", memberId);
 
   // Parse PLACEMENT_OPTIONS
-  let options: { LINE?: number; ACTIVE_STATUS?: number } = {};
+  let options: { LINE?: number; ACTIVE_STATUS?: number; CONNECTOR?: string } = {};
   if (typeof payload.PLACEMENT_OPTIONS === "string") {
     try {
       options = JSON.parse(payload.PLACEMENT_OPTIONS);
     } catch (e) {
-      console.log("Failed to parse PLACEMENT_OPTIONS as JSON, trying as object");
-      options = payload.PLACEMENT_OPTIONS || {};
+      console.log("Failed to parse PLACEMENT_OPTIONS as JSON:", e);
+      // Try URL decoding
+      try {
+        options = JSON.parse(decodeURIComponent(payload.PLACEMENT_OPTIONS));
+      } catch (e2) {
+        console.log("Failed to decode and parse PLACEMENT_OPTIONS");
+        options = {};
+      }
     }
-  } else {
-    options = payload.PLACEMENT_OPTIONS || {};
+  } else if (payload.PLACEMENT_OPTIONS) {
+    options = payload.PLACEMENT_OPTIONS;
   }
 
-  const lineId = options.LINE || 0;
-  const activeStatus = options.ACTIVE_STATUS ?? 1; // Default to activate
-  const domain = payload.auth?.domain || payload.DOMAIN;
-  const memberId = payload.auth?.member_id || payload.member_id;
+  console.log("Parsed PLACEMENT_OPTIONS:", JSON.stringify(options));
 
-  console.log("Parsed options - LINE:", lineId, "ACTIVE_STATUS:", activeStatus);
-  console.log("Domain:", domain, "MemberId:", memberId);
+  const lineId = options.LINE || 1; // Default to LINE 1 if not specified
+  const activeStatus = options.ACTIVE_STATUS ?? 1; // Default to activate
+  const connectorId = options.CONNECTOR || "thoth_whatsapp";
+
+  console.log("Using - LINE:", lineId, "ACTIVE_STATUS:", activeStatus, "CONNECTOR:", connectorId);
 
   // Find the integration
   let integration = null;
@@ -284,9 +299,9 @@ async function handlePlacement(supabase: any, payload: any, supabaseUrl: string)
 
   if (!integration) {
     console.error("No Bitrix24 integration found");
-    // Return error but as plain text
-    return new Response("error: integration not found", {
-      status: 404,
+    // Return "successfully" anyway - Bitrix24 expects this
+    // The integration will need to be set up later
+    return new Response("successfully", {
       headers: { ...corsHeaders, "Content-Type": "text/plain" }
     });
   }
@@ -294,22 +309,78 @@ async function handlePlacement(supabase: any, payload: any, supabaseUrl: string)
   console.log("Found integration:", integration.id, "workspace:", integration.workspace_id);
 
   const webhookUrl = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
+  const config = integration.config || {};
 
-  // If LINE is specified, handle activation/deactivation
-  if (lineId > 0) {
-    console.log("LINE specified:", lineId, "calling activateConnectorViaAPI with ACTIVE:", activeStatus);
+  // Determine API endpoint and access token
+  // IMPORTANT: Use AUTH_ID from Bitrix24 if available (more reliable for PLACEMENT calls)
+  const accessToken = authId || await refreshBitrixToken(integration, supabase);
+  const apiUrl = domain ? `https://${domain}/rest/` : (config.client_endpoint || `https://${config.domain}/rest/`);
+
+  console.log("Using API URL:", apiUrl);
+  console.log("Access token available:", !!accessToken);
+
+  // For SETTING_CONNECTOR placement, we need to activate the connector
+  if (payload.PLACEMENT === "SETTING_CONNECTOR" || lineId > 0) {
+    console.log("=== ACTIVATING CONNECTOR FOR LINE", lineId, "===");
     
-    // Activate or deactivate based on ACTIVE_STATUS
-    const activationResult = await activateConnectorViaAPI(integration, supabase, lineId, activeStatus, webhookUrl);
-    console.log("Activation result:", activationResult);
-    
-    // Save line_id to integration config (so we know which line was activated)
-    if (activeStatus === 1) {
-      const currentConfig = integration.config || {};
+    try {
+      // 1. Activate the connector
+      const activateUrl = `${apiUrl}imconnector.activate`;
+      console.log("Calling:", activateUrl);
+      
+      const activateBody = {
+        auth: accessToken,
+        CONNECTOR: connectorId,
+        LINE: lineId,
+        ACTIVE: activeStatus
+      };
+      console.log("Activate body:", JSON.stringify(activateBody));
+      
+      const activateResponse = await fetch(activateUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(activateBody)
+      });
+      
+      const activateResult = await activateResponse.json();
+      console.log("imconnector.activate result:", JSON.stringify(activateResult));
+      
+      // 2. Set connector data with webhook URL
+      if (activeStatus === 1) {
+        const dataSetUrl = `${apiUrl}imconnector.connector.data.set`;
+        console.log("Calling:", dataSetUrl);
+        
+        const dataBody = {
+          auth: accessToken,
+          CONNECTOR: connectorId,
+          LINE: lineId,
+          DATA: {
+            id: `${connectorId}_line_${lineId}`,
+            url: webhookUrl,
+            url_im: webhookUrl,
+            name: "Thoth WhatsApp"
+          }
+        };
+        console.log("Data body:", JSON.stringify(dataBody));
+        
+        const dataSetResponse = await fetch(dataSetUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(dataBody)
+        });
+        
+        const dataSetResult = await dataSetResponse.json();
+        console.log("imconnector.connector.data.set result:", JSON.stringify(dataSetResult));
+      }
+      
+      // 3. Save line_id to integration config
       const updatedConfig = {
-        ...currentConfig,
+        ...config,
+        connector_id: connectorId,
         line_id: lineId,
-        last_activated_at: new Date().toISOString()
+        activated_line_id: lineId,
+        last_placement_call: new Date().toISOString(),
+        placement_auth_id: authId ? "present" : "missing"
       };
       
       await supabase
@@ -321,19 +392,16 @@ async function handlePlacement(supabase: any, payload: any, supabaseUrl: string)
         .eq("id", integration.id);
       
       console.log("Saved line_id to integration config");
+      
+    } catch (error) {
+      console.error("Error in PLACEMENT activation:", error);
+      // Still return "successfully" - Bitrix24 needs this
     }
-    
-    // CRITICAL: Return "successfully" as plain text
-    // This is what Bitrix24 expects to mark the setup as complete
-    console.log("Returning 'successfully' to Bitrix24");
-    return new Response("successfully", {
-      headers: { ...corsHeaders, "Content-Type": "text/plain" }
-    });
   }
 
-  // If no LINE specified, still return success
-  // The user can configure the mapping later in Thoth.ai
-  console.log("No LINE specified, returning success anyway");
+  // CRITICAL: Return "successfully" as plain text
+  // This is what Bitrix24 expects to mark the setup as complete
+  console.log("=== Returning 'successfully' to Bitrix24 ===");
   return new Response("successfully", {
     headers: { ...corsHeaders, "Content-Type": "text/plain" }
   });

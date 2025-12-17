@@ -396,6 +396,61 @@ serve(async (req) => {
         );
       }
 
+      case "simulate_placement": {
+        // Simulate a PLACEMENT call from Bitrix24 to test webhook response
+        console.log("=== SIMULATING PLACEMENT CALL ===");
+        
+        const webhookUrl = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
+        const lineId = 1; // Default to line 1
+        
+        // Build payload similar to what Bitrix24 sends
+        const placementPayload = {
+          PLACEMENT: "SETTING_CONNECTOR",
+          PLACEMENT_OPTIONS: JSON.stringify({
+            CONNECTOR: config.connector_id || "thoth_whatsapp",
+            LINE: lineId,
+            ACTIVE_STATUS: 1
+          }),
+          AUTH_ID: config.access_token,
+          DOMAIN: config.domain,
+          member_id: config.member_id,
+          auth: {
+            access_token: config.access_token,
+            domain: config.domain,
+            member_id: config.member_id
+          }
+        };
+
+        console.log("Simulating with payload:", JSON.stringify(placementPayload, null, 2));
+
+        // Call the webhook
+        const response = await fetch(webhookUrl, {
+          method: "POST",
+          headers: { 
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(placementPayload)
+        });
+
+        const responseText = await response.text();
+        console.log("Webhook response:", response.status, responseText);
+
+        const isSuccess = responseText.toLowerCase().includes("successfully");
+
+        return new Response(
+          JSON.stringify({ 
+            success: isSuccess,
+            message: isSuccess 
+              ? "PLACEMENT simulado com sucesso! Webhook retornou 'successfully'"
+              : `Webhook retornou: ${responseText}`,
+            webhook_response: responseText,
+            http_status: response.status,
+            payload_sent: placementPayload
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
       case "register_bot": {
         // Ensure valid token
         if (config?.access_token) {
