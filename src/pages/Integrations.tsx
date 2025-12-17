@@ -222,6 +222,11 @@ export default function Integrations() {
   const [tokenExpired, setTokenExpired] = useState(false);
   const [tokenRefreshFailed, setTokenRefreshFailed] = useState(false);
 
+  // Test and refresh states
+  const [testingConnection, setTestingConnection] = useState(false);
+  const [refreshingToken, setRefreshingToken] = useState(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; message?: string; details?: any } | null>(null);
+
   useEffect(() => {
     if (workspace) {
       fetchIntegrations();
@@ -947,6 +952,87 @@ export default function Integrations() {
     }
   };
 
+  // Test Bitrix24 connection
+  const handleTestConnection = async () => {
+    const bitrix = integrations.find((i) => i.type === "bitrix24");
+    if (!bitrix) {
+      toast.error("Integração Bitrix24 não encontrada");
+      return;
+    }
+
+    setTestingConnection(true);
+    setTestResult(null);
+    try {
+      const response = await supabase.functions.invoke("bitrix24-test", {
+        body: {
+          action: "test_connection",
+          integration_id: bitrix.id,
+          workspace_id: workspace?.id
+        }
+      });
+
+      if (response.data?.success) {
+        setTestResult({ 
+          success: true, 
+          message: response.data.message,
+          details: {
+            connectors: response.data.connectors?.length || 0,
+            connector_id: response.data.connector_id,
+            bot_status: response.data.bot_status,
+            token_expires_at: response.data.token_expires_at
+          }
+        });
+        toast.success("Conexão testada com sucesso!");
+      } else {
+        setTestResult({ 
+          success: false, 
+          message: response.data?.error || "Falha no teste"
+        });
+        toast.error(response.data?.error || "Falha no teste de conexão");
+      }
+    } catch (error) {
+      console.error("Error testing connection:", error);
+      setTestResult({ success: false, message: "Erro ao testar conexão" });
+      toast.error("Erro ao testar conexão");
+    } finally {
+      setTestingConnection(false);
+    }
+  };
+
+  // Refresh OAuth token
+  const handleRefreshToken = async () => {
+    const bitrix = integrations.find((i) => i.type === "bitrix24");
+    if (!bitrix) {
+      toast.error("Integração Bitrix24 não encontrada");
+      return;
+    }
+
+    setRefreshingToken(true);
+    try {
+      const response = await supabase.functions.invoke("bitrix24-test", {
+        body: {
+          action: "refresh_token",
+          integration_id: bitrix.id,
+          workspace_id: workspace?.id
+        }
+      });
+
+      if (response.data?.success) {
+        toast.success("Token renovado com sucesso!");
+        setTokenExpired(false);
+        setTokenRefreshFailed(false);
+        fetchIntegrations();
+      } else {
+        toast.error(response.data?.error || "Falha ao renovar token");
+      }
+    } catch (error) {
+      console.error("Error refreshing token:", error);
+      toast.error("Erro ao renovar token");
+    } finally {
+      setRefreshingToken(false);
+    }
+  };
+
   const bitrixIntegration = getIntegrationStatus("bitrix24");
   const bitrixConfig = bitrixIntegration?.config || {};
 
@@ -1381,14 +1467,78 @@ export default function Integrations() {
 
                     {/* Status if installed via app */}
                     {bitrixConfig.member_id && (
-                      <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-4">
-                        <div className="flex items-center gap-2">
-                          <CheckCircle2 className="h-5 w-5 text-green-500" />
-                          <span className="font-medium text-green-600 dark:text-green-400">
-                            App instalado em: {String(bitrixConfig.domain || "")}
-                          </span>
+                      <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-4 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <CheckCircle2 className="h-5 w-5 text-green-500" />
+                            <span className="font-medium text-green-600 dark:text-green-400">
+                              App instalado em: {String(bitrixConfig.domain || "")}
+                            </span>
+                          </div>
+                          <div className="flex gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={handleRefreshToken}
+                              disabled={refreshingToken}
+                            >
+                              {refreshingToken ? (
+                                <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                              ) : (
+                                <RefreshCw className="h-4 w-4 mr-1" />
+                              )}
+                              Renovar Token
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={handleTestConnection}
+                              disabled={testingConnection}
+                            >
+                              {testingConnection ? (
+                                <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                              ) : (
+                                <Zap className="h-4 w-4 mr-1" />
+                              )}
+                              Testar Conexão
+                            </Button>
+                          </div>
                         </div>
+                        
+                        {/* Token expiration info */}
+                        {bitrixConfig.token_expires_at && (
+                          <p className="text-xs text-muted-foreground">
+                            Token expira em: {new Date(bitrixConfig.token_expires_at as string).toLocaleString()}
+                          </p>
+                        )}
                       </div>
+                    )}
+
+                    {/* Test Result */}
+                    {testResult && (
+                      <Alert variant={testResult.success ? "default" : "destructive"}>
+                        {testResult.success ? (
+                          <CheckCircle2 className="h-4 w-4" />
+                        ) : (
+                          <AlertTriangle className="h-4 w-4" />
+                        )}
+                        <AlertTitle>{testResult.success ? "Conexão OK" : "Falha na Conexão"}</AlertTitle>
+                        <AlertDescription className="space-y-1">
+                          <p>{testResult.message}</p>
+                          {testResult.success && testResult.details && (
+                            <div className="text-xs space-y-0.5 mt-2">
+                              <p>• Conectores registrados: {testResult.details.connectors}</p>
+                              <p>• ID do conector: {testResult.details.connector_id || "Não configurado"}</p>
+                              {testResult.details.bot_status && (
+                                <p>• Bot Universal: {testResult.details.bot_status.registered ? `Registrado (${testResult.details.bot_status.name})` : "Não registrado"}</p>
+                              )}
+                              {testResult.details.token_expires_at && (
+                                <p>• Token válido até: {new Date(testResult.details.token_expires_at).toLocaleString()}</p>
+                              )}
+                            </div>
+                          )}
+                        </AlertDescription>
+                      </Alert>
                     )}
 
                     {/* Token Expired Alert */}
@@ -1398,15 +1548,30 @@ export default function Integrations() {
                         <AlertTitle>
                           {tokenRefreshFailed ? "Falha ao Renovar Token" : "Token Expirado"}
                         </AlertTitle>
-                        <AlertDescription className="space-y-2">
+                        <AlertDescription className="space-y-3">
                           <p>
                             {tokenRefreshFailed 
                               ? `Não foi possível renovar o token OAuth. Erro: ${bitrixConfig.token_refresh_error || "desconhecido"}`
                               : "O token de acesso ao Bitrix24 expirou. Mensagens não serão enviadas até reconectar."
                             }
                           </p>
+                          <div className="flex gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={handleRefreshToken}
+                              disabled={refreshingToken}
+                            >
+                              {refreshingToken ? (
+                                <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                              ) : (
+                                <RefreshCw className="h-4 w-4 mr-1" />
+                              )}
+                              Tentar Renovar
+                            </Button>
+                          </div>
                           <p className="text-xs">
-                            Use a <strong>Configuração OAuth Manual</strong> acima para reconectar, ou reinstale o aplicativo no Bitrix24.
+                            Se a renovação falhar, use a <strong>Configuração OAuth Manual</strong> acima para reconectar.
                           </p>
                         </AlertDescription>
                       </Alert>
