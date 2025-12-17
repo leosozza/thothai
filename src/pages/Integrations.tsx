@@ -52,6 +52,7 @@ import {
   Trash2,
   Plus,
   Phone,
+  Bot,
 } from "lucide-react";
 import {
   Table,
@@ -198,11 +199,18 @@ export default function Integrations() {
   const [newChannelName, setNewChannelName] = useState("");
   const [creatingChannel, setCreatingChannel] = useState(false);
 
+  // Chatbot AI states
+  const [personas, setPersonas] = useState<Array<{ id: string; name: string; description: string | null }>>([]);
+  const [chatbotEnabled, setChatbotEnabled] = useState(false);
+  const [selectedPersonaId, setSelectedPersonaId] = useState("");
+  const [savingChatbot, setSavingChatbot] = useState(false);
+
   useEffect(() => {
     if (workspace) {
       fetchIntegrations();
       fetchInstances();
       fetchChannelMappings();
+      fetchPersonas();
     }
   }, [workspace]);
 
@@ -317,6 +325,62 @@ export default function Integrations() {
     }
   };
 
+  // Fetch personas for chatbot
+  const fetchPersonas = async () => {
+    if (!workspace?.id) return;
+    try {
+      const { data, error } = await supabase
+        .from("personas")
+        .select("id, name, description")
+        .eq("workspace_id", workspace.id);
+
+      if (error) throw error;
+      setPersonas(data || []);
+
+      // Load chatbot config from integration
+      const bitrix = integrations.find((i) => i.type === "bitrix24");
+      if (bitrix?.config) {
+        setChatbotEnabled(!!bitrix.config.chatbot_enabled);
+        setSelectedPersonaId((bitrix.config.persona_id as string) || "");
+      }
+    } catch (error) {
+      console.error("Error fetching personas:", error);
+    }
+  };
+
+  // Save chatbot configuration
+  const handleSaveChatbotConfig = async () => {
+    const bitrix = integrations.find((i) => i.type === "bitrix24");
+    if (!bitrix) {
+      toast.error("Integração Bitrix24 não encontrada");
+      return;
+    }
+
+    setSavingChatbot(true);
+    try {
+      const { error } = await supabase
+        .from("integrations")
+        .update({
+          config: {
+            ...(bitrix.config as Record<string, unknown>),
+            chatbot_enabled: chatbotEnabled,
+            persona_id: selectedPersonaId || null
+          },
+          updated_at: new Date().toISOString()
+        })
+        .eq("id", bitrix.id);
+
+      if (error) throw error;
+      toast.success("Configurações do chatbot salvas!");
+      fetchIntegrations();
+    } catch (error) {
+      console.error("Error saving chatbot config:", error);
+      toast.error("Erro ao salvar configurações do chatbot");
+    } finally {
+      setSavingChatbot(false);
+    }
+  };
+
   // Create new Bitrix24 channel
   const handleCreateChannel = async () => {
     if (!newChannelName.trim()) {
@@ -356,11 +420,16 @@ export default function Integrations() {
     }
   };
 
-  // Fetch channels when Bitrix24 integration is loaded
+  // Fetch channels and update chatbot config when Bitrix24 integration is loaded
   useEffect(() => {
     const bitrix = integrations.find((i) => i.type === "bitrix24");
     if (bitrix?.is_active && (bitrix?.config?.access_token || bitrix?.config?.webhook_url)) {
       fetchBitrixChannels();
+    }
+    // Update chatbot config from integration
+    if (bitrix?.config) {
+      setChatbotEnabled(!!bitrix.config.chatbot_enabled);
+      setSelectedPersonaId((bitrix.config.persona_id as string) || "");
     }
   }, [integrations]);
 
@@ -1573,6 +1642,101 @@ export default function Integrations() {
                       </div>
                     </div>
                   </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* AI Chatbot Card */}
+            {bitrixIntegration?.is_active && (
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="h-12 w-12 rounded-xl bg-violet-500/10 flex items-center justify-center">
+                        <Bot className="h-6 w-6 text-violet-500" />
+                      </div>
+                      <div>
+                        <CardTitle>Chatbot de IA</CardTitle>
+                        <CardDescription>
+                          Configure um agente de IA para responder automaticamente os clientes no Bitrix24
+                        </CardDescription>
+                      </div>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <div className="flex items-center justify-between p-4 rounded-lg border">
+                    <div className="space-y-0.5">
+                      <Label className="text-base">Ativar Chatbot</Label>
+                      <p className="text-sm text-muted-foreground">
+                        Quando ativado, a IA responderá automaticamente mensagens recebidas no canal
+                      </p>
+                    </div>
+                    <Switch 
+                      checked={chatbotEnabled} 
+                      onCheckedChange={setChatbotEnabled}
+                    />
+                  </div>
+
+                  {chatbotEnabled && (
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <Label>Persona (Agente de IA)</Label>
+                        <Select value={selectedPersonaId} onValueChange={setSelectedPersonaId}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecione uma persona" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {personas.length === 0 ? (
+                              <SelectItem value="__no_personas__" disabled>
+                                Nenhuma persona configurada
+                              </SelectItem>
+                            ) : (
+                              personas.map((p) => (
+                                <SelectItem key={p.id} value={p.id}>
+                                  {p.name}
+                                </SelectItem>
+                              ))
+                            )}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">
+                          A persona define o comportamento e personalidade do chatbot. 
+                          Crie novas personas na página de Personas.
+                        </p>
+                      </div>
+
+                      <div className="bg-muted/50 rounded-lg p-4 text-sm">
+                        <div className="flex items-start gap-2">
+                          <Bot className="h-5 w-5 text-violet-500 shrink-0 mt-0.5" />
+                          <div>
+                            <p className="font-medium">Como funciona:</p>
+                            <ul className="text-muted-foreground mt-1 space-y-1">
+                              <li>• Quando um cliente envia mensagem no Canal Aberto do Bitrix24</li>
+                              <li>• A IA processa a mensagem usando a persona configurada</li>
+                              <li>• A resposta é enviada automaticamente de volta para o cliente</li>
+                              <li>• Operadores podem assumir a conversa a qualquer momento</li>
+                            </ul>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <Button 
+                    onClick={handleSaveChatbotConfig} 
+                    disabled={savingChatbot}
+                    className="w-full"
+                  >
+                    {savingChatbot ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        Salvando...
+                      </>
+                    ) : (
+                      "Salvar Configurações do Chatbot"
+                    )}
+                  </Button>
                 </CardContent>
               </Card>
             )}

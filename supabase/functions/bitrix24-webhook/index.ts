@@ -771,6 +771,247 @@ serve(async (req) => {
         break;
       }
 
+      // Handle client messages received via Open Channel
+      case "ONIMCONNECTORMESSAGERECEIVE":
+      case "ONIMBOTMESSAGEADD": {
+        console.log("=== CLIENT MESSAGE RECEIVED ===");
+        const data = payload.data?.MESSAGES?.[0] || payload.data;
+        
+        if (!data) {
+          console.log("No message data");
+          break;
+        }
+
+        const clientUserId = data.user?.id || data.im?.user_id;
+        const clientChatId = data.chat?.id || data.im?.chat_id;
+        const clientMessageText = data.message?.text || data.text || "";
+        const clientLine = data.line || payload.data?.LINE;
+        const clientName = data.user?.name || data.user?.first_name || "Cliente";
+
+        console.log("Client message:", { clientUserId, clientChatId, clientMessageText, clientLine, clientName });
+
+        if (!clientMessageText) {
+          console.log("Empty message, skipping");
+          break;
+        }
+
+        // Find integration and mapping for this line
+        let integrationData: any = null;
+        let mappingData: any = null;
+
+        if (clientLine) {
+          const { data: mapping } = await supabase
+            .from("bitrix_channel_mappings")
+            .select("*, integrations(*)")
+            .eq("line_id", clientLine)
+            .eq("is_active", true)
+            .maybeSingle();
+
+          if (mapping) {
+            mappingData = mapping;
+            integrationData = mapping.integrations;
+          }
+        }
+
+        if (!integrationData) {
+          // Try to find by member_id or domain
+          const memberId = payload.auth?.member_id || payload.member_id;
+          const domain = payload.auth?.domain || payload.DOMAIN;
+
+          if (memberId) {
+            const { data: integration } = await supabase
+              .from("integrations")
+              .select("*")
+              .eq("type", "bitrix24")
+              .eq("config->>member_id", memberId)
+              .eq("is_active", true)
+              .maybeSingle();
+            integrationData = integration;
+          }
+
+          if (!integrationData && domain) {
+            const { data: integration } = await supabase
+              .from("integrations")
+              .select("*")
+              .eq("type", "bitrix24")
+              .ilike("config->>domain", `%${domain}%`)
+              .eq("is_active", true)
+              .maybeSingle();
+            integrationData = integration;
+          }
+        }
+
+        if (!integrationData) {
+          console.error("No integration found for client message");
+          break;
+        }
+
+        console.log("Found integration:", integrationData.id, "workspace:", integrationData.workspace_id);
+
+        // Check if chatbot is enabled for this integration
+        if (!integrationData.config?.chatbot_enabled) {
+          console.log("Chatbot not enabled for this integration, skipping AI response");
+          break;
+        }
+
+        const workspaceId = integrationData.workspace_id;
+        const instanceId = mappingData?.instance_id || integrationData.config?.instance_id;
+
+        if (!instanceId) {
+          console.error("No instance_id configured");
+          break;
+        }
+
+        // Create or find contact
+        let contact: any = null;
+        
+        // Try to find existing contact by bitrix24_user_id
+        const { data: existingContact } = await supabase
+          .from("contacts")
+          .select("*")
+          .eq("instance_id", instanceId)
+          .contains("metadata", { bitrix24_user_id: clientUserId })
+          .maybeSingle();
+
+        if (existingContact) {
+          contact = existingContact;
+          console.log("Found existing contact:", contact.id);
+        } else {
+          // Create new contact
+          const { data: newContact, error: contactError } = await supabase
+            .from("contacts")
+            .insert({
+              instance_id: instanceId,
+              name: clientName,
+              phone_number: `bitrix_${clientUserId}`,
+              push_name: clientName,
+              metadata: {
+                bitrix24_user_id: clientUserId,
+                bitrix24_chat_id: clientChatId,
+                source: "bitrix24"
+              }
+            })
+            .select()
+            .single();
+
+          if (contactError) {
+            console.error("Error creating contact:", contactError);
+            break;
+          }
+          contact = newContact;
+          console.log("Created new contact:", contact.id);
+        }
+
+        // Update contact metadata with latest chat_id
+        if (contact && clientChatId) {
+          await supabase
+            .from("contacts")
+            .update({
+              metadata: {
+                ...contact.metadata,
+                bitrix24_chat_id: clientChatId
+              }
+            })
+            .eq("id", contact.id);
+        }
+
+        // Create or find conversation
+        let conversation: any = null;
+
+        const { data: existingConversation } = await supabase
+          .from("conversations")
+          .select("*")
+          .eq("contact_id", contact.id)
+          .eq("instance_id", instanceId)
+          .in("status", ["open", "pending"])
+          .order("created_at", { ascending: false })
+          .maybeSingle();
+
+        if (existingConversation) {
+          conversation = existingConversation;
+          console.log("Found existing conversation:", conversation.id);
+        } else {
+          const { data: newConversation, error: convError } = await supabase
+            .from("conversations")
+            .insert({
+              contact_id: contact.id,
+              instance_id: instanceId,
+              status: "open",
+              attendance_mode: "ai",
+              last_message_at: new Date().toISOString()
+            })
+            .select()
+            .single();
+
+          if (convError) {
+            console.error("Error creating conversation:", convError);
+            break;
+          }
+          conversation = newConversation;
+          console.log("Created new conversation:", conversation.id);
+        }
+
+        // Save incoming message
+        const { error: msgError } = await supabase
+          .from("messages")
+          .insert({
+            conversation_id: conversation.id,
+            contact_id: contact.id,
+            instance_id: instanceId,
+            content: clientMessageText,
+            direction: "incoming",
+            is_from_bot: false,
+            message_type: "text",
+            status: "received",
+            metadata: { source: "bitrix24", bitrix24_user_id: clientUserId }
+          });
+
+        if (msgError) {
+          console.error("Error saving message:", msgError);
+        }
+
+        // Update conversation
+        await supabase
+          .from("conversations")
+          .update({
+            last_message_at: new Date().toISOString(),
+            unread_count: (conversation.unread_count || 0) + 1
+          })
+          .eq("id", conversation.id);
+
+        // Check attendance mode - only call AI if mode is "ai"
+        if (conversation.attendance_mode === "ai" || !existingConversation) {
+          console.log("Calling AI to process message...");
+          
+          // Call ai-process-bitrix24 function
+          const aiResponse = await fetch(`${supabaseUrl}/functions/v1/ai-process-bitrix24`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${supabaseServiceKey}`,
+            },
+            body: JSON.stringify({
+              conversation_id: conversation.id,
+              contact_id: contact.id,
+              instance_id: instanceId,
+              content: clientMessageText,
+              workspace_id: workspaceId,
+              integration_id: integrationData.id,
+              bitrix24_user_id: clientUserId,
+              bitrix24_chat_id: clientChatId,
+              line_id: clientLine
+            })
+          });
+
+          const aiResult = await aiResponse.json();
+          console.log("AI process result:", aiResult);
+        } else {
+          console.log("Attendance mode is not AI, skipping automatic response");
+        }
+
+        break;
+      }
+
       case "ONIMCONNECTORTYPING":
       case "ONIMCONNECTORDIALOGFINISH":
       case "ONIMCONNECTORSTATUSDELETE":
