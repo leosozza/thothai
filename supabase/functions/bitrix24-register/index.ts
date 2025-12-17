@@ -505,14 +505,53 @@ serve(async (req) => {
       );
     }
 
-    // NOTE: imconnector.activate is now handled by bitrix24-webhook when user connects Open Channel
-    // This allows the correct LINE ID to be used (selected by user in Contact Center)
-    console.log("Skipping imconnector.activate - will be called when user connects Open Channel");
-
-    // 2. Bind events to receive messages from Bitrix24 operators
-    console.log("Binding events for message handling...");
+    // 2. ACTIVATE connector immediately with default line (LINE: 1)
+    // This ensures "Setup concluído" in Bitrix24 Contact Center
+    console.log("=== ACTIVATING CONNECTOR IMMEDIATELY ===");
     const workspaceIdForWebhook = workspace_id || integration?.workspace_id || "default";
     const webhookEndpoint = `${supabaseUrl}/functions/v1/bitrix24-webhook?workspace_id=${workspaceIdForWebhook}&connector_id=${finalConnectorId}`;
+    
+    const defaultLineId = 1; // Default to first Open Line
+    
+    // Call imconnector.activate
+    const activateUrl = `${bitrixApiUrl}imconnector.activate?auth=${accessToken}`;
+    console.log("Calling imconnector.activate with LINE:", defaultLineId);
+    
+    const activateResponse = await fetch(activateUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        CONNECTOR: finalConnectorId,
+        LINE: defaultLineId,
+        ACTIVE: 1
+      })
+    });
+    const activateResult = await activateResponse.json();
+    console.log("imconnector.activate result:", JSON.stringify(activateResult));
+    
+    // 3. Set connector data with URLs
+    console.log("Setting connector data...");
+    const dataSetUrl = `${bitrixApiUrl}imconnector.connector.data.set?auth=${accessToken}`;
+    
+    const dataSetResponse = await fetch(dataSetUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        CONNECTOR: finalConnectorId,
+        LINE: defaultLineId,
+        DATA: {
+          id: `${finalConnectorId}_line_${defaultLineId}`,
+          url: webhookEndpoint,
+          url_im: webhookEndpoint,
+          name: "Thoth WhatsApp"
+        }
+      })
+    });
+    const dataSetResult = await dataSetResponse.json();
+    console.log("imconnector.connector.data.set result:", JSON.stringify(dataSetResult));
+
+    // 4. Bind events to receive messages from Bitrix24 operators
+    console.log("Binding events for message handling...");
     
     const events = [
       "OnImConnectorMessageAdd",      // When operator sends message
@@ -536,13 +575,16 @@ serve(async (req) => {
       console.log(`event.bind ${event} result:`, JSON.stringify(bindResult));
     }
 
-    // 4. Update integration in database with registration details
+    // 5. Update integration in database with registration details
+    const activated = !activateResult.error;
     const configUpdate = {
       connector_id: finalConnectorId,
       instance_id: instance_id || null,
       registered: true,
+      activated: activated,
+      activated_line_id: activated ? defaultLineId : null,
       events_url: webhookEndpoint,
-      line_id: "1",
+      line_id: String(defaultLineId),
     };
 
     if (integration_id || integration?.id) {
@@ -573,11 +615,18 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({ 
         success: true, 
-        message: "Conector registrado com sucesso no Contact Center!",
+        message: activated 
+          ? "Conector registrado E ATIVADO com sucesso no Contact Center!" 
+          : "Conector registrado mas ativação pendente. Use 'Ativar Manualmente' na interface.",
         connector_id: finalConnectorId,
         events_url: webhookEndpoint,
         mode: "oauth",
-        next_steps: "Vá em Contact Center → + Adicionar → Thoth WhatsApp para configurar a linha",
+        activated: activated,
+        activate_result: activateResult,
+        data_set_result: dataSetResult,
+        next_steps: activated 
+          ? "O conector está ativo! Teste enviando uma mensagem pelo WhatsApp."
+          : "Vá em Contact Center → Thoth WhatsApp → Continuar para finalizar a configuração",
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

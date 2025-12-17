@@ -241,6 +241,146 @@ serve(async (req) => {
         );
       }
 
+      case "check_connector": {
+        // Diagnostic action to check connector status in Bitrix24
+        const validToken = await refreshBitrixToken(integration, supabase);
+        if (!validToken) {
+          return new Response(
+            JSON.stringify({ 
+              success: false, 
+              error: "Token OAuth não disponível" 
+            }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const apiUrl = (config.client_endpoint as string) || `https://${config.domain}/rest/`;
+        const connectorId = String(config.connector_id || "thoth_whatsapp");
+
+        // Check imconnector.list
+        const listResponse = await fetch(`${apiUrl}imconnector.list`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ auth: validToken })
+        });
+        const listResult = await listResponse.json();
+        console.log("imconnector.list:", JSON.stringify(listResult));
+
+        const connectors = listResult.result as Record<string, any> || {};
+        const connectorExists = Object.keys(connectors).includes(connectorId);
+        const connectorDetails = connectorExists ? connectors[connectorId] : null;
+
+        // Check activation status via imconnector.status
+        let activationStatus = null;
+        if (connectorExists) {
+          const statusResponse = await fetch(`${apiUrl}imconnector.status`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ 
+              auth: validToken,
+              CONNECTOR: connectorId
+            })
+          });
+          const statusResult = await statusResponse.json();
+          console.log("imconnector.status:", JSON.stringify(statusResult));
+          activationStatus = statusResult.result;
+        }
+
+        return new Response(
+          JSON.stringify({ 
+            success: true,
+            connector_id: connectorId,
+            registered: connectorExists,
+            connector_details: connectorDetails,
+            activation_status: activationStatus,
+            all_connectors: Object.keys(listResult.result || {}),
+            diagnosis: connectorExists 
+              ? (activationStatus?.ACTIVE ? "Conector registrado e ATIVO" : "Conector registrado mas NÃO ATIVO - precisa ativar em Open Lines")
+              : "Conector NÃO registrado - registre novamente"
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      case "activate_connector": {
+        // Manual activation of connector for a specific line
+        const validToken = await refreshBitrixToken(integration, supabase);
+        if (!validToken) {
+          return new Response(
+            JSON.stringify({ 
+              success: false, 
+              error: "Token OAuth não disponível" 
+            }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
+
+        const { line_id } = await req.json().then(b => ({ line_id: b.line_id })).catch(() => ({ line_id: 1 }));
+        const apiUrl = (config.client_endpoint as string) || `https://${config.domain}/rest/`;
+        const connectorId = (config.connector_id as string) || "thoth_whatsapp";
+        const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+        const webhookUrl = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
+
+        // Activate
+        const activateResponse = await fetch(`${apiUrl}imconnector.activate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            auth: validToken,
+            CONNECTOR: connectorId,
+            LINE: line_id || 1,
+            ACTIVE: 1
+          })
+        });
+        const activateResult = await activateResponse.json();
+        console.log("imconnector.activate:", JSON.stringify(activateResult));
+
+        // Set data
+        const dataSetResponse = await fetch(`${apiUrl}imconnector.connector.data.set`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            auth: validToken,
+            CONNECTOR: connectorId,
+            LINE: line_id || 1,
+            DATA: {
+              id: `${connectorId}_line_${line_id || 1}`,
+              url: webhookUrl,
+              url_im: webhookUrl,
+              name: "Thoth WhatsApp"
+            }
+          })
+        });
+        const dataSetResult = await dataSetResponse.json();
+        console.log("imconnector.connector.data.set:", JSON.stringify(dataSetResult));
+
+        // Update integration config
+        await supabase
+          .from("integrations")
+          .update({
+            config: {
+              ...config,
+              activated: !activateResult.error,
+              activated_line_id: line_id || 1,
+              last_activation_at: new Date().toISOString()
+            },
+            updated_at: new Date().toISOString()
+          })
+          .eq("id", integration.id);
+
+        return new Response(
+          JSON.stringify({ 
+            success: !activateResult.error,
+            message: activateResult.error 
+              ? `Erro ao ativar: ${activateResult.error_description || activateResult.error}`
+              : "Conector ativado com sucesso!",
+            activate_result: activateResult,
+            data_set_result: dataSetResult
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
       case "register_bot": {
         // Ensure valid token
         if (config?.access_token) {
