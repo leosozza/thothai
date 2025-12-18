@@ -356,18 +356,38 @@ serve(async (req) => {
         console.error("imconnector error:", imconnectorResult.error);
       }
 
-      // Update contact metadata with Bitrix24 user ID if returned
-      if (imconnectorResult.result?.USER_ID) {
+      // Save session info for conversation to open in Contact Center
+      // The result may contain SESSION_ID, CHAT_ID, USER_ID that we need for replies
+      const sessionData = imconnectorResult.result || {};
+      const sessionId = sessionData.SESSION_ID || sessionData.session_id;
+      const chatId = sessionData.CHAT_ID || sessionData.chat_id;
+      const bitrixUserId = sessionData.USER_ID || sessionData.user_id;
+
+      console.log("Session data from imconnector:", { sessionId, chatId, bitrixUserId });
+
+      // Update contact metadata with Bitrix24 session info
+      if (sessionId || chatId || bitrixUserId) {
+        const { data: existingContact } = await supabase
+          .from("contacts")
+          .select("metadata")
+          .eq("phone_number", contact_phone)
+          .maybeSingle();
+
         await supabase
           .from("contacts")
           .update({ 
             metadata: { 
-              bitrix24_user_id: imconnectorResult.result.USER_ID,
-              bitrix24_chat_id: imconnectorResult.result.CHAT_ID,
+              ...(existingContact?.metadata || {}),
+              bitrix24_session_id: sessionId,
+              bitrix24_chat_id: chatId,
+              bitrix24_user_id: bitrixUserId,
               bitrix24_lead_id: leadInfo.lead_id,
+              bitrix24_last_message_at: new Date().toISOString(),
             } 
           })
           .eq("phone_number", contact_phone);
+
+        console.log("Updated contact with session info");
       }
     }
 
