@@ -989,6 +989,452 @@ async function handleRegisterSmsProvider(supabase: any, payload: any, supabaseUr
   }
 }
 
+// Handle register_robot action - Register automation robot in Bitrix24 (bizproc.robot.add)
+async function handleRegisterRobot(supabase: any, payload: any, supabaseUrl: string) {
+  console.log("=== REGISTER AUTOMATION ROBOT ===");
+  const { integration_id, robot_name } = payload;
+
+  if (!integration_id) {
+    return new Response(
+      JSON.stringify({ error: "Integration ID é obrigatório" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const { data: integration, error: integrationError } = await supabase
+    .from("integrations")
+    .select("*")
+    .eq("id", integration_id)
+    .single();
+
+  if (integrationError || !integration) {
+    console.error("Integration not found:", integrationError);
+    return new Response(
+      JSON.stringify({ error: "Integração não encontrada" }),
+      { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const accessToken = await refreshBitrixToken(integration, supabase);
+  if (!accessToken) {
+    return new Response(
+      JSON.stringify({ error: "Token de acesso não disponível" }),
+      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const config = integration.config;
+  const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
+  const robotCode = "thoth_whatsapp_robot";
+  const name = robot_name || "Thoth WhatsApp - Enviar Mensagem";
+  const webhookUrl = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
+
+  try {
+    // First, check if robot already exists
+    console.log("Checking existing robots...");
+    const listResponse = await fetch(`${clientEndpoint}bizproc.robot.list`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ auth: accessToken })
+    });
+
+    const listResult = await listResponse.json();
+    console.log("bizproc.robot.list result:", JSON.stringify(listResult));
+
+    // Check if our robot already exists
+    const existingRobot = listResult.result?.find((r: any) => r.CODE === robotCode);
+
+    if (existingRobot) {
+      console.log("Robot already exists:", existingRobot);
+      
+      // Update integration config
+      await supabase
+        .from("integrations")
+        .update({
+          config: {
+            ...config,
+            robot_code: robotCode,
+            robot_registered: true,
+          },
+          updated_at: new Date().toISOString()
+        })
+        .eq("id", integration.id);
+
+      return new Response(
+        JSON.stringify({ 
+          success: true, 
+          message: "Robot de automação já registrado",
+          robot_code: robotCode
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Register new robot
+    console.log("Registering new automation robot...");
+    const registerResponse = await fetch(`${clientEndpoint}bizproc.robot.add`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        auth: accessToken,
+        CODE: robotCode,
+        HANDLER: webhookUrl,
+        AUTH_USER_ID: 1,
+        USE_SUBSCRIPTION: "Y",
+        NAME: {
+          "pt": name,
+          "en": "Thoth WhatsApp - Send Message"
+        },
+        DESCRIPTION: {
+          "pt": "Envia mensagem WhatsApp para o contato do Lead/Deal/Contato",
+          "en": "Sends WhatsApp message to Lead/Deal/Contact"
+        },
+        PROPERTIES: {
+          phone: {
+            Name: { pt: "Telefone", en: "Phone" },
+            Description: { pt: "Número de telefone do destinatário", en: "Recipient phone number" },
+            Type: "string",
+            Required: "Y",
+            Default: "{=Document:PHONE}"
+          },
+          message: {
+            Name: { pt: "Mensagem", en: "Message" },
+            Description: { pt: "Texto da mensagem a ser enviada", en: "Message text to send" },
+            Type: "text",
+            Required: "Y"
+          }
+        },
+        RETURN_PROPERTIES: {
+          status: {
+            Name: { pt: "Status", en: "Status" },
+            Type: "string"
+          },
+          message_id: {
+            Name: { pt: "ID da Mensagem", en: "Message ID" },
+            Type: "string"
+          }
+        },
+        FILTER: {
+          INCLUDE: [
+            ["crm", "CCrmDocumentDeal"],
+            ["crm", "CCrmDocumentLead"],
+            ["crm", "CCrmDocumentContact"]
+          ]
+        }
+      })
+    });
+
+    const registerResult = await registerResponse.json();
+    console.log("bizproc.robot.add result:", JSON.stringify(registerResult));
+
+    if (registerResult.error) {
+      console.error("Registration error:", registerResult.error, registerResult.error_description);
+      
+      // If error is "Robot already exists", treat as success
+      if (registerResult.error === "ERROR_ACTIVITY_ALREADY_INSTALLED" || 
+          registerResult.error_description?.includes("already")) {
+        await supabase
+          .from("integrations")
+          .update({
+            config: {
+              ...config,
+              robot_code: robotCode,
+              robot_registered: true,
+            },
+            updated_at: new Date().toISOString()
+          })
+          .eq("id", integration.id);
+
+        return new Response(
+          JSON.stringify({ 
+            success: true, 
+            message: "Robot de automação já existe no Bitrix24",
+            robot_code: robotCode
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      return new Response(
+        JSON.stringify({ error: registerResult.error_description || registerResult.error }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Update integration config with robot info
+    await supabase
+      .from("integrations")
+      .update({
+        config: {
+          ...config,
+          robot_code: robotCode,
+          robot_registered: true,
+          robot_registered_at: new Date().toISOString(),
+        },
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", integration.id);
+
+    console.log("Automation robot registered successfully");
+
+    return new Response(
+      JSON.stringify({ 
+        success: true, 
+        message: "Robot de automação registrado com sucesso! Agora você pode usar WhatsApp nas automações do CRM.",
+        robot_code: robotCode,
+        result: registerResult.result
+      }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  } catch (error) {
+    console.error("Error registering automation robot:", error);
+    return new Response(
+      JSON.stringify({ error: error instanceof Error ? error.message : "Erro ao registrar robot de automação" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+}
+
+// Handle unregister_robot action - Remove automation robot from Bitrix24
+async function handleUnregisterRobot(supabase: any, payload: any) {
+  console.log("=== UNREGISTER AUTOMATION ROBOT ===");
+  const { integration_id } = payload;
+
+  if (!integration_id) {
+    return new Response(
+      JSON.stringify({ error: "Integration ID é obrigatório" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const { data: integration, error: integrationError } = await supabase
+    .from("integrations")
+    .select("*")
+    .eq("id", integration_id)
+    .single();
+
+  if (integrationError || !integration) {
+    console.error("Integration not found:", integrationError);
+    return new Response(
+      JSON.stringify({ error: "Integração não encontrada" }),
+      { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const accessToken = await refreshBitrixToken(integration, supabase);
+  if (!accessToken) {
+    return new Response(
+      JSON.stringify({ error: "Token de acesso não disponível" }),
+      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const config = integration.config;
+  const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
+  const robotCode = config.robot_code || "thoth_whatsapp_robot";
+
+  try {
+    console.log("Removing automation robot:", robotCode);
+    const deleteResponse = await fetch(`${clientEndpoint}bizproc.robot.delete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        auth: accessToken,
+        CODE: robotCode
+      })
+    });
+
+    const deleteResult = await deleteResponse.json();
+    console.log("bizproc.robot.delete result:", JSON.stringify(deleteResult));
+
+    // Update integration config
+    const { robot_code, robot_registered, robot_registered_at, ...restConfig } = config;
+    await supabase
+      .from("integrations")
+      .update({
+        config: {
+          ...restConfig,
+          robot_registered: false,
+        },
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", integration.id);
+
+    return new Response(
+      JSON.stringify({ 
+        success: true, 
+        message: "Robot de automação removido com sucesso"
+      }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  } catch (error) {
+    console.error("Error unregistering automation robot:", error);
+    return new Response(
+      JSON.stringify({ error: error instanceof Error ? error.message : "Erro ao remover robot de automação" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+}
+
+// Handle robot execution - Called by Bitrix24 when automation robot is triggered
+async function handleRobotExecution(supabase: any, payload: any, supabaseUrl: string) {
+  console.log("=== ROBOT EXECUTION (from Bitrix24 automation) ===");
+  console.log("Full payload:", JSON.stringify(payload, null, 2));
+
+  // Extract data from Bitrix24's bizproc robot call
+  const eventToken = payload.event_token || payload.EVENT_TOKEN;
+  const documentId = payload.document_id || payload.DOCUMENT_ID;
+  const documentType = payload.document_type || payload.DOCUMENT_TYPE;
+  const properties = payload.properties || payload.PROPERTIES || {};
+  const tsResult = payload.ts || payload.TS; // Timestamp result
+  const workflowId = payload.workflow_id || payload.WORKFLOW_ID;
+
+  // Get phone and message from properties
+  const phone = properties.phone || properties.PHONE;
+  const message = properties.message || properties.MESSAGE;
+
+  console.log("Robot execution data:", { eventToken, documentId, documentType, phone, message, workflowId });
+
+  if (!phone || !message) {
+    console.error("Missing phone or message in robot execution");
+    return new Response(
+      JSON.stringify({ error: "Telefone e mensagem são obrigatórios" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  // Clean phone number
+  const cleanPhone = phone.replace(/\D/g, "");
+  console.log("Sending WhatsApp message to:", cleanPhone);
+
+  // Find the integration by member_id or domain
+  const memberId = payload.auth?.member_id || payload.member_id;
+  const domain = payload.auth?.domain || payload.DOMAIN;
+
+  let integration = null;
+  if (memberId) {
+    const { data } = await supabase
+      .from("integrations")
+      .select("*")
+      .eq("type", "bitrix24")
+      .eq("config->>member_id", memberId)
+      .maybeSingle();
+    integration = data;
+  }
+
+  if (!integration && domain) {
+    const { data } = await supabase
+      .from("integrations")
+      .select("*")
+      .eq("type", "bitrix24")
+      .ilike("config->>domain", `%${domain}%`)
+      .maybeSingle();
+    integration = data;
+  }
+
+  if (!integration) {
+    // Try to find any active integration
+    const { data } = await supabase
+      .from("integrations")
+      .select("*")
+      .eq("type", "bitrix24")
+      .eq("is_active", true)
+      .maybeSingle();
+    integration = data;
+  }
+
+  if (!integration) {
+    console.error("No Bitrix24 integration found for robot execution");
+    return new Response(
+      JSON.stringify({ error: "Integração não encontrada" }),
+      { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  // Find instance to send from
+  const instanceId = integration.config?.instance_id;
+
+  if (!instanceId) {
+    console.error("No instance configured for robot execution");
+    return new Response(
+      JSON.stringify({ error: "Nenhuma instância WhatsApp configurada" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  // Send message via wapi-send-message
+  let sendResult: any = null;
+  try {
+    const sendResponse = await fetch(`${supabaseUrl}/functions/v1/wapi-send-message`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        instance_id: instanceId,
+        phone_number: cleanPhone,
+        message: message,
+        message_type: "text",
+        workspace_id: integration.workspace_id,
+        internal_call: true, // Skip JWT validation
+      })
+    });
+
+    sendResult = await sendResponse.json();
+    console.log("WhatsApp send result for robot:", sendResult);
+  } catch (error) {
+    console.error("Error sending WhatsApp message from robot:", error);
+    sendResult = { error: error instanceof Error ? error.message : "Erro ao enviar mensagem" };
+  }
+
+  // Send completion event back to Bitrix24 if event_token is present
+  if (eventToken && integration.config?.access_token) {
+    try {
+      const accessToken = await refreshBitrixToken(integration, supabase);
+      const clientEndpoint = integration.config.client_endpoint || `https://${integration.config.domain}/rest/`;
+
+      console.log("Sending bizproc.event.send to complete workflow...");
+      const eventResponse = await fetch(`${clientEndpoint}bizproc.event.send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          auth: accessToken,
+          EVENT_TOKEN: eventToken,
+          RETURN_VALUES: {
+            status: sendResult?.error ? "error" : "sent",
+            message_id: sendResult?.message_id || sendResult?.id || ""
+          }
+        })
+      });
+
+      const eventResult = await eventResponse.json();
+      console.log("bizproc.event.send result:", eventResult);
+    } catch (error) {
+      console.error("Error sending bizproc event:", error);
+    }
+  }
+
+  // Return result
+  if (sendResult?.error) {
+    return new Response(
+      JSON.stringify({ 
+        success: false,
+        error: sendResult.error 
+      }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  return new Response(
+    JSON.stringify({ 
+      success: true,
+      message_id: sendResult?.message_id || sendResult?.id,
+      status: "sent"
+    }),
+    { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+  );
+}
+
 // Handle send_sms action - Called by Bitrix24 when sending SMS via our provider
 async function handleSendSms(supabase: any, payload: any, supabaseUrl: string) {
   console.log("=== SEND SMS (from Bitrix24 automation) ===");
@@ -1213,6 +1659,23 @@ serve(async (req) => {
 
     if (action === "send_sms" || payload.action === "send_sms") {
       return await handleSendSms(supabase, payload, supabaseUrl);
+    }
+
+    // Handle automation robot registration
+    if (action === "register_robot" || payload.action === "register_robot") {
+      return await handleRegisterRobot(supabase, payload, supabaseUrl);
+    }
+
+    if (action === "unregister_robot" || payload.action === "unregister_robot") {
+      return await handleUnregisterRobot(supabase, payload);
+    }
+
+    // Check if this is a robot execution call (bizproc.robot handler)
+    if (payload.event_token || payload.EVENT_TOKEN || 
+        (payload.properties && (payload.properties.phone || payload.properties.message)) ||
+        (payload.PROPERTIES && (payload.PROPERTIES.phone || payload.PROPERTIES.message))) {
+      console.log("=== DETECTED ROBOT EXECUTION REQUEST ===");
+      return await handleRobotExecution(supabase, payload, supabaseUrl);
     }
 
     // Check if this is a messageservice callback (Bitrix24 automation sending SMS)

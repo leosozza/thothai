@@ -232,6 +232,11 @@ export default function Integrations() {
   const [unregisteringBot, setUnregisteringBot] = useState(false);
   const [savingBotConfig, setSavingBotConfig] = useState(false);
 
+  // Automation Robot states
+  const [robotRegistered, setRobotRegistered] = useState(false);
+  const [registeringRobot, setRegisteringRobot] = useState(false);
+  const [unregisteringRobot, setUnregisteringRobot] = useState(false);
+
   // Token status
   const [tokenExpired, setTokenExpired] = useState(false);
   const [tokenRefreshFailed, setTokenRefreshFailed] = useState(false);
@@ -435,6 +440,9 @@ export default function Integrations() {
         setBotPersonaId((bitrix.config.bot_persona_id as string) || "");
         setBotWelcomeMessage((bitrix.config.bot_welcome_message as string) || "");
         
+        // Automation robot status
+        setRobotRegistered(!!bitrix.config.robot_registered);
+        
         // Token status
         if (bitrix.config.token_expires_at) {
           const expiresAt = new Date(bitrix.config.token_expires_at as string);
@@ -586,6 +594,70 @@ export default function Integrations() {
     }
   };
 
+  // Register automation robot (for CRM automations)
+  const handleRegisterRobot = async () => {
+    const bitrix = integrations.find((i) => i.type === "bitrix24");
+    if (!bitrix) {
+      toast.error("Integração Bitrix24 não encontrada");
+      return;
+    }
+
+    setRegisteringRobot(true);
+    try {
+      const response = await supabase.functions.invoke("bitrix24-webhook", {
+        body: {
+          action: "register_robot",
+          integration_id: bitrix.id,
+        }
+      });
+
+      if (response.data?.success) {
+        toast.success(response.data.message || "Robot de automação registrado com sucesso!");
+        setRobotRegistered(true);
+        fetchIntegrations();
+      } else {
+        toast.error(response.data?.error || "Erro ao registrar robot");
+      }
+    } catch (error) {
+      console.error("Error registering robot:", error);
+      toast.error("Erro ao registrar robot de automação");
+    } finally {
+      setRegisteringRobot(false);
+    }
+  };
+
+  // Unregister automation robot
+  const handleUnregisterRobot = async () => {
+    const bitrix = integrations.find((i) => i.type === "bitrix24");
+    if (!bitrix) {
+      toast.error("Integração Bitrix24 não encontrada");
+      return;
+    }
+
+    setUnregisteringRobot(true);
+    try {
+      const response = await supabase.functions.invoke("bitrix24-webhook", {
+        body: {
+          action: "unregister_robot",
+          integration_id: bitrix.id,
+        }
+      });
+
+      if (response.data?.success) {
+        toast.success("Robot de automação removido!");
+        setRobotRegistered(false);
+        fetchIntegrations();
+      } else {
+        toast.error(response.data?.error || "Erro ao remover robot");
+      }
+    } catch (error) {
+      console.error("Error unregistering robot:", error);
+      toast.error("Erro ao remover robot de automação");
+    } finally {
+      setUnregisteringRobot(false);
+    }
+  };
+
   // Create new Bitrix24 channel
   const handleCreateChannel = async () => {
     if (!newChannelName.trim()) {
@@ -640,6 +712,8 @@ export default function Integrations() {
       setBotId(bitrix.config.bot_id as number | null);
       setBotEnabled(!!bitrix.config.bot_enabled);
       setBotPersonaId((bitrix.config.bot_persona_id as string) || "");
+      // Update robot status
+      setRobotRegistered(!!bitrix.config.robot_registered);
     }
   }, [integrations]);
 
@@ -2605,6 +2679,119 @@ export default function Integrations() {
                           {unregisteringBot ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
                         </Button>
                       </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Automation Robot Card */}
+            {bitrixIntegration?.is_active && (
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="h-12 w-12 rounded-xl bg-amber-500/10 flex items-center justify-center">
+                        <Zap className="h-6 w-6 text-amber-500" />
+                      </div>
+                      <div>
+                        <CardTitle>Robot de Automação CRM</CardTitle>
+                        <CardDescription>
+                          Envie mensagens WhatsApp diretamente das automações do Bitrix24
+                        </CardDescription>
+                      </div>
+                    </div>
+                    {robotRegistered && (
+                      <Badge variant="outline" className="gap-1.5">
+                        <span className="h-2 w-2 rounded-full bg-green-500" />
+                        Registrado
+                      </Badge>
+                    )}
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  {!robotRegistered ? (
+                    <div className="space-y-4">
+                      <div className="bg-amber-500/5 border border-amber-500/20 rounded-lg p-4">
+                        <p className="text-sm text-muted-foreground">
+                          O Robot de Automação permite enviar mensagens WhatsApp diretamente das automações do Bitrix24 CRM.
+                          Após registrado, ele aparecerá como uma <strong>Atividade do Aplicativo</strong> nas regras de automação de Leads, Deals e Contatos.
+                        </p>
+                      </div>
+                      
+                      <div className="bg-muted/50 rounded-lg p-4 text-sm">
+                        <div className="flex items-start gap-2">
+                          <Zap className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
+                          <div>
+                            <p className="font-medium">Como funciona:</p>
+                            <ul className="text-muted-foreground mt-1 space-y-1">
+                              <li>• Registre o robot clicando no botão abaixo</li>
+                              <li>• No Bitrix24, vá em CRM → Automação → Regras</li>
+                              <li>• Adicione uma ação → Atividades do Aplicativo → <strong>Thoth WhatsApp</strong></li>
+                              <li>• Configure o telefone e a mensagem</li>
+                              <li>• A mensagem será enviada automaticamente via WhatsApp</li>
+                            </ul>
+                          </div>
+                        </div>
+                      </div>
+
+                      <Button onClick={handleRegisterRobot} disabled={registeringRobot} className="w-full">
+                        {registeringRobot ? (
+                          <>
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            Registrando...
+                          </>
+                        ) : (
+                          <>
+                            <Zap className="h-4 w-4 mr-2" />
+                            Registrar Robot de Automação
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <Alert>
+                        <CheckCircle2 className="h-4 w-4" />
+                        <AlertTitle>Robot Registrado</AlertTitle>
+                        <AlertDescription>
+                          O robot <strong>"Thoth WhatsApp - Enviar Mensagem"</strong> está disponível nas automações do Bitrix24.
+                          <br />
+                          Acesse CRM → Automação → Regras → Atividades do Aplicativo para usá-lo.
+                        </AlertDescription>
+                      </Alert>
+
+                      <div className="bg-muted/50 rounded-lg p-4 text-sm">
+                        <div className="flex items-start gap-2">
+                          <Settings className="h-5 w-5 text-muted-foreground shrink-0 mt-0.5" />
+                          <div>
+                            <p className="font-medium">Parâmetros disponíveis:</p>
+                            <ul className="text-muted-foreground mt-1 space-y-1">
+                              <li>• <strong>Telefone:</strong> Número do destinatário (pode usar variáveis do CRM)</li>
+                              <li>• <strong>Mensagem:</strong> Texto a ser enviado (pode usar variáveis do CRM)</li>
+                            </ul>
+                          </div>
+                        </div>
+                      </div>
+
+                      <Button 
+                        variant="destructive" 
+                        onClick={handleUnregisterRobot} 
+                        disabled={unregisteringRobot}
+                        className="w-full"
+                      >
+                        {unregisteringRobot ? (
+                          <>
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            Removendo...
+                          </>
+                        ) : (
+                          <>
+                            <Trash2 className="h-4 w-4 mr-2" />
+                            Remover Robot de Automação
+                          </>
+                        )}
+                      </Button>
                     </div>
                   )}
                 </CardContent>
