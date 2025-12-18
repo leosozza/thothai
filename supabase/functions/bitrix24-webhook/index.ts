@@ -824,6 +824,299 @@ async function handleCreateChannel(supabase: any, payload: any) {
   }
 }
 
+// Handle register_sms_provider action - Register as SMS/messaging provider in Bitrix24
+async function handleRegisterSmsProvider(supabase: any, payload: any, supabaseUrl: string) {
+  console.log("=== REGISTER SMS PROVIDER ===");
+  const { integration_id, provider_name } = payload;
+
+  if (!integration_id) {
+    return new Response(
+      JSON.stringify({ error: "Integration ID é obrigatório" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const { data: integration, error: integrationError } = await supabase
+    .from("integrations")
+    .select("*")
+    .eq("id", integration_id)
+    .single();
+
+  if (integrationError || !integration) {
+    console.error("Integration not found:", integrationError);
+    return new Response(
+      JSON.stringify({ error: "Integração não encontrada" }),
+      { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const accessToken = await refreshBitrixToken(integration, supabase);
+  if (!accessToken) {
+    return new Response(
+      JSON.stringify({ error: "Token de acesso não disponível" }),
+      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const config = integration.config;
+  const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
+  const smsProviderId = "thoth_whatsapp_sms";
+  const name = provider_name || "Thoth WhatsApp";
+  const webhookUrl = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
+
+  try {
+    // First, check if provider already exists
+    console.log("Checking existing SMS providers...");
+    const listResponse = await fetch(`${clientEndpoint}messageservice.sender.list`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ auth: accessToken })
+    });
+
+    const listResult = await listResponse.json();
+    console.log("messageservice.sender.list result:", JSON.stringify(listResult));
+
+    // Check if our provider already exists
+    const existingProvider = listResult.result?.find((p: any) => 
+      p.CODE === smsProviderId || p.ID === smsProviderId || 
+      (p.NAME && p.NAME.toLowerCase().includes("thoth"))
+    );
+
+    if (existingProvider) {
+      console.log("Provider already exists:", existingProvider);
+      
+      // Update integration config
+      await supabase
+        .from("integrations")
+        .update({
+          config: {
+            ...config,
+            sms_provider_id: existingProvider.CODE || existingProvider.ID,
+            sms_provider_registered: true,
+          },
+          updated_at: new Date().toISOString()
+        })
+        .eq("id", integration.id);
+
+      return new Response(
+        JSON.stringify({ 
+          success: true, 
+          message: "Provedor de SMS já registrado",
+          provider: existingProvider
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Register new SMS provider
+    console.log("Registering new SMS provider...");
+    const registerResponse = await fetch(`${clientEndpoint}messageservice.sender.add`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        auth: accessToken,
+        CODE: smsProviderId,
+        TYPE: "SMS",
+        NAME: name,
+        DESCRIPTION: "Envio de mensagens WhatsApp via Thoth.ai",
+        HANDLER: webhookUrl,
+        // Options for Bitrix24 CRM automations
+        CRM_SETTINGS: {
+          CONTACT: "Y",
+          COMPANY: "Y", 
+          LEAD: "Y",
+          DEAL: "Y"
+        }
+      })
+    });
+
+    const registerResult = await registerResponse.json();
+    console.log("messageservice.sender.add result:", JSON.stringify(registerResult));
+
+    if (registerResult.error) {
+      console.error("Registration error:", registerResult.error, registerResult.error_description);
+      
+      // If error is "Provider already exists", try to get the existing one
+      if (registerResult.error === "ERROR_PROVIDER_ALREADY_EXISTS" || 
+          registerResult.error_description?.includes("already exists")) {
+        return new Response(
+          JSON.stringify({ 
+            success: true, 
+            message: "Provedor de SMS já existe no Bitrix24",
+            provider_id: smsProviderId
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      return new Response(
+        JSON.stringify({ error: registerResult.error_description || registerResult.error }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Update integration config with SMS provider info
+    await supabase
+      .from("integrations")
+      .update({
+        config: {
+          ...config,
+          sms_provider_id: smsProviderId,
+          sms_provider_registered: true,
+          sms_provider_registered_at: new Date().toISOString(),
+        },
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", integration.id);
+
+    console.log("SMS provider registered successfully");
+
+    return new Response(
+      JSON.stringify({ 
+        success: true, 
+        message: "Provedor de SMS registrado com sucesso! Agora você pode usar WhatsApp nas automações do CRM.",
+        provider_id: smsProviderId,
+        result: registerResult.result
+      }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  } catch (error) {
+    console.error("Error registering SMS provider:", error);
+    return new Response(
+      JSON.stringify({ error: error instanceof Error ? error.message : "Erro ao registrar provedor de SMS" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+}
+
+// Handle send_sms action - Called by Bitrix24 when sending SMS via our provider
+async function handleSendSms(supabase: any, payload: any, supabaseUrl: string) {
+  console.log("=== SEND SMS (from Bitrix24 automation) ===");
+  console.log("Payload:", JSON.stringify(payload, null, 2));
+
+  // Extract data from Bitrix24's messageservice call
+  const phoneNumber = payload.PHONE_NUMBER || payload.phone || payload.MESSAGE_TO;
+  const message = payload.MESSAGE_BODY || payload.message || payload.MESSAGE;
+  const entityType = payload.ENTITY_TYPE || payload.entity_type; // CONTACT, LEAD, DEAL
+  const entityId = payload.ENTITY_ID || payload.entity_id;
+
+  if (!phoneNumber || !message) {
+    console.error("Missing phone or message");
+    return new Response(
+      JSON.stringify({ error: "Número de telefone e mensagem são obrigatórios" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  // Clean phone number
+  const cleanPhone = phoneNumber.replace(/\D/g, "");
+  console.log("Sending WhatsApp message to:", cleanPhone);
+
+  // Find the integration by member_id or domain
+  const memberId = payload.auth?.member_id || payload.member_id;
+  const domain = payload.auth?.domain || payload.DOMAIN;
+
+  let integration = null;
+  if (memberId) {
+    const { data } = await supabase
+      .from("integrations")
+      .select("*")
+      .eq("type", "bitrix24")
+      .eq("config->>member_id", memberId)
+      .maybeSingle();
+    integration = data;
+  }
+
+  if (!integration && domain) {
+    const { data } = await supabase
+      .from("integrations")
+      .select("*")
+      .eq("type", "bitrix24")
+      .ilike("config->>domain", `%${domain}%`)
+      .maybeSingle();
+    integration = data;
+  }
+
+  if (!integration) {
+    // Try to find any active integration
+    const { data } = await supabase
+      .from("integrations")
+      .select("*")
+      .eq("type", "bitrix24")
+      .eq("is_active", true)
+      .maybeSingle();
+    integration = data;
+  }
+
+  if (!integration) {
+    console.error("No Bitrix24 integration found");
+    return new Response(
+      JSON.stringify({ error: "Integração não encontrada" }),
+      { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  // Find instance to send from
+  const instanceId = integration.config?.instance_id;
+
+  if (!instanceId) {
+    console.error("No instance configured");
+    return new Response(
+      JSON.stringify({ error: "Nenhuma instância WhatsApp configurada" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  // Send message via wapi-send-message
+  try {
+    const sendResponse = await fetch(`${supabaseUrl}/functions/v1/wapi-send-message`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        instance_id: instanceId,
+        phone_number: cleanPhone,
+        message: message,
+        message_type: "text",
+        workspace_id: integration.workspace_id,
+      })
+    });
+
+    const sendResult = await sendResponse.json();
+    console.log("WhatsApp send result:", sendResult);
+
+    if (sendResult.error) {
+      return new Response(
+        JSON.stringify({ 
+          STATUS: "ERROR",
+          error: sendResult.error 
+        }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Return success in Bitrix24 expected format
+    return new Response(
+      JSON.stringify({ 
+        STATUS: "SENT",
+        MESSAGE_ID: sendResult.message_id || sendResult.id,
+        success: true
+      }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  } catch (error) {
+    console.error("Error sending SMS via WhatsApp:", error);
+    return new Response(
+      JSON.stringify({ 
+        STATUS: "ERROR",
+        error: error instanceof Error ? error.message : "Erro ao enviar mensagem" 
+      }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+}
+
 serve(async (req) => {
   console.log("=== BITRIX24-WEBHOOK REQUEST ===");
   console.log("Method:", req.method);
@@ -912,6 +1205,20 @@ serve(async (req) => {
 
     if (action === "activate_connector_for_line" || payload.action === "activate_connector_for_line") {
       return await handleActivateConnectorForLine(supabase, payload, supabaseUrl);
+    }
+
+    if (action === "register_sms_provider" || payload.action === "register_sms_provider") {
+      return await handleRegisterSmsProvider(supabase, payload, supabaseUrl);
+    }
+
+    if (action === "send_sms" || payload.action === "send_sms") {
+      return await handleSendSms(supabase, payload, supabaseUrl);
+    }
+
+    // Check if this is a messageservice callback (Bitrix24 automation sending SMS)
+    if (payload.MESSAGE_BODY || payload.PHONE_NUMBER || payload.MESSAGE_TO) {
+      console.log("=== DETECTED SMS SEND REQUEST ===");
+      return await handleSendSms(supabase, payload, supabaseUrl);
     }
 
     // Check if this is a PLACEMENT call

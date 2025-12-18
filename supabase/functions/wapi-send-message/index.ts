@@ -18,49 +18,77 @@ serve(async (req) => {
     const supabaseAnonKey = Deno.env.get("SUPABASE_ANON_KEY")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
-    // Get auth token from request
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const supabaseUser = createClient(supabaseUrl, supabaseAnonKey, {
-      global: { headers: { Authorization: authHeader } },
-    });
-
-    const { data: { user }, error: authError } = await supabaseUser.auth.getUser();
-    if (authError || !user) {
-      return new Response(JSON.stringify({ error: "Unauthorized" }), {
-        status: 401,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
+    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 
     const { 
       instanceId, 
+      instance_id, // Alternative naming
       conversationId,
+      conversation_id, // Alternative naming
       contactId,
+      contact_id, // Alternative naming
       phoneNumber, 
+      phone_number, // Alternative naming
       message, 
       messageType = "text",
+      message_type, // Alternative naming
       mediaUrl,
-      workspaceId
+      media_url, // Alternative naming
+      workspaceId,
+      workspace_id, // Alternative naming
+      internal_call // Flag for internal edge function calls
     } = await req.json();
 
-    console.log("Send message request:", { instanceId, phoneNumber, messageType });
+    // Normalize parameter names
+    const finalInstanceId = instanceId || instance_id;
+    const finalConversationId = conversationId || conversation_id;
+    const finalContactId = contactId || contact_id;
+    const finalPhoneNumber = phoneNumber || phone_number;
+    const finalMessageType = messageType || message_type || "text";
+    const finalMediaUrl = mediaUrl || media_url;
+    const finalWorkspaceId = workspaceId || workspace_id;
 
-    const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
+    console.log("Send message request:", { instanceId: finalInstanceId, phoneNumber: finalPhoneNumber, messageType: finalMessageType, internal_call });
 
-    // Verify instance belongs to user
-    const { data: instance, error: instanceError } = await supabaseAdmin
+    // Get auth token from request (optional for internal calls)
+    const authHeader = req.headers.get("Authorization");
+    let userId: string | null = null;
+
+    // If not an internal call, require authentication
+    if (!internal_call && !finalWorkspaceId) {
+      if (!authHeader) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const supabaseUser = createClient(supabaseUrl, supabaseAnonKey, {
+        global: { headers: { Authorization: authHeader } },
+      });
+
+      const { data: { user }, error: authError } = await supabaseUser.auth.getUser();
+      if (authError || !user) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      userId = user.id;
+    }
+
+    // Verify instance exists
+    let instanceQuery = supabaseAdmin
       .from("instances")
       .select("*")
-      .eq("id", instanceId)
-      .eq("user_id", user.id)
-      .single();
+      .eq("id", finalInstanceId);
+
+    // If we have a userId, verify ownership
+    if (userId) {
+      instanceQuery = instanceQuery.eq("user_id", userId);
+    }
+
+    const { data: instance, error: instanceError } = await instanceQuery.single();
 
     if (instanceError || !instance) {
       return new Response(JSON.stringify({ error: "Instância não encontrada" }), {
@@ -76,11 +104,13 @@ serve(async (req) => {
       });
     }
 
+    const effectiveWorkspaceId = finalWorkspaceId || instance.workspace_id;
+
     // Get W-API config
     const { data: integration, error: intError } = await supabaseAdmin
       .from("integrations")
       .select("*")
-      .eq("workspace_id", workspaceId)
+      .eq("workspace_id", effectiveWorkspaceId)
       .eq("type", "wapi")
       .eq("is_active", true)
       .single();
@@ -104,7 +134,7 @@ serve(async (req) => {
     }
 
     // Format phone number for WhatsApp (W-API expects just the number)
-    const formattedPhone = phoneNumber.replace(/\D/g, "");
+    const formattedPhone = finalPhoneNumber.replace(/\D/g, "");
 
     let endpoint = "message/send-text";
     let body: Record<string, unknown> = {
@@ -113,21 +143,21 @@ serve(async (req) => {
     };
 
     // Handle different message types
-    if (messageType === "audio" && mediaUrl) {
+    if (finalMessageType === "audio" && finalMediaUrl) {
       endpoint = "message/send-audio";
-      body = { phone: formattedPhone, audioUrl: mediaUrl };
-    } else if (messageType === "image" && mediaUrl) {
+      body = { phone: formattedPhone, audioUrl: finalMediaUrl };
+    } else if (finalMessageType === "image" && finalMediaUrl) {
       endpoint = "message/send-image";
-      body = { phone: formattedPhone, imageUrl: mediaUrl, caption: message };
-    } else if (messageType === "document" && mediaUrl) {
+      body = { phone: formattedPhone, imageUrl: finalMediaUrl, caption: message };
+    } else if (finalMessageType === "document" && finalMediaUrl) {
       endpoint = "message/send-document";
-      body = { phone: formattedPhone, documentUrl: mediaUrl, fileName: message || "document" };
+      body = { phone: formattedPhone, documentUrl: finalMediaUrl, fileName: message || "document" };
     }
 
     console.log("W-API request body:", JSON.stringify(body));
 
     // Send message via W-API
-    console.log(`Sending ${messageType} message via W-API...`);
+    console.log(`Sending ${finalMessageType} message via W-API...`);
     
     const sendResponse = await fetch(
       `${WAPI_BASE_URL}/${endpoint}?instanceId=${wapiInstanceId}`,
@@ -155,36 +185,40 @@ serve(async (req) => {
 
     const waMessageId = sendData.key?.id || sendData.id || sendData.messageId;
 
-    // Save message to database
-    const { data: savedMessage, error: saveError } = await supabaseAdmin
-      .from("messages")
-      .insert({
-        instance_id: instanceId,
-        contact_id: contactId,
-        conversation_id: conversationId,
-        whatsapp_message_id: waMessageId,
-        direction: "outgoing",
-        message_type: messageType,
-        content: message,
-        media_url: mediaUrl,
-        status: "sent",
-        is_from_bot: false,
-      })
-      .select()
-      .single();
+    // Save message to database (only if we have conversation info)
+    let savedMessage = null;
+    if (finalConversationId && finalContactId) {
+      const { data: msgData, error: saveError } = await supabaseAdmin
+        .from("messages")
+        .insert({
+          instance_id: finalInstanceId,
+          contact_id: finalContactId,
+          conversation_id: finalConversationId,
+          whatsapp_message_id: waMessageId,
+          direction: "outgoing",
+          message_type: finalMessageType,
+          content: message,
+          media_url: finalMediaUrl,
+          status: "sent",
+          is_from_bot: false,
+        })
+        .select()
+        .single();
 
-    if (saveError) {
-      console.error("Error saving message:", saveError);
+      if (saveError) {
+        console.error("Error saving message:", saveError);
+      }
+      savedMessage = msgData;
+
+      // Update conversation last_message_at
+      await supabaseAdmin
+        .from("conversations")
+        .update({
+          last_message_at: new Date().toISOString(),
+          unread_count: 0,
+        })
+        .eq("id", finalConversationId);
     }
-
-    // Update conversation last_message_at
-    await supabaseAdmin
-      .from("conversations")
-      .update({
-        last_message_at: new Date().toISOString(),
-        unread_count: 0,
-      })
-      .eq("id", conversationId);
 
     return new Response(JSON.stringify({ 
       success: true, 

@@ -228,7 +228,6 @@ serve(async (req) => {
                 method: "POST",
                 headers: {
                   "Content-Type": "application/json",
-                  Authorization: `Bearer ${supabaseServiceKey}`,
                 },
                 body: JSON.stringify({
                   integration_id: bitrixIntegration.id,
@@ -238,6 +237,8 @@ serve(async (req) => {
                   message: msgContent,
                   message_type: messageType,
                   message_id: messageId,
+                  create_lead: true,
+                  is_first_message: isFirstMessage,
                 }),
               });
 
@@ -270,7 +271,6 @@ serve(async (req) => {
                 method: "POST",
                 headers: {
                   "Content-Type": "application/json",
-                  Authorization: `Bearer ${supabaseServiceKey}`,
                 },
                 body: JSON.stringify({
                   message_id: savedMessage.id,
@@ -350,7 +350,6 @@ serve(async (req) => {
                       method: "POST",
                       headers: {
                         "Content-Type": "application/json",
-                        Authorization: `Bearer ${supabaseServiceKey}`,
                       },
                       body: JSON.stringify({
                         type: statusText === "delivered" ? "delivery" : "reading",
