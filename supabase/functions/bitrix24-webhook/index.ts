@@ -1195,6 +1195,299 @@ async function handleRegisterRobot(supabase: any, payload: any, supabaseUrl: str
   }
 }
 
+// Handle auto_setup action - Automatically configure all Bitrix24 integrations
+async function handleAutoSetup(supabase: any, payload: any, supabaseUrl: string) {
+  console.log("=== AUTO SETUP ===");
+  const { integration_id, instance_id } = payload;
+
+  if (!integration_id) {
+    return new Response(
+      JSON.stringify({ error: "Integration ID é obrigatório" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const { data: integration, error: integrationError } = await supabase
+    .from("integrations")
+    .select("*")
+    .eq("id", integration_id)
+    .single();
+
+  if (integrationError || !integration) {
+    console.error("Integration not found:", integrationError);
+    return new Response(
+      JSON.stringify({ error: "Integração não encontrada" }),
+      { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const accessToken = await refreshBitrixToken(integration, supabase);
+  if (!accessToken) {
+    return new Response(
+      JSON.stringify({ error: "Token de acesso não disponível" }),
+      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const config = integration.config;
+  const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
+  const connectorId = config.connector_id || "thoth_whatsapp";
+  const webhookUrl = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
+  const effectiveInstanceId = instance_id || config.instance_id;
+
+  const results = {
+    connector_registered: false,
+    lines_activated: 0,
+    lines_total: 0,
+    mappings_created: 0,
+    sms_provider_registered: false,
+    robot_registered: false,
+    errors: [] as string[],
+    warnings: [] as string[],
+  };
+
+  try {
+    // 1. Register connector if not already registered
+    console.log("Step 1: Registering connector...");
+    try {
+      const registerResponse = await fetch(`${clientEndpoint}imconnector.register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          auth: accessToken,
+          ID: connectorId,
+          NAME: "Thoth WhatsApp",
+          ICON: {
+            DATA_IMAGE: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0OCIgaGVpZ2h0PSI0OCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiMyNUQzNjYiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMjEgMTEuNWE4LjM4IDguMzggMCAwIDEtLjkgMy44IDguNSA4LjUgMCAwIDEtNy42IDQuNyA4LjM4IDguMzggMCAwIDEtMy44LS45TDMgMjFsMS45LTUuN2E4LjM4IDguMzggMCAwIDEtLjktMy44IDguNSA4LjUgMCAwIDEgNC43LTcuNiA4LjM4IDguMzggMCAwIDEgMy44LS45aDEgMCA4LjUgOC41IDAgMCAxIDguNSA4LjV2LjVaIj48L3BhdGg+PC9zdmc+"
+          },
+          PLACEMENT_HANDLER: webhookUrl
+        })
+      });
+      const registerResult = await registerResponse.json();
+      console.log("Connector register result:", registerResult);
+      
+      if (registerResult.result || registerResult.error === "ERROR_CONNECTOR_ALREADY_EXISTS") {
+        results.connector_registered = true;
+      } else if (registerResult.error) {
+        results.warnings.push(`Conector: ${registerResult.error_description || registerResult.error}`);
+      }
+    } catch (e: any) {
+      console.error("Error registering connector:", e);
+      results.warnings.push(`Conector: ${e.message}`);
+    }
+
+    // 2. Get Open Lines and activate connector for each
+    console.log("Step 2: Getting Open Lines and activating connector...");
+    try {
+      const linesResponse = await fetch(`${clientEndpoint}imopenlines.config.list.get`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          auth: accessToken,
+          PARAMS: { select: ["ID", "LINE_NAME", "ACTIVE"] }
+        })
+      });
+      const linesResult = await linesResponse.json();
+      console.log("Open Lines result:", linesResult);
+
+      const lines = linesResult.result || [];
+      results.lines_total = lines.length;
+
+      for (const line of lines) {
+        const lineId = parseInt(line.ID);
+        const lineName = line.LINE_NAME || `Canal ${lineId}`;
+        
+        try {
+          // Activate connector for this line
+          const activateResponse = await fetch(`${clientEndpoint}imconnector.activate`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              auth: accessToken,
+              CONNECTOR: connectorId,
+              LINE: lineId,
+              ACTIVE: 1
+            })
+          });
+          const activateResult = await activateResponse.json();
+          console.log(`Activate line ${lineId} result:`, activateResult);
+
+          if (activateResult.result || !activateResult.error) {
+            results.lines_activated++;
+
+            // Set connector data
+            await fetch(`${clientEndpoint}imconnector.connector.data.set`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                auth: accessToken,
+                CONNECTOR: connectorId,
+                LINE: lineId,
+                DATA: {
+                  id: `${connectorId}_line_${lineId}`,
+                  url: webhookUrl,
+                  url_im: webhookUrl,
+                  name: "Thoth WhatsApp"
+                }
+              })
+            });
+
+            // Create mapping if instance_id is provided
+            if (effectiveInstanceId) {
+              const { error: mappingError } = await supabase
+                .from("bitrix_channel_mappings")
+                .upsert({
+                  workspace_id: integration.workspace_id,
+                  integration_id: integration.id,
+                  instance_id: effectiveInstanceId,
+                  line_id: lineId,
+                  line_name: lineName,
+                  is_active: true,
+                  updated_at: new Date().toISOString()
+                }, { onConflict: "integration_id,line_id" });
+
+              if (!mappingError) {
+                results.mappings_created++;
+              }
+            }
+          }
+        } catch (lineError: any) {
+          console.error(`Error activating line ${lineId}:`, lineError);
+        }
+      }
+    } catch (e: any) {
+      console.error("Error getting/activating lines:", e);
+      results.errors.push(`Open Lines: ${e.message}`);
+    }
+
+    // 3. Register SMS Provider
+    console.log("Step 3: Registering SMS Provider...");
+    try {
+      const smsProviderId = "thoth_whatsapp_sms";
+      const smsResponse = await fetch(`${clientEndpoint}messageservice.sender.add`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          auth: accessToken,
+          CODE: smsProviderId,
+          TYPE: "SMS",
+          NAME: "Thoth WhatsApp",
+          DESCRIPTION: "Envio de mensagens WhatsApp via Thoth.ai",
+          HANDLER: webhookUrl,
+          CRM_SETTINGS: {
+            CONTACT: "Y",
+            COMPANY: "Y",
+            LEAD: "Y",
+            DEAL: "Y"
+          }
+        })
+      });
+      const smsResult = await smsResponse.json();
+      console.log("SMS Provider result:", smsResult);
+
+      if (smsResult.result || smsResult.error === "ERROR_PROVIDER_ALREADY_EXISTS") {
+        results.sms_provider_registered = true;
+      } else if (smsResult.error) {
+        results.warnings.push(`SMS Provider: ${smsResult.error_description || smsResult.error}`);
+      }
+    } catch (e: any) {
+      console.error("Error registering SMS provider:", e);
+      results.warnings.push(`SMS Provider: ${e.message}`);
+    }
+
+    // 4. Try to register Automation Robot (optional - requires bizproc scope)
+    console.log("Step 4: Attempting to register Automation Robot...");
+    try {
+      const robotCode = "thoth_whatsapp_robot";
+      const robotResponse = await fetch(`${clientEndpoint}bizproc.robot.add`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          auth: accessToken,
+          CODE: robotCode,
+          HANDLER: webhookUrl,
+          AUTH_USER_ID: 1,
+          USE_SUBSCRIPTION: "Y",
+          NAME: { pt: "Thoth WhatsApp - Enviar Mensagem", en: "Thoth WhatsApp - Send Message" },
+          DESCRIPTION: { pt: "Envia mensagem WhatsApp", en: "Send WhatsApp message" },
+          PROPERTIES: {
+            phone: {
+              Name: { pt: "Telefone", en: "Phone" },
+              Type: "string",
+              Required: "Y",
+              Default: "{=Document:PHONE}"
+            },
+            message: {
+              Name: { pt: "Mensagem", en: "Message" },
+              Type: "text",
+              Required: "Y"
+            }
+          },
+          FILTER: {
+            INCLUDE: [
+              ["crm", "CCrmDocumentDeal"],
+              ["crm", "CCrmDocumentLead"],
+              ["crm", "CCrmDocumentContact"]
+            ]
+          }
+        })
+      });
+      const robotResult = await robotResponse.json();
+      console.log("Robot result:", robotResult);
+
+      if (robotResult.result || robotResult.error === "ERROR_ACTIVITY_ALREADY_INSTALLED") {
+        results.robot_registered = true;
+      } else if (robotResult.error) {
+        // This is expected if bizproc scope is not available
+        results.warnings.push(`Robot: ${robotResult.error_description || robotResult.error} (adicione o escopo bizproc para habilitar)`);
+      }
+    } catch (e: any) {
+      console.error("Error registering robot:", e);
+      results.warnings.push(`Robot: ${e.message}`);
+    }
+
+    // 5. Update integration config with results
+    console.log("Step 5: Updating integration config...");
+    await supabase
+      .from("integrations")
+      .update({
+        config: {
+          ...config,
+          instance_id: effectiveInstanceId || config.instance_id,
+          connector_id: connectorId,
+          connector_registered: results.connector_registered,
+          sms_provider_registered: results.sms_provider_registered,
+          robot_registered: results.robot_registered,
+          auto_setup_completed: true,
+          auto_setup_at: new Date().toISOString(),
+          lines_activated: results.lines_activated,
+        },
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", integration.id);
+
+    console.log("Auto setup completed:", results);
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        message: `Configuração automática concluída! ${results.lines_activated}/${results.lines_total} canais ativados.`,
+        results
+      }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  } catch (error) {
+    console.error("Auto setup error:", error);
+    return new Response(
+      JSON.stringify({ 
+        error: error instanceof Error ? error.message : "Erro na configuração automática",
+        results 
+      }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+}
+
 // Handle unregister_robot action - Remove automation robot from Bitrix24
 async function handleUnregisterRobot(supabase: any, payload: any) {
   console.log("=== UNREGISTER AUTOMATION ROBOT ===");
@@ -1659,6 +1952,11 @@ serve(async (req) => {
 
     if (action === "send_sms" || payload.action === "send_sms") {
       return await handleSendSms(supabase, payload, supabaseUrl);
+    }
+
+    // Handle auto setup (configures everything automatically)
+    if (action === "auto_setup" || payload.action === "auto_setup") {
+      return await handleAutoSetup(supabase, payload, supabaseUrl);
     }
 
     // Handle automation robot registration

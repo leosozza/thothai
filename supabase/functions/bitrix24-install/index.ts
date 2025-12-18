@@ -680,12 +680,25 @@ serve(async (req) => {
 
       console.log("Returning instances for workspace:", instances?.length || 0);
 
+      // Get the integration ID for auto_setup
+      let integrationIdForSetup = existingIntegration?.id;
+      if (!integrationIdForSetup) {
+        const { data: newIntegration } = await supabase
+          .from("integrations")
+          .select("id")
+          .eq("type", "bitrix24")
+          .eq("workspace_id", workspaceId)
+          .maybeSingle();
+        integrationIdForSetup = newIntegration?.id;
+      }
+
       return new Response(
         JSON.stringify({
           success: true,
           message: "Token validado com sucesso",
           workspace_id: workspaceId,
           instances: instances || [],
+          integration_id: integrationIdForSetup, // Return integration_id for auto_setup
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );

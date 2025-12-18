@@ -30,7 +30,7 @@ interface BitrixStatus {
 
 export default function Bitrix24Setup() {
 const [loading, setLoading] = useState(true);
-  const [registering, setRegistering] = useState(false);
+  const [connecting, setConnecting] = useState(false);
   const [validatingToken, setValidatingToken] = useState(false);
   const [savingWebhook, setSavingWebhook] = useState(false);
   const [testingConnection, setTestingConnection] = useState(false);
@@ -41,6 +41,18 @@ const [loading, setLoading] = useState(true);
   const [instances, setInstances] = useState<Instance[]>([]);
   const [selectedInstance, setSelectedInstance] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
+  const [integrationId, setIntegrationId] = useState<string | null>(null);
+  
+  // Setup results from auto_setup
+  const [setupResults, setSetupResults] = useState<{
+    connector_registered?: boolean;
+    lines_activated?: number;
+    lines_total?: number;
+    sms_provider_registered?: boolean;
+    robot_registered?: boolean;
+    errors?: string[];
+    warnings?: string[];
+  } | null>(null);
   
   // Token de vinculação
   const [linkingToken, setLinkingToken] = useState<string>("");
@@ -56,8 +68,9 @@ const [loading, setLoading] = useState(true);
   const [clientSecret, setClientSecret] = useState<string>("");
   const [savingOAuth, setSavingOAuth] = useState(false);
   
-  // Limpar conectores
+  // Legacy states (kept for compatibility but auto_setup handles these now)
   const [cleaningConnectors, setCleaningConnectors] = useState(false);
+  const [registering, setRegistering] = useState(false);
 
   useEffect(() => {
     // Extract params from URL (provided by Bitrix24 iframe)
@@ -221,6 +234,9 @@ const [loading, setLoading] = useState(true);
         if (data.instances) {
           setInstances(data.instances);
         }
+        if (data.integration_id) {
+          setIntegrationId(data.integration_id);
+        }
         // Reload data to get updated status
         await loadData();
       } else {
@@ -231,6 +247,70 @@ const [loading, setLoading] = useState(true);
       toast.error(err.message || "Erro ao validar token");
     } finally {
       setValidatingToken(false);
+    }
+  };
+
+  // Auto setup - connects everything automatically
+  const handleAutoSetup = async () => {
+    if (!selectedInstance) {
+      toast.error("Selecione uma instância WhatsApp");
+      return;
+    }
+
+    if (!integrationId && !status?.found) {
+      toast.error("Integração não encontrada. Valide o token primeiro.");
+      return;
+    }
+
+    try {
+      setConnecting(true);
+      setSetupResults(null);
+
+      // Get integration ID if not set
+      let effectiveIntegrationId = integrationId;
+      if (!effectiveIntegrationId) {
+        // Try to get from a query to find the integration
+        const response = await fetch(
+          `${SUPABASE_URL}/functions/v1/bitrix24-install?member_id=${encodeURIComponent(memberId || domain || "")}`,
+          { method: "GET", headers: { "Content-Type": "application/json" } }
+        );
+        const data = await response.json();
+        if (data?.integration_id) {
+          effectiveIntegrationId = data.integration_id;
+        }
+      }
+
+      const response = await fetch(
+        `${SUPABASE_URL}/functions/v1/bitrix24-webhook`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "auto_setup",
+            integration_id: effectiveIntegrationId,
+            instance_id: selectedInstance,
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error || "Erro na configuração automática");
+      }
+
+      if (data?.success) {
+        setSetupResults(data.results);
+        toast.success(data.message || "Configuração automática concluída!");
+        await loadData();
+      } else {
+        throw new Error(data?.error || "Erro na configuração");
+      }
+    } catch (err: any) {
+      console.error("Error in auto setup:", err);
+      toast.error(err.message || "Erro na configuração automática");
+    } finally {
+      setConnecting(false);
     }
   };
 
@@ -955,32 +1035,70 @@ const [loading, setLoading] = useState(true);
 
                   <Button
                     className="w-full"
-                    onClick={handleRegisterConnector}
-                    disabled={!selectedInstance || registering}
+                    onClick={handleAutoSetup}
+                    disabled={!selectedInstance || connecting}
                   >
-                    {registering ? (
+                    {connecting ? (
                       <>
                         <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        Registrando no Contact Center...
+                        Configurando automaticamente...
                       </>
-                    ) : status?.registered ? (
+                    ) : setupResults ? (
                       <>
                         <CheckCircle className="h-4 w-4 mr-2" />
-                        Registrar Novamente
+                        Reconfigurar
                       </>
                     ) : (
-                      "Ativar Conector no Contact Center"
+                      "Conectar ao Bitrix24"
                     )}
                   </Button>
                   
-                  {status?.registered && (
-                    <div className="mt-3 p-3 bg-green-500/10 border border-green-500/20 rounded-lg text-center">
-                      <p className="text-green-600 dark:text-green-400 text-sm">
-                        ✓ O conector "Thoth WhatsApp" está disponível no Contact Center do Bitrix24!
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Vá em Contact Center → + Adicionar para configurar a linha.
-                      </p>
+                  {/* Setup Results - Consolidated Status */}
+                  {setupResults && (
+                    <div className="mt-4 space-y-3">
+                      <div className="p-4 bg-green-500/10 border border-green-500/20 rounded-lg">
+                        <h4 className="font-medium text-green-600 dark:text-green-400 mb-3 flex items-center gap-2">
+                          <CheckCircle className="h-4 w-4" />
+                          Configuração Concluída!
+                        </h4>
+                        <div className="space-y-2 text-sm">
+                          <div className="flex items-center justify-between">
+                            <span>Conector Contact Center</span>
+                            {setupResults.connector_registered ? (
+                              <Badge variant="default" className="bg-green-500">Ativo</Badge>
+                            ) : (
+                              <Badge variant="secondary">Pendente</Badge>
+                            )}
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span>Open Lines Ativadas</span>
+                            <Badge variant="outline">{setupResults.lines_activated || 0}/{setupResults.lines_total || 0}</Badge>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span>Provedor SMS (Automações)</span>
+                            {setupResults.sms_provider_registered ? (
+                              <Badge variant="default" className="bg-green-500">Ativo</Badge>
+                            ) : (
+                              <Badge variant="secondary">Pendente</Badge>
+                            )}
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span>Robot de Automação</span>
+                            {setupResults.robot_registered ? (
+                              <Badge variant="default" className="bg-green-500">Ativo</Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-amber-500 border-amber-500">Opcional</Badge>
+                            )}
+                          </div>
+                        </div>
+                        {setupResults.warnings && setupResults.warnings.length > 0 && (
+                          <div className="mt-3 pt-3 border-t border-green-500/20">
+                            <p className="text-xs text-muted-foreground">
+                              {setupResults.warnings.map((w, i) => <span key={i} className="block">{w}</span>)}
+                            </p>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )}
                 </>
@@ -993,16 +1111,16 @@ const [loading, setLoading] = useState(true);
         <Card>
           <CardContent className="pt-6 space-y-3">
             <p className="text-sm text-muted-foreground text-center">
-              Após ativar, o conector <strong>"Thoth WhatsApp"</strong> aparecerá no <strong>Contact Center</strong> do Bitrix24.
+              A configuração automática ativa o <strong>Conector</strong>, <strong>Provedor SMS</strong> e <strong>Robot de Automação</strong> no seu Bitrix24.
             </p>
             <div className="bg-muted/50 rounded-lg p-3 text-xs text-muted-foreground">
-              <p className="font-medium mb-1">Próximos passos:</p>
-              <ol className="list-decimal list-inside space-y-1">
-                <li>Acesse Contact Center no menu lateral do Bitrix24</li>
-                <li>Clique em "+ Adicionar" no canto superior</li>
-                <li>Selecione "Thoth WhatsApp"</li>
-                <li>Configure a Open Line para receber mensagens</li>
-              </ol>
+              <p className="font-medium mb-1">O que é configurado automaticamente:</p>
+              <ul className="list-disc list-inside space-y-1">
+                <li>Conector WhatsApp no Contact Center (todas as Open Lines)</li>
+                <li>Provedor SMS para automações de CRM</li>
+                <li>Robot de Automação para workflows (se o escopo bizproc estiver disponível)</li>
+                <li>Mapeamento automático das Open Lines</li>
+              </ul>
             </div>
           </CardContent>
         </Card>
