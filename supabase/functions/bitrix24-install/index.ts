@@ -175,6 +175,7 @@ serve(async (req) => {
           return new Response(
             JSON.stringify({
               found: true,
+              integration_id: integration.id,
               domain: integration.config?.domain,
               registered: integration.config?.registered || false,
               instance_id: integration.config?.instance_id,
@@ -182,6 +183,10 @@ serve(async (req) => {
               workspace_id: integration.workspace_id,
               instances: instances,
               has_access_token: !!integration.config?.access_token,
+              // OAuth config status
+              has_oauth_config: !!(integration.config?.client_id && integration.config?.client_secret),
+              client_id: integration.config?.client_id || null,
+              oauth_pending: integration.config?.oauth_pending || false,
             }),
             { headers: { ...corsHeaders, "Content-Type": "application/json" } }
           );
@@ -340,14 +345,15 @@ serve(async (req) => {
     if (body.action === "oauth_exchange") {
       const clientId = body.client_id;
       const clientSecret = body.client_secret;
+      const keepExistingSecret = body.keep_existing_secret === "true";
       const memberId = body.member_id;
       const domain = body.domain;
 
-      console.log("OAuth exchange request:", { clientId, hasDomain: !!domain, memberId });
+      console.log("OAuth exchange request:", { clientId, hasDomain: !!domain, memberId, keepExistingSecret });
 
-      if (!clientId || !clientSecret) {
+      if (!clientId) {
         return new Response(
-          JSON.stringify({ error: "Client ID e Client Secret são obrigatórios" }),
+          JSON.stringify({ error: "Client ID é obrigatório" }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
@@ -385,11 +391,25 @@ serve(async (req) => {
         existingIntegration = byDomain4;
       }
 
+      // Determine the client_secret to use
+      let effectiveClientSecret = clientSecret;
+      if (!clientSecret && keepExistingSecret && existingIntegration?.config?.client_secret) {
+        effectiveClientSecret = existingIntegration.config.client_secret;
+        console.log("Using existing client_secret from database");
+      }
+
+      if (!effectiveClientSecret) {
+        return new Response(
+          JSON.stringify({ error: "Client Secret é obrigatório" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
       const oauthConfig = {
         member_id: memberId || normalizedDomain,
         domain: normalizedDomain,
         client_id: clientId,
-        client_secret: clientSecret,
+        client_secret: effectiveClientSecret,
         oauth_pending: true,
         installed: true,
         installed_at: new Date().toISOString(),
