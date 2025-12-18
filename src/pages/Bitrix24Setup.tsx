@@ -19,6 +19,7 @@ interface Instance {
 
 interface BitrixStatus {
   found: boolean;
+  integration_id?: string;
   domain?: string;
   registered?: boolean;
   instance_id?: string;
@@ -26,6 +27,11 @@ interface BitrixStatus {
   instances?: Instance[];
   requires_token?: boolean;
   workspace_id?: string;
+  // OAuth config
+  has_oauth_config?: boolean;
+  client_id?: string;
+  oauth_pending?: boolean;
+  has_access_token?: boolean;
 }
 
 export default function Bitrix24Setup() {
@@ -64,6 +70,7 @@ const [loading, setLoading] = useState(true);
   
   // OAuth manual (fallback)
   const [showOAuthForm, setShowOAuthForm] = useState(false);
+  const [oAuthConfigured, setOAuthConfigured] = useState(false);
   const [clientId, setClientId] = useState<string>("");
   const [clientSecret, setClientSecret] = useState<string>("");
   const [savingOAuth, setSavingOAuth] = useState(false);
@@ -183,6 +190,16 @@ const [loading, setLoading] = useState(true);
       }
       if (data.workspace_id) {
         setTokenValidated(true);
+      }
+      if (data.integration_id) {
+        setIntegrationId(data.integration_id);
+      }
+      // Load OAuth config status
+      if (data.has_oauth_config) {
+        setOAuthConfigured(true);
+        if (data.client_id) {
+          setClientId(data.client_id);
+        }
       }
     } catch (err) {
       console.error("Error loading data:", err);
@@ -439,8 +456,14 @@ const [loading, setLoading] = useState(true);
   };
 
   const handleSaveOAuth = async () => {
-    if (!clientId.trim() || !clientSecret.trim()) {
-      toast.error("Preencha o Client ID e Client Secret");
+    // Allow empty secret if already configured (will keep existing)
+    if (!clientId.trim()) {
+      toast.error("Preencha o Client ID");
+      return;
+    }
+    
+    if (!clientSecret.trim() && !oAuthConfigured) {
+      toast.error("Preencha o Client Secret");
       return;
     }
 
@@ -452,6 +475,19 @@ const [loading, setLoading] = useState(true);
     try {
       setSavingOAuth(true);
 
+      const payload: Record<string, string | undefined> = {
+        action: "oauth_exchange",
+        client_id: clientId.trim(),
+        member_id: memberId || undefined,
+        domain: domain || undefined,
+        keep_existing_secret: (!clientSecret.trim() && oAuthConfigured) ? "true" : undefined,
+      };
+      
+      // Only send client_secret if provided
+      if (clientSecret.trim()) {
+        payload.client_secret = clientSecret.trim();
+      }
+
       const response = await fetch(
         `${SUPABASE_URL}/functions/v1/bitrix24-install`,
         {
@@ -459,13 +495,7 @@ const [loading, setLoading] = useState(true);
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({
-            action: "oauth_exchange",
-            client_id: clientId.trim(),
-            client_secret: clientSecret.trim(),
-            member_id: memberId,
-            domain: domain,
-          }),
+          body: JSON.stringify(payload),
         }
       );
 
@@ -780,11 +810,56 @@ const [loading, setLoading] = useState(true);
                 </Button>
               </div>
 
-              {showOAuthForm && (
+              {/* OAuth Status or Form */}
+              {oAuthConfigured && !showOAuthForm ? (
+                <div className="space-y-3 border-t pt-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-green-600">
+                      <CheckCircle className="h-4 w-4" />
+                      <span className="font-medium">OAuth Configurado</span>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setShowOAuthForm(true)}
+                    >
+                      Reconfigurar
+                    </Button>
+                  </div>
+                  {clientId && (
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">Client ID</span>
+                      <code className="bg-muted px-2 py-1 rounded text-xs">{clientId}</code>
+                    </div>
+                  )}
+                  {status?.has_access_token ? (
+                    <Badge variant="default" className="bg-green-500">
+                      <CheckCircle className="h-3 w-3 mr-1" />
+                      Token de acesso ativo
+                    </Badge>
+                  ) : status?.oauth_pending ? (
+                    <Badge variant="secondary">
+                      <AlertCircle className="h-3 w-3 mr-1" />
+                      Aguardando autorização
+                    </Badge>
+                  ) : null}
+                </div>
+              ) : showOAuthForm ? (
                 <div className="space-y-4 border-t pt-4">
-                  <p className="text-xs text-muted-foreground">
-                    Para que o conector apareça no Contact Center, você precisa configurar um aplicativo OAuth.
-                  </p>
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs text-muted-foreground">
+                      Configure as credenciais OAuth do seu aplicativo Bitrix24.
+                    </p>
+                    {oAuthConfigured && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setShowOAuthForm(false)}
+                      >
+                        Cancelar
+                      </Button>
+                    )}
+                  </div>
                   <div className="space-y-2">
                     <Label htmlFor="client-id">Client ID (código do aplicativo)</Label>
                     <Input
@@ -800,16 +875,21 @@ const [loading, setLoading] = useState(true);
                     <Input
                       id="client-secret"
                       type="password"
-                      placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                      placeholder={oAuthConfigured ? "••••••••••••••••" : "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}
                       value={clientSecret}
                       onChange={(e) => setClientSecret(e.target.value)}
                       className="font-mono text-sm"
                     />
+                    {oAuthConfigured && (
+                      <p className="text-xs text-muted-foreground">
+                        Deixe em branco para manter o secret atual
+                      </p>
+                    )}
                   </div>
                   <Button
                     className="w-full"
                     onClick={handleSaveOAuth}
-                    disabled={!clientId.trim() || !clientSecret.trim() || savingOAuth}
+                    disabled={!clientId.trim() || (!clientSecret.trim() && !oAuthConfigured) || savingOAuth}
                   >
                     {savingOAuth ? (
                       <>
@@ -819,7 +899,7 @@ const [loading, setLoading] = useState(true);
                     ) : (
                       <>
                         <Key className="h-4 w-4 mr-2" />
-                        Autorizar OAuth
+                        {oAuthConfigured ? "Atualizar e Reautorizar" : "Autorizar OAuth"}
                       </>
                     )}
                   </Button>
@@ -833,7 +913,7 @@ const [loading, setLoading] = useState(true);
                     </ol>
                   </div>
                 </div>
-              )}
+              ) : null}
             </CardContent>
           </Card>
         )}
