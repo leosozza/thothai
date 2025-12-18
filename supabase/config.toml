@@ -7,7 +7,7 @@ verify_jwt = false
 verify_jwt = true
 
 [functions.wapi-send-message]
-verify_jwt = true
+verify_jwt = false
 
 [functions.ai-process-message]
 verify_jwt = true
@@ -16,7 +16,7 @@ verify_jwt = true
 verify_jwt = true
 
 [functions.flow-engine]
-verify_jwt = true
+verify_jwt = false
 
 [functions.elevenlabs-stt]
 verify_jwt = true
@@ -37,13 +37,13 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.bitrix24-send]
-verify_jwt = true
+verify_jwt = false
 
 [functions.bitrix24-install]
 verify_jwt = false
 
 [functions.bitrix24-status]
-verify_jwt = true
+verify_jwt = false
 
 [functions.bitrix24-sync-contacts]
 verify_jwt = true
