@@ -4,9 +4,10 @@ interface ThothLogoProps {
   size?: "sm" | "md" | "lg" | "xl";
   showText?: boolean;
   className?: string;
+  animated?: boolean;
 }
 
-export function ThothLogo({ size = "md", showText = true, className }: ThothLogoProps) {
+export function ThothLogo({ size = "md", showText = true, className, animated = false }: ThothLogoProps) {
   const sizes = {
     sm: "h-6 w-6",
     md: "h-8 w-8",
@@ -23,42 +24,108 @@ export function ThothLogo({ size = "md", showText = true, className }: ThothLogo
 
   return (
     <div className={cn("flex items-center gap-2", className)}>
-      {/* Ibis Bird Icon - Symbol of Thoth */}
-      <div className={cn("relative", sizes[size])}>
+      {/* Stylized Ibis Bird - Symbol of Thoth */}
+      <div className={cn(
+        "relative",
+        sizes[size],
+        animated && "hover:scale-105 transition-transform duration-300"
+      )}>
         <svg
           viewBox="0 0 40 40"
           fill="none"
           xmlns="http://www.w3.org/2000/svg"
           className="h-full w-full"
         >
-          {/* Pyramid base */}
-          <path
-            d="M20 4L36 32H4L20 4Z"
-            className="fill-primary"
-            opacity="0.9"
+          {/* Glow effect behind the bird */}
+          <defs>
+            <radialGradient id="ibisGlow" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stopColor="hsl(var(--primary))" stopOpacity="0.4" />
+              <stop offset="100%" stopColor="hsl(var(--primary))" stopOpacity="0" />
+            </radialGradient>
+            <linearGradient id="ibisBody" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stopColor="hsl(var(--primary))" />
+              <stop offset="100%" stopColor="hsl(var(--primary) / 0.85)" />
+            </linearGradient>
+          </defs>
+          
+          {/* Subtle glow background */}
+          <ellipse 
+            cx="22" 
+            cy="24" 
+            rx="14" 
+            ry="12" 
+            fill="url(#ibisGlow)"
           />
-          {/* Eye of Thoth */}
+          
+          {/* Ibis Body - elegant curved shape */}
+          <path
+            d="M22 14 C28 16, 32 22, 30 30 C28 34, 24 36, 22 36 C20 36, 16 34, 14 30 C12 22, 16 16, 22 14"
+            className="fill-primary"
+          />
+          
+          {/* Elegant neck curve */}
+          <path
+            d="M22 14 C20 12, 18 10, 16 8 C14 6, 12 5, 10 5"
+            className="stroke-primary"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            fill="none"
+          />
+          
+          {/* Head - small circle */}
           <circle
-            cx="20"
-            cy="18"
-            r="5"
+            cx="9"
+            cy="5"
+            r="4"
+            className="fill-primary"
+          />
+          
+          {/* Characteristic curved beak - the signature element */}
+          <path
+            d="M9 5 C7 6, 4 8, 2 12 C1 14, 2 15, 4 14 C6 12, 7 9, 9 7"
+            className="fill-primary"
+          />
+          
+          {/* Eye of wisdom - golden highlight */}
+          <circle
+            cx="10"
+            cy="4.5"
+            r="1.2"
             className="fill-primary-foreground"
           />
+          
+          {/* Inner eye detail */}
           <circle
-            cx="20"
-            cy="18"
-            r="2.5"
+            cx="10"
+            cy="4.5"
+            r="0.5"
             className="fill-primary"
           />
-          {/* Glow effect */}
-          <circle
-            cx="20"
-            cy="18"
-            r="7"
-            className="stroke-primary"
-            strokeWidth="0.5"
+          
+          {/* Wing detail - subtle lines */}
+          <path
+            d="M18 22 C20 20, 24 20, 26 22"
+            className="stroke-primary-foreground/30"
+            strokeWidth="1"
+            strokeLinecap="round"
             fill="none"
-            opacity="0.5"
+          />
+          <path
+            d="M17 26 C20 24, 25 24, 28 26"
+            className="stroke-primary-foreground/20"
+            strokeWidth="1"
+            strokeLinecap="round"
+            fill="none"
+          />
+          
+          {/* Tail feather accent */}
+          <path
+            d="M20 34 L22 38 L24 34"
+            className="stroke-primary"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            fill="none"
           />
         </svg>
       </div>
