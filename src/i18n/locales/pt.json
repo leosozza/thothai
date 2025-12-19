@@ -1,0 +1,229 @@
+{
+  "common": {
+    "login": "Entrar",
+    "logout": "Sair",
+    "save": "Salvar",
+    "cancel": "Cancelar",
+    "loading": "Carregando...",
+    "error": "Erro",
+    "success": "Sucesso",
+    "back": "Voltar",
+    "next": "Próximo",
+    "submit": "Enviar",
+    "allRightsReserved": "Todos os direitos reservados",
+    "termsOfUse": "Termos de Uso",
+    "privacy": "Privacidade",
+    "contact": "Contato",
+    "language": "Idioma"
+  },
+  "landing": {
+    "badge": "Agente Inteligente de Atendimento",
+    "headline": "Automatize seu atendimento com",
+    "headlineHighlight": "Inteligência Artificial",
+    "subheadline": "Conecte seu WhatsApp Business e deixe a IA cuidar do atendimento. Respostas inteligentes, fluxos automatizados e análises em tempo real.",
+    "cta": "Começar Agora",
+    "demo": "Ver Demonstração",
+    "features": {
+      "multiService": {
+        "title": "Multi-Atendimento",
+        "description": "Conecte múltiplos números e gerencie todas as conversas em um só lugar."
+      },
+      "trainableAI": {
+        "title": "IA Treinável",
+        "description": "Ensine a IA com seus documentos, FAQs e histórico para respostas personalizadas."
+      },
+      "automations": {
+        "title": "Automações",
+        "description": "Crie fluxos visuais para automatizar respostas e ações de atendimento."
+      }
+    }
+  },
+  "license": {
+    "title": "Termos de Licença de Uso",
+    "lastUpdated": "Última atualização",
+    "sections": {
+      "acceptance": {
+        "title": "1. Aceitação dos Termos",
+        "content": "Ao instalar e utilizar o aplicativo Thoth WhatsApp (\"Aplicativo\") no Bitrix24, você concorda com estes Termos de Licença de Uso. Se você não concordar com estes termos, não instale ou utilize o Aplicativo."
+      },
+      "license": {
+        "title": "2. Licença de Uso",
+        "content": "Concedemos a você uma licença limitada, não exclusiva, intransferível e revogável para utilizar o Aplicativo de acordo com estes termos. Esta licença permite:",
+        "items": [
+          "Integrar suas contas WhatsApp com o Bitrix24",
+          "Enviar e receber mensagens através da plataforma",
+          "Utilizar recursos de automação e IA disponíveis no plano contratado",
+          "Gerenciar conversas e contatos através do Contact Center"
+        ]
+      },
+      "restrictions": {
+        "title": "3. Restrições",
+        "content": "Você concorda em NÃO:",
+        "items": [
+          "Modificar, descompilar ou fazer engenharia reversa do Aplicativo",
+          "Utilizar o Aplicativo para enviar spam ou mensagens não solicitadas",
+          "Violar as políticas de uso do WhatsApp Business API",
+          "Sublicenciar, vender ou redistribuir o Aplicativo",
+          "Utilizar o Aplicativo para atividades ilegais ou fraudulentas"
+        ]
+      },
+      "intellectualProperty": {
+        "title": "4. Propriedade Intelectual",
+        "content": "O Aplicativo e todo o seu conteúdo, recursos e funcionalidades são de propriedade exclusiva da Thoth.ai e estão protegidos por leis de direitos autorais, marcas registradas e outras leis de propriedade intelectual."
+      },
+      "liability": {
+        "title": "5. Limitação de Responsabilidade",
+        "content": "O Aplicativo é fornecido \"como está\", sem garantias de qualquer tipo. Não nos responsabilizamos por danos diretos, indiretos, incidentais ou consequenciais decorrentes do uso ou impossibilidade de uso do Aplicativo."
+      },
+      "termination": {
+        "title": "6. Rescisão",
+        "content": "Podemos suspender ou encerrar sua licença a qualquer momento se você violar estes termos. Você pode encerrar sua licença desinstalando o Aplicativo do Bitrix24 a qualquer momento."
+      },
+      "changes": {
+        "title": "7. Alterações nos Termos",
+        "content": "Reservamo-nos o direito de modificar estes termos a qualquer momento. Alterações significativas serão comunicadas através do Aplicativo ou por e-mail."
+      },
+      "contact": {
+        "title": "8. Contato",
+        "content": "Para dúvidas sobre estes termos, entre em contato conosco através do e-mail:"
+      },
+      "law": {
+        "title": "9. Lei Aplicável",
+        "content": "Estes termos são regidos pelas leis da República Federativa do Brasil. Qualquer disputa será submetida aos tribunais competentes da cidade de São Paulo, SP."
+      }
+    }
+  },
+  "privacy": {
+    "title": "Política de Privacidade",
+    "lastUpdated": "Última atualização",
+    "sections": {
+      "introduction": {
+        "title": "1. Introdução",
+        "content": "A Thoth.ai (\"nós\", \"nosso\" ou \"empresa\") está comprometida em proteger sua privacidade. Esta Política de Privacidade explica como coletamos, usamos, armazenamos e protegemos suas informações quando você utiliza o aplicativo Thoth WhatsApp no Bitrix24."
+      },
+      "dataCollection": {
+        "title": "2. Dados que Coletamos",
+        "content": "Coletamos os seguintes tipos de dados:",
+        "accountData": {
+          "title": "2.1 Dados de Conta",
+          "items": [
+            "Informações de autenticação do Bitrix24 (tokens OAuth)",
+            "ID do portal Bitrix24",
+            "Configurações do aplicativo"
+          ]
+        },
+        "communicationData": {
+          "title": "2.2 Dados de Comunicação",
+          "items": [
+            "Mensagens enviadas e recebidas via WhatsApp",
+            "Informações de contato (nome, número de telefone)",
+            "Metadados de conversas (data, hora, status)"
+          ]
+        },
+        "technicalData": {
+          "title": "2.3 Dados Técnicos",
+          "items": [
+            "Logs de acesso e uso do aplicativo",
+            "Informações de erro e diagnóstico",
+            "Configurações de integração"
+          ]
+        }
+      },
+      "dataUsage": {
+        "title": "3. Como Usamos seus Dados",
+        "content": "Utilizamos seus dados para:",
+        "items": [
+          "Fornecer e manter o serviço de integração WhatsApp-Bitrix24",
+          "Sincronizar mensagens entre WhatsApp e Contact Center",
+          "Processar mensagens com IA quando habilitado",
+          "Melhorar a qualidade e funcionalidades do aplicativo",
+          "Enviar notificações importantes sobre o serviço",
+          "Cumprir obrigações legais"
+        ]
+      },
+      "dataSharing": {
+        "title": "4. Compartilhamento de Dados",
+        "content": "Podemos compartilhar seus dados com:",
+        "items": [
+          "Bitrix24: Para funcionamento da integração",
+          "Provedores WhatsApp (Meta/Gupshup): Para envio e recebimento de mensagens",
+          "Provedores de IA: Quando recursos de IA estão habilitados (dados são anonimizados)",
+          "Autoridades legais: Quando exigido por lei"
+        ],
+        "noSale": "Não vendemos seus dados pessoais a terceiros."
+      },
+      "dataSecurity": {
+        "title": "5. Segurança dos Dados",
+        "content": "Implementamos medidas de segurança incluindo:",
+        "items": [
+          "Criptografia de dados em trânsito (TLS/SSL)",
+          "Criptografia de dados sensíveis em repouso",
+          "Controle de acesso baseado em funções",
+          "Monitoramento contínuo de segurança",
+          "Backups regulares e plano de recuperação de desastres"
+        ]
+      },
+      "dataRetention": {
+        "title": "6. Retenção de Dados",
+        "content": "Mantemos seus dados enquanto sua conta estiver ativa ou conforme necessário para fornecer o serviço. Ao desinstalar o aplicativo, seus dados são removidos de nossos sistemas em até 30 dias, exceto quando a retenção for exigida por lei."
+      },
+      "yourRights": {
+        "title": "7. Seus Direitos (LGPD)",
+        "content": "De acordo com a Lei Geral de Proteção de Dados (LGPD), você tem direito a:",
+        "items": [
+          "Confirmar a existência de tratamento de dados",
+          "Acessar seus dados pessoais",
+          "Corrigir dados incompletos ou desatualizados",
+          "Solicitar anonimização ou exclusão de dados",
+          "Revogar consentimento a qualquer momento",
+          "Solicitar portabilidade dos dados",
+          "Obter informações sobre compartilhamento de dados"
+        ]
+      },
+      "cookies": {
+        "title": "8. Cookies e Tecnologias Similares",
+        "content": "O aplicativo utiliza cookies e tecnologias similares para manter sessões ativas e melhorar a experiência do usuário. Você pode configurar seu navegador para recusar cookies, mas isso pode afetar a funcionalidade do aplicativo."
+      },
+      "policyChanges": {
+        "title": "9. Alterações nesta Política",
+        "content": "Podemos atualizar esta política periodicamente. Alterações significativas serão comunicadas através do aplicativo ou por e-mail. Recomendamos revisar esta página regularmente."
+      },
+      "dpoContact": {
+        "title": "10. Contato do DPO",
+        "content": "Para exercer seus direitos ou esclarecer dúvidas sobre privacidade, entre em contato com nosso Encarregado de Proteção de Dados (DPO):",
+        "email": "E-mail:"
+      }
+    }
+  },
+  "auth": {
+    "welcome": "Bem-vindo",
+    "signIn": "Entrar",
+    "signUp": "Cadastrar",
+    "email": "E-mail",
+    "password": "Senha",
+    "forgotPassword": "Esqueceu a senha?",
+    "noAccount": "Não tem uma conta?",
+    "hasAccount": "Já tem uma conta?"
+  },
+  "dashboard": {
+    "title": "Painel",
+    "welcome": "Bem-vindo de volta",
+    "overview": "Visão Geral",
+    "conversations": "Conversas",
+    "contacts": "Contatos",
+    "instances": "Instâncias"
+  },
+  "sidebar": {
+    "dashboard": "Painel",
+    "instances": "Instâncias",
+    "conversations": "Conversas",
+    "contacts": "Contatos",
+    "training": "Treinamento",
+    "personas": "Personas",
+    "departments": "Departamentos",
+    "flows": "Fluxos",
+    "integrations": "Integrações",
+    "playground": "Playground",
+    "settings": "Configurações"
+  }
+}

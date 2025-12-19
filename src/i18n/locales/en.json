@@ -1,0 +1,229 @@
+{
+  "common": {
+    "login": "Login",
+    "logout": "Logout",
+    "save": "Save",
+    "cancel": "Cancel",
+    "loading": "Loading...",
+    "error": "Error",
+    "success": "Success",
+    "back": "Back",
+    "next": "Next",
+    "submit": "Submit",
+    "allRightsReserved": "All rights reserved",
+    "termsOfUse": "Terms of Use",
+    "privacy": "Privacy",
+    "contact": "Contact",
+    "language": "Language"
+  },
+  "landing": {
+    "badge": "Intelligent Customer Service Agent",
+    "headline": "Automate your customer service with",
+    "headlineHighlight": "Artificial Intelligence",
+    "subheadline": "Connect your WhatsApp Business and let AI handle customer service. Smart responses, automated workflows, and real-time analytics.",
+    "cta": "Get Started",
+    "demo": "View Demo",
+    "features": {
+      "multiService": {
+        "title": "Multi-Service",
+        "description": "Connect multiple numbers and manage all conversations in one place."
+      },
+      "trainableAI": {
+        "title": "Trainable AI",
+        "description": "Teach AI with your documents, FAQs, and history for personalized responses."
+      },
+      "automations": {
+        "title": "Automations",
+        "description": "Create visual workflows to automate responses and service actions."
+      }
+    }
+  },
+  "license": {
+    "title": "Terms of License",
+    "lastUpdated": "Last updated",
+    "sections": {
+      "acceptance": {
+        "title": "1. Acceptance of Terms",
+        "content": "By installing and using the Thoth WhatsApp application (\"Application\") on Bitrix24, you agree to these Terms of License. If you do not agree to these terms, do not install or use the Application."
+      },
+      "license": {
+        "title": "2. License Grant",
+        "content": "We grant you a limited, non-exclusive, non-transferable, and revocable license to use the Application in accordance with these terms. This license allows:",
+        "items": [
+          "Integrate your WhatsApp accounts with Bitrix24",
+          "Send and receive messages through the platform",
+          "Use automation and AI features available in your plan",
+          "Manage conversations and contacts through Contact Center"
+        ]
+      },
+      "restrictions": {
+        "title": "3. Restrictions",
+        "content": "You agree NOT to:",
+        "items": [
+          "Modify, decompile, or reverse engineer the Application",
+          "Use the Application to send spam or unsolicited messages",
+          "Violate WhatsApp Business API usage policies",
+          "Sublicense, sell, or redistribute the Application",
+          "Use the Application for illegal or fraudulent activities"
+        ]
+      },
+      "intellectualProperty": {
+        "title": "4. Intellectual Property",
+        "content": "The Application and all its content, features, and functionality are the exclusive property of Thoth.ai and are protected by copyright, trademark, and other intellectual property laws."
+      },
+      "liability": {
+        "title": "5. Limitation of Liability",
+        "content": "The Application is provided \"as is\", without warranties of any kind. We are not responsible for direct, indirect, incidental, or consequential damages arising from the use or inability to use the Application."
+      },
+      "termination": {
+        "title": "6. Termination",
+        "content": "We may suspend or terminate your license at any time if you violate these terms. You may terminate your license by uninstalling the Application from Bitrix24 at any time."
+      },
+      "changes": {
+        "title": "7. Changes to Terms",
+        "content": "We reserve the right to modify these terms at any time. Significant changes will be communicated through the Application or by email."
+      },
+      "contact": {
+        "title": "8. Contact",
+        "content": "For questions about these terms, contact us at:"
+      },
+      "law": {
+        "title": "9. Applicable Law",
+        "content": "These terms are governed by the laws of the Federative Republic of Brazil. Any dispute will be submitted to the competent courts of São Paulo, SP."
+      }
+    }
+  },
+  "privacy": {
+    "title": "Privacy Policy",
+    "lastUpdated": "Last updated",
+    "sections": {
+      "introduction": {
+        "title": "1. Introduction",
+        "content": "Thoth.ai (\"we\", \"our\", or \"company\") is committed to protecting your privacy. This Privacy Policy explains how we collect, use, store, and protect your information when you use the Thoth WhatsApp application on Bitrix24."
+      },
+      "dataCollection": {
+        "title": "2. Data We Collect",
+        "content": "We collect the following types of data:",
+        "accountData": {
+          "title": "2.1 Account Data",
+          "items": [
+            "Bitrix24 authentication information (OAuth tokens)",
+            "Bitrix24 portal ID",
+            "Application settings"
+          ]
+        },
+        "communicationData": {
+          "title": "2.2 Communication Data",
+          "items": [
+            "Messages sent and received via WhatsApp",
+            "Contact information (name, phone number)",
+            "Conversation metadata (date, time, status)"
+          ]
+        },
+        "technicalData": {
+          "title": "2.3 Technical Data",
+          "items": [
+            "Access and usage logs",
+            "Error and diagnostic information",
+            "Integration settings"
+          ]
+        }
+      },
+      "dataUsage": {
+        "title": "3. How We Use Your Data",
+        "content": "We use your data to:",
+        "items": [
+          "Provide and maintain the WhatsApp-Bitrix24 integration service",
+          "Synchronize messages between WhatsApp and Contact Center",
+          "Process messages with AI when enabled",
+          "Improve application quality and features",
+          "Send important service notifications",
+          "Comply with legal obligations"
+        ]
+      },
+      "dataSharing": {
+        "title": "4. Data Sharing",
+        "content": "We may share your data with:",
+        "items": [
+          "Bitrix24: For integration functionality",
+          "WhatsApp providers (Meta/Gupshup): For sending and receiving messages",
+          "AI providers: When AI features are enabled (data is anonymized)",
+          "Legal authorities: When required by law"
+        ],
+        "noSale": "We do NOT sell your personal data to third parties."
+      },
+      "dataSecurity": {
+        "title": "5. Data Security",
+        "content": "We implement security measures including:",
+        "items": [
+          "Data encryption in transit (TLS/SSL)",
+          "Encryption of sensitive data at rest",
+          "Role-based access control",
+          "Continuous security monitoring",
+          "Regular backups and disaster recovery plan"
+        ]
+      },
+      "dataRetention": {
+        "title": "6. Data Retention",
+        "content": "We keep your data while your account is active or as needed to provide the service. When uninstalling the application, your data is removed from our systems within 30 days, except when retention is required by law."
+      },
+      "yourRights": {
+        "title": "7. Your Rights (LGPD/GDPR)",
+        "content": "According to data protection laws, you have the right to:",
+        "items": [
+          "Confirm the existence of data processing",
+          "Access your personal data",
+          "Correct incomplete or outdated data",
+          "Request anonymization or deletion of data",
+          "Revoke consent at any time",
+          "Request data portability",
+          "Obtain information about data sharing"
+        ]
+      },
+      "cookies": {
+        "title": "8. Cookies and Similar Technologies",
+        "content": "The application uses cookies and similar technologies to maintain active sessions and improve user experience. You can configure your browser to refuse cookies, but this may affect application functionality."
+      },
+      "policyChanges": {
+        "title": "9. Changes to This Policy",
+        "content": "We may update this policy periodically. Significant changes will be communicated through the application or by email. We recommend reviewing this page regularly."
+      },
+      "dpoContact": {
+        "title": "10. DPO Contact",
+        "content": "To exercise your rights or clarify privacy questions, contact our Data Protection Officer (DPO):",
+        "email": "Email:"
+      }
+    }
+  },
+  "auth": {
+    "welcome": "Welcome",
+    "signIn": "Sign In",
+    "signUp": "Sign Up",
+    "email": "Email",
+    "password": "Password",
+    "forgotPassword": "Forgot password?",
+    "noAccount": "Don't have an account?",
+    "hasAccount": "Already have an account?"
+  },
+  "dashboard": {
+    "title": "Dashboard",
+    "welcome": "Welcome back",
+    "overview": "Overview",
+    "conversations": "Conversations",
+    "contacts": "Contacts",
+    "instances": "Instances"
+  },
+  "sidebar": {
+    "dashboard": "Dashboard",
+    "instances": "Instances",
+    "conversations": "Conversations",
+    "contacts": "Contacts",
+    "training": "Training",
+    "personas": "Personas",
+    "departments": "Departments",
+    "flows": "Flows",
+    "integrations": "Integrations",
+    "playground": "Playground",
+    "settings": "Settings"
+  }
+}
