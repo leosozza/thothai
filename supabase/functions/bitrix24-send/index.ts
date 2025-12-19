@@ -333,6 +333,77 @@ serve(async (req) => {
     // Send to Open Lines via imconnector if configured
     let imconnectorResult = null;
     if (connectorId) {
+      // Check if connector is active on this line and activate if needed
+      console.log(`Checking connector status on line ${lineId}...`);
+      
+      const statusParams: Record<string, unknown> = {
+        CONNECTOR: connectorId,
+        LINE: parseInt(lineId)
+      };
+      if (isOAuth && accessToken) {
+        statusParams.auth = accessToken;
+      }
+      
+      const statusResponse = await fetch(`${apiUrl}imconnector.status`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(statusParams)
+      });
+      const statusResult = await statusResponse.json();
+      console.log("Connector status result:", JSON.stringify(statusResult));
+      
+      // Check if connector is not active or not configured on this line
+      const isActive = statusResult.result?.active || statusResult.result?.ACTIVE;
+      const isConfigured = statusResult.result?.connection || statusResult.result?.CONNECTION;
+      
+      if (!isActive || !isConfigured) {
+        console.log(`Connector not fully active on line ${lineId}, activating...`);
+        
+        // Activate connector on this line
+        const activateParams: Record<string, unknown> = {
+          CONNECTOR: connectorId,
+          LINE: parseInt(lineId),
+          ACTIVE: 1
+        };
+        if (isOAuth && accessToken) {
+          activateParams.auth = accessToken;
+        }
+        
+        const activateResponse = await fetch(`${apiUrl}imconnector.activate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(activateParams)
+        });
+        const activateResult = await activateResponse.json();
+        console.log("Connector activate result:", JSON.stringify(activateResult));
+        
+        // Configure connector data (webhook URL) for this line
+        const webhookCallbackUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/bitrix24-webhook`;
+        const connectorDataParams: Record<string, unknown> = {
+          CONNECTOR: connectorId,
+          LINE: parseInt(lineId),
+          DATA: {
+            id: `${connectorId}_line_${lineId}`,
+            url: webhookCallbackUrl,
+            url_im: webhookCallbackUrl,
+            name: "Thoth WhatsApp"
+          }
+        };
+        if (isOAuth && accessToken) {
+          connectorDataParams.auth = accessToken;
+        }
+        
+        const configResponse = await fetch(`${apiUrl}imconnector.connector.data.set`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(connectorDataParams)
+        });
+        const configResult = await configResponse.json();
+        console.log("Connector data.set result:", JSON.stringify(configResult));
+      } else {
+        console.log(`Connector already active on line ${lineId}`);
+      }
+
       // Build message payload for Bitrix24
       const messagePayload: Record<string, unknown> = {
         CONNECTOR: connectorId,
