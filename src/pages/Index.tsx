@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { ThothLogo } from "@/components/ThothLogo";
 import { Button } from "@/components/ui/button";
@@ -120,8 +120,16 @@ export default function Index() {
       <footer className="relative z-10 border-t border-border/50 py-8">
         <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-4">
           <ThothLogo size="sm" />
+          <div className="flex items-center gap-6">
+            <Link to="/license" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+              Termos de Uso
+            </Link>
+            <Link to="/privacy" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+              Privacidade
+            </Link>
+          </div>
           <p className="text-sm text-muted-foreground">
-            © 2024 thoth.AI - Todos os direitos reservados
+            © {new Date().getFullYear()} thoth.AI - Todos os direitos reservados
           </p>
         </div>
       </footer>
