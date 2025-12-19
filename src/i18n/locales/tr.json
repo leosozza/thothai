@@ -1,0 +1,229 @@
+{
+  "common": {
+    "login": "Giriş Yap",
+    "logout": "Çıkış Yap",
+    "save": "Kaydet",
+    "cancel": "İptal",
+    "loading": "Yükleniyor...",
+    "error": "Hata",
+    "success": "Başarılı",
+    "back": "Geri",
+    "next": "İleri",
+    "submit": "Gönder",
+    "allRightsReserved": "Tüm hakları saklıdır",
+    "termsOfUse": "Kullanım Koşulları",
+    "privacy": "Gizlilik",
+    "contact": "İletişim",
+    "language": "Dil"
+  },
+  "landing": {
+    "badge": "Akıllı Müşteri Hizmetleri Ajanı",
+    "headline": "Müşteri hizmetlerinizi otomatikleştirin",
+    "headlineHighlight": "Yapay Zeka ile",
+    "subheadline": "WhatsApp Business'ınızı bağlayın ve yapay zekanın müşteri hizmetlerini yönetmesine izin verin. Akıllı yanıtlar, otomatik iş akışları ve gerçek zamanlı analizler.",
+    "cta": "Şimdi Başla",
+    "demo": "Demo İzle",
+    "features": {
+      "multiService": {
+        "title": "Çoklu Hizmet",
+        "description": "Birden fazla numarayı bağlayın ve tüm konuşmaları tek yerden yönetin."
+      },
+      "trainableAI": {
+        "title": "Eğitilebilir Yapay Zeka",
+        "description": "Kişiselleştirilmiş yanıtlar için yapay zekayı belgeleriniz, SSS'leriniz ve geçmişinizle eğitin."
+      },
+      "automations": {
+        "title": "Otomasyonlar",
+        "description": "Yanıtları ve hizmet eylemlerini otomatikleştirmek için görsel iş akışları oluşturun."
+      }
+    }
+  },
+  "license": {
+    "title": "Lisans Koşulları",
+    "lastUpdated": "Son güncelleme",
+    "sections": {
+      "acceptance": {
+        "title": "1. Koşulların Kabulü",
+        "content": "Thoth WhatsApp uygulamasını (\"Uygulama\") Bitrix24'te yükleyerek ve kullanarak bu Lisans Koşullarını kabul etmiş olursunuz. Bu koşulları kabul etmiyorsanız, Uygulamayı yüklemeyin veya kullanmayın."
+      },
+      "license": {
+        "title": "2. Lisans Verme",
+        "content": "Size bu koşullara uygun olarak Uygulamayı kullanmak için sınırlı, münhasır olmayan, devredilemez ve geri alınabilir bir lisans veriyoruz. Bu lisans şunları sağlar:",
+        "items": [
+          "WhatsApp hesaplarınızı Bitrix24 ile entegre etme",
+          "Platform üzerinden mesaj gönderme ve alma",
+          "Planınızda mevcut otomasyon ve yapay zeka özelliklerini kullanma",
+          "Contact Center üzerinden konuşmaları ve kişileri yönetme"
+        ]
+      },
+      "restrictions": {
+        "title": "3. Kısıtlamalar",
+        "content": "Şunları YAPMAMAYA kabul ediyorsunuz:",
+        "items": [
+          "Uygulamayı değiştirme, derlemeyi açma veya tersine mühendislik yapma",
+          "Uygulamayı spam veya istenmeyen mesajlar göndermek için kullanma",
+          "WhatsApp Business API kullanım politikalarını ihlal etme",
+          "Uygulamayı alt lisanslama, satma veya yeniden dağıtma",
+          "Uygulamayı yasadışı veya hileli faaliyetler için kullanma"
+        ]
+      },
+      "intellectualProperty": {
+        "title": "4. Fikri Mülkiyet",
+        "content": "Uygulama ve tüm içeriği, özellikleri ve işlevleri Thoth.ai'nin münhasır mülkiyetindedir ve telif hakkı, ticari marka ve diğer fikri mülkiyet yasaları ile korunmaktadır."
+      },
+      "liability": {
+        "title": "5. Sorumluluk Sınırlaması",
+        "content": "Uygulama herhangi bir garanti olmaksızın \"olduğu gibi\" sağlanmaktadır. Uygulamanın kullanımından veya kullanılamamasından kaynaklanan doğrudan, dolaylı, arızi veya sonuç olarak ortaya çıkan zararlardan sorumlu değiliz."
+      },
+      "termination": {
+        "title": "6. Fesih",
+        "content": "Bu koşulları ihlal ederseniz, lisansınızı istediğimiz zaman askıya alabilir veya feshedebiliriz. Uygulamayı Bitrix24'ten kaldırarak lisansınızı istediğiniz zaman sonlandırabilirsiniz."
+      },
+      "changes": {
+        "title": "7. Koşullardaki Değişiklikler",
+        "content": "Bu koşulları istediğimiz zaman değiştirme hakkımızı saklı tutuyoruz. Önemli değişiklikler Uygulama aracılığıyla veya e-posta ile bildirilecektir."
+      },
+      "contact": {
+        "title": "8. İletişim",
+        "content": "Bu koşullar hakkında sorularınız için bizimle iletişime geçin:"
+      },
+      "law": {
+        "title": "9. Geçerli Hukuk",
+        "content": "Bu koşullar Brezilya Federal Cumhuriyeti yasalarına tabidir. Herhangi bir anlaşmazlık São Paulo, SP şehrinin yetkili mahkemelerine sunulacaktır."
+      }
+    }
+  },
+  "privacy": {
+    "title": "Gizlilik Politikası",
+    "lastUpdated": "Son güncelleme",
+    "sections": {
+      "introduction": {
+        "title": "1. Giriş",
+        "content": "Thoth.ai (\"biz\", \"bizim\" veya \"şirket\") gizliliğinizi korumaya kararlıdır. Bu Gizlilik Politikası, Bitrix24'te Thoth WhatsApp uygulamasını kullandığınızda bilgilerinizi nasıl topladığımızı, kullandığımızı, sakladığımızı ve koruduğumuzu açıklar."
+      },
+      "dataCollection": {
+        "title": "2. Topladığımız Veriler",
+        "content": "Aşağıdaki veri türlerini topluyoruz:",
+        "accountData": {
+          "title": "2.1 Hesap Verileri",
+          "items": [
+            "Bitrix24 kimlik doğrulama bilgileri (OAuth tokenleri)",
+            "Bitrix24 portal kimliği",
+            "Uygulama ayarları"
+          ]
+        },
+        "communicationData": {
+          "title": "2.2 İletişim Verileri",
+          "items": [
+            "WhatsApp üzerinden gönderilen ve alınan mesajlar",
+            "İletişim bilgileri (isim, telefon numarası)",
+            "Konuşma meta verileri (tarih, saat, durum)"
+          ]
+        },
+        "technicalData": {
+          "title": "2.3 Teknik Veriler",
+          "items": [
+            "Erişim ve kullanım günlükleri",
+            "Hata ve tanılama bilgileri",
+            "Entegrasyon ayarları"
+          ]
+        }
+      },
+      "dataUsage": {
+        "title": "3. Verilerinizi Nasıl Kullanıyoruz",
+        "content": "Verilerinizi şunlar için kullanıyoruz:",
+        "items": [
+          "WhatsApp-Bitrix24 entegrasyon hizmetini sağlamak ve sürdürmek",
+          "WhatsApp ve Contact Center arasında mesajları senkronize etmek",
+          "Etkinleştirildiğinde mesajları yapay zeka ile işlemek",
+          "Uygulama kalitesini ve özelliklerini geliştirmek",
+          "Önemli hizmet bildirimlerini göndermek",
+          "Yasal yükümlülüklere uymak"
+        ]
+      },
+      "dataSharing": {
+        "title": "4. Veri Paylaşımı",
+        "content": "Verilerinizi şunlarla paylaşabiliriz:",
+        "items": [
+          "Bitrix24: Entegrasyon işlevselliği için",
+          "WhatsApp sağlayıcıları (Meta/Gupshup): Mesaj gönderme ve alma için",
+          "Yapay zeka sağlayıcıları: Yapay zeka özellikleri etkinleştirildiğinde (veriler anonimleştirilir)",
+          "Yasal makamlar: Kanun tarafından gerekli olduğunda"
+        ],
+        "noSale": "Kişisel verilerinizi üçüncü taraflara SATMIYORUZ."
+      },
+      "dataSecurity": {
+        "title": "5. Veri Güvenliği",
+        "content": "Aşağıdakileri içeren güvenlik önlemleri uyguluyoruz:",
+        "items": [
+          "Aktarım sırasında veri şifreleme (TLS/SSL)",
+          "Hassas verilerin bekleme durumunda şifrelenmesi",
+          "Rol tabanlı erişim kontrolü",
+          "Sürekli güvenlik izleme",
+          "Düzenli yedeklemeler ve felaket kurtarma planı"
+        ]
+      },
+      "dataRetention": {
+        "title": "6. Veri Saklama",
+        "content": "Hesabınız aktif olduğu veya hizmeti sağlamak için gerekli olduğu sürece verilerinizi saklıyoruz. Uygulamayı kaldırdığınızda, yasalarca saklama gerekmedikçe verileriniz 30 gün içinde sistemlerimizden kaldırılır."
+      },
+      "yourRights": {
+        "title": "7. Haklarınız (KVKK/GDPR)",
+        "content": "Veri koruma yasalarına göre şu haklara sahipsiniz:",
+        "items": [
+          "Veri işlemenin varlığını doğrulama",
+          "Kişisel verilerinize erişme",
+          "Eksik veya güncel olmayan verileri düzeltme",
+          "Verilerin anonimleştirilmesini veya silinmesini talep etme",
+          "Onayı istediğiniz zaman geri çekme",
+          "Veri taşınabilirliği talep etme",
+          "Veri paylaşımı hakkında bilgi edinme"
+        ]
+      },
+      "cookies": {
+        "title": "8. Çerezler ve Benzer Teknolojiler",
+        "content": "Uygulama, aktif oturumları sürdürmek ve kullanıcı deneyimini geliştirmek için çerezler ve benzer teknolojiler kullanır. Tarayıcınızı çerezleri reddetmek için yapılandırabilirsiniz, ancak bu uygulama işlevselliğini etkileyebilir."
+      },
+      "policyChanges": {
+        "title": "9. Bu Politikadaki Değişiklikler",
+        "content": "Bu politikayı periyodik olarak güncelleyebiliriz. Önemli değişiklikler uygulama aracılığıyla veya e-posta ile bildirilecektir. Bu sayfayı düzenli olarak incelemenizi öneririz."
+      },
+      "dpoContact": {
+        "title": "10. DPO İletişim",
+        "content": "Haklarınızı kullanmak veya gizlilik sorularını netleştirmek için Veri Koruma Görevlimiz (DPO) ile iletişime geçin:",
+        "email": "E-posta:"
+      }
+    }
+  },
+  "auth": {
+    "welcome": "Hoş Geldiniz",
+    "signIn": "Giriş Yap",
+    "signUp": "Kayıt Ol",
+    "email": "E-posta",
+    "password": "Şifre",
+    "forgotPassword": "Şifremi unuttum?",
+    "noAccount": "Hesabınız yok mu?",
+    "hasAccount": "Zaten hesabınız var mı?"
+  },
+  "dashboard": {
+    "title": "Panel",
+    "welcome": "Tekrar hoş geldiniz",
+    "overview": "Genel Bakış",
+    "conversations": "Konuşmalar",
+    "contacts": "Kişiler",
+    "instances": "Örnekler"
+  },
+  "sidebar": {
+    "dashboard": "Panel",
+    "instances": "Örnekler",
+    "conversations": "Konuşmalar",
+    "contacts": "Kişiler",
+    "training": "Eğitim",
+    "personas": "Personalar",
+    "departments": "Departmanlar",
+    "flows": "Akışlar",
+    "integrations": "Entegrasyonlar",
+    "playground": "Playground",
+    "settings": "Ayarlar"
+  }
+}
