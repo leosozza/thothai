@@ -1154,23 +1154,56 @@ const [loading, setLoading] = useState(true);
                             <span>Open Lines Ativadas</span>
                             <Badge variant="outline">{setupResults.lines_activated || 0}/{setupResults.lines_total || 0}</Badge>
                           </div>
+                          
+                          {/* SMS Provider - Principal para automações */}
                           <div className="flex items-center justify-between">
-                            <span>Provedor SMS (Automações)</span>
+                            <div className="flex items-center gap-1">
+                              <span>Automações via SMS</span>
+                              <span className="text-xs text-muted-foreground">(recomendado)</span>
+                            </div>
                             {setupResults.sms_provider_registered ? (
-                              <Badge variant="default" className="bg-green-500">Ativo</Badge>
+                              <Badge variant="default" className="bg-green-500">
+                                <CheckCircle className="h-3 w-3 mr-1" />
+                                Habilitado
+                              </Badge>
                             ) : (
                               <Badge variant="secondary">Pendente</Badge>
                             )}
                           </div>
+                          
+                          {/* Robot - Opcional */}
                           <div className="flex items-center justify-between">
-                            <span>Robot de Automação</span>
+                            <div className="flex items-center gap-1">
+                              <span>Robot Bizproc</span>
+                              <span className="text-xs text-muted-foreground">(opcional)</span>
+                            </div>
                             {setupResults.robot_registered ? (
                               <Badge variant="default" className="bg-green-500">Ativo</Badge>
                             ) : (
-                              <Badge variant="outline" className="text-amber-500 border-amber-500">Opcional</Badge>
+                              <Badge variant="outline" className="text-muted-foreground border-muted-foreground/50">
+                                Não disponível
+                              </Badge>
                             )}
                           </div>
                         </div>
+                        
+                        {/* Mensagem de sucesso para automações */}
+                        {setupResults.sms_provider_registered && (
+                          <div className="mt-3 pt-3 border-t border-green-500/20">
+                            <p className="text-xs text-green-600 dark:text-green-400 font-medium">
+                              ✅ Automações habilitadas! Use "Enviar SMS" → "Thoth WhatsApp" nas regras de automação.
+                            </p>
+                          </div>
+                        )}
+                        
+                        {/* Aviso se robot não disponível */}
+                        {!setupResults.robot_registered && setupResults.sms_provider_registered && (
+                          <div className="mt-2 p-2 bg-muted/50 rounded text-xs text-muted-foreground">
+                            <span className="font-medium">ℹ️ Robot não disponível:</span> O escopo "bizproc" não está configurado no app. 
+                            Use o <strong>Provedor SMS</strong> para automações - funciona perfeitamente!
+                          </div>
+                        )}
+                        
                         {setupResults.warnings && setupResults.warnings.length > 0 && (
                           <div className="mt-3 pt-3 border-t border-green-500/20">
                             <p className="text-xs text-muted-foreground">
@@ -1179,6 +1212,27 @@ const [loading, setLoading] = useState(true);
                           </div>
                         )}
                       </div>
+                      
+                      {/* Instruções de uso para automações */}
+                      {setupResults.sms_provider_registered && (
+                        <div className="p-4 bg-primary/5 border border-primary/20 rounded-lg">
+                          <h4 className="font-medium text-primary mb-2 flex items-center gap-2">
+                            <MessageSquare className="h-4 w-4" />
+                            Como usar WhatsApp nas Automações
+                          </h4>
+                          <ol className="text-xs text-muted-foreground space-y-1.5 list-decimal list-inside">
+                            <li>Acesse <strong>CRM → Leads</strong> ou <strong>Negócios</strong></li>
+                            <li>Clique em <strong>Automação</strong> (regras de automação)</li>
+                            <li>Adicione uma nova regra ou ação</li>
+                            <li>Escolha <strong>"Enviar SMS"</strong></li>
+                            <li>Selecione o provedor <strong>"Thoth WhatsApp"</strong></li>
+                            <li>Configure o telefone e a mensagem</li>
+                          </ol>
+                          <p className="text-xs text-muted-foreground mt-2 pt-2 border-t border-primary/10">
+                            💡 <strong>Dica:</strong> Use campos do CRM como <code className="bg-muted px-1 rounded">{"{{PHONE}}"}</code> para enviar automaticamente.
+                          </p>
+                        </div>
+                      )}
                     </div>
                   )}
                 </>
@@ -1191,7 +1245,7 @@ const [loading, setLoading] = useState(true);
         <Card>
           <CardContent className="pt-6 space-y-3">
             <p className="text-sm text-muted-foreground text-center">
-              A configuração automática ativa o <strong>Conector</strong>, <strong>Provedor SMS</strong> e <strong>Robot de Automação</strong> no seu Bitrix24.
+              A configuração automática ativa o <strong>Conector</strong> (Contact Center) e <strong>Provedor SMS</strong> (automações) no seu Bitrix24.
             </p>
             <div className="bg-muted/50 rounded-lg p-3 text-xs text-muted-foreground">
               <p className="font-medium mb-1">O que é configurado automaticamente:</p>
