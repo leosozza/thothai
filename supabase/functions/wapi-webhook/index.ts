@@ -231,6 +231,7 @@ serve(async (req) => {
                 },
                 body: JSON.stringify({
                   integration_id: bitrixIntegration.id,
+                  instance_id: instanceId,
                   contact_phone: contactPhone,
                   contact_name: pushName || contactPhone,
                   contact_picture: profilePic,
