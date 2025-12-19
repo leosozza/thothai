@@ -356,6 +356,9 @@ serve(async (req) => {
       const isActive = statusResult.result?.active || statusResult.result?.ACTIVE;
       const isConfigured = statusResult.result?.connection || statusResult.result?.CONNECTION;
       
+      // Webhook URL for receiving operator messages
+      const webhookCallbackUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/bitrix24-webhook`;
+      
       if (!isActive || !isConfigured) {
         console.log(`Connector not fully active on line ${lineId}, activating...`);
         
@@ -376,36 +379,53 @@ serve(async (req) => {
         });
         const activateResult = await activateResponse.json();
         console.log("Connector activate result:", JSON.stringify(activateResult));
-        
-        // Configure connector data (webhook URL) for this line
-        const webhookCallbackUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/bitrix24-webhook`;
-        const connectorDataParams: Record<string, unknown> = {
-          CONNECTOR: connectorId,
-          LINE: parseInt(lineId),
-          DATA: {
-            id: `${connectorId}_line_${lineId}`,
-            url: webhookCallbackUrl,
-            url_im: webhookCallbackUrl,
-            name: "Thoth WhatsApp"
-          }
-        };
-        if (isOAuth && accessToken) {
-          connectorDataParams.auth = accessToken;
-        }
-        
-        const configResponse = await fetch(`${apiUrl}imconnector.connector.data.set`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(connectorDataParams)
-        });
-        const configResult = await configResponse.json();
-        console.log("Connector data.set result:", JSON.stringify(configResult));
       } else {
         console.log(`Connector already active on line ${lineId}`);
       }
+      
+      // ALWAYS configure connector data (webhook URL) for this line to ensure replies come back
+      console.log(`Configuring connector data on line ${lineId} with webhook: ${webhookCallbackUrl}`);
+      const connectorDataParams: Record<string, unknown> = {
+        CONNECTOR: connectorId,
+        LINE: parseInt(lineId),
+        DATA: {
+          id: `${connectorId}_line_${lineId}`,
+          url: webhookCallbackUrl,
+          url_im: webhookCallbackUrl,
+          name: "Thoth WhatsApp",
+          // Additional fields that might be needed for message routing
+          PLACEMENT_HANDLER: webhookCallbackUrl,
+        }
+      };
+      if (isOAuth && accessToken) {
+        connectorDataParams.auth = accessToken;
+      }
+      
+      const configResponse = await fetch(`${apiUrl}imconnector.connector.data.set`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(connectorDataParams)
+      });
+      const configResult = await configResponse.json();
+      console.log("Connector data.set result:", JSON.stringify(configResult));
+      
+      // Update integration config with current line_id
+      if (config?.line_id !== lineId || config?.activated_line_id !== lineId) {
+        console.log(`Updating integration config with line_id: ${lineId}`);
+        await supabase
+          .from("integrations")
+          .update({
+            config: {
+              ...config,
+              line_id: lineId,
+              activated_line_id: lineId,
+            },
+            updated_at: new Date().toISOString()
+          })
+          .eq("id", integration.id);
+      }
 
       // Ensure event bindings are set up to receive operator messages
-      const webhookCallbackUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/bitrix24-webhook`;
       const events = [
         "OnImConnectorMessageAdd",      // When operator sends message
         "OnImConnectorDialogStart",     // When dialog starts
