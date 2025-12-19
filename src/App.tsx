@@ -22,6 +22,8 @@ import Integrations from "./pages/Integrations";
 import Settings from "./pages/Settings";
 import Playground from "./pages/Playground";
 import Bitrix24Setup from "./pages/Bitrix24Setup";
+import License from "./pages/License";
+import Privacy from "./pages/Privacy";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -40,8 +42,10 @@ const App = () => (
         <Sonner />
         <BrowserRouter>
           <Routes>
-            {/* Rota pública para iframe Bitrix24 - fora dos providers de auth */}
+            {/* Rotas públicas para Bitrix24 - fora dos providers de auth */}
             <Route path="/bitrix24-setup" element={<Bitrix24Setup />} />
+            <Route path="/license" element={<License />} />
+            <Route path="/privacy" element={<Privacy />} />
             
             {/* Rotas protegidas com autenticação */}
             <Route
