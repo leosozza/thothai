@@ -404,6 +404,66 @@ serve(async (req) => {
         console.log(`Connector already active on line ${lineId}`);
       }
 
+      // Ensure event bindings are set up to receive operator messages
+      const webhookCallbackUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/bitrix24-webhook`;
+      const events = [
+        "OnImConnectorMessageAdd",      // When operator sends message
+        "OnImConnectorDialogStart",     // When dialog starts
+        "OnImConnectorDialogFinish",    // When dialog ends
+        "OnImConnectorStatusChange",    // When connector status changes
+      ];
+
+      console.log("Ensuring event bindings for webhook:", webhookCallbackUrl);
+
+      // First, get existing event bindings
+      const eventGetParams: Record<string, unknown> = {};
+      if (isOAuth && accessToken) {
+        eventGetParams.auth = accessToken;
+      }
+
+      const eventListResponse = await fetch(`${apiUrl}event.get`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(eventGetParams)
+      });
+      const eventListResult = await eventListResponse.json();
+      console.log("Current event bindings:", JSON.stringify(eventListResult));
+
+      // Check if our events are bound and bind if missing
+      const existingEvents = eventListResult.result || [];
+      const existingHandlers = existingEvents.map((e: any) => `${e.event || e.EVENT}::${e.handler || e.HANDLER}`);
+
+      for (const eventName of events) {
+        const eventAlreadyBound = existingEvents.some((e: any) => {
+          const existingEventName = (e.event || e.EVENT || "").toUpperCase();
+          const existingHandler = (e.handler || e.HANDLER || "");
+          return existingEventName === eventName.toUpperCase() && 
+                 existingHandler.includes("bitrix24-webhook");
+        });
+
+        if (!eventAlreadyBound) {
+          console.log(`Binding event ${eventName}...`);
+          
+          const bindParams: Record<string, unknown> = {
+            event: eventName,
+            handler: webhookCallbackUrl
+          };
+          if (isOAuth && accessToken) {
+            bindParams.auth = accessToken;
+          }
+
+          const bindResponse = await fetch(`${apiUrl}event.bind`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(bindParams)
+          });
+          const bindResult = await bindResponse.json();
+          console.log(`Event bind ${eventName} result:`, JSON.stringify(bindResult));
+        } else {
+          console.log(`Event ${eventName} already bound`);
+        }
+      }
+
       // Build message payload for Bitrix24
       const messagePayload: Record<string, unknown> = {
         CONNECTOR: connectorId,
