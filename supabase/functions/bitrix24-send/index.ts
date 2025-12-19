@@ -365,30 +365,29 @@ serve(async (req) => {
 
       console.log("Session data from imconnector:", { sessionId, chatId, bitrixUserId });
 
-      // Update contact metadata with Bitrix24 session info
-      if (sessionId || chatId || bitrixUserId) {
-        const { data: existingContact } = await supabase
-          .from("contacts")
-          .select("metadata")
-          .eq("phone_number", contact_phone)
-          .maybeSingle();
+      // ALWAYS update contact metadata with Bitrix24 info
+      // Save contact_phone as bitrix24_user_id since that's what we send as user.id
+      const { data: existingContact } = await supabase
+        .from("contacts")
+        .select("metadata")
+        .eq("phone_number", contact_phone)
+        .maybeSingle();
 
-        await supabase
-          .from("contacts")
-          .update({ 
-            metadata: { 
-              ...(existingContact?.metadata || {}),
-              bitrix24_session_id: sessionId,
-              bitrix24_chat_id: chatId,
-              bitrix24_user_id: bitrixUserId,
-              bitrix24_lead_id: leadInfo.lead_id,
-              bitrix24_last_message_at: new Date().toISOString(),
-            } 
-          })
-          .eq("phone_number", contact_phone);
+      await supabase
+        .from("contacts")
+        .update({ 
+          metadata: { 
+            ...(existingContact?.metadata || {}),
+            bitrix24_user_id: contact_phone, // IMPORTANT: save phone as user_id for lookup
+            bitrix24_session_id: sessionId || existingContact?.metadata?.bitrix24_session_id,
+            bitrix24_chat_id: chatId || existingContact?.metadata?.bitrix24_chat_id,
+            bitrix24_lead_id: leadInfo.lead_id,
+            bitrix24_last_message_at: new Date().toISOString(),
+          } 
+        })
+        .eq("phone_number", contact_phone);
 
-        console.log("Updated contact with session info");
-      }
+      console.log("Updated contact metadata with bitrix24_user_id:", contact_phone);
     }
 
     // Update contact with lead info

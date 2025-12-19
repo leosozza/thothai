@@ -2043,16 +2043,39 @@ serve(async (req) => {
           break;
         }
 
-        // Find contact
-        const { data: contact } = await supabase
+        // Find contact - userId from Bitrix24 is the phone number we sent as user.id
+        const cleanUserId = userId?.toString().replace(/\D/g, "");
+        console.log("Looking for contact with userId/phone:", { userId, cleanUserId, instanceId });
+
+        // Try to find by phone_number first (since user.id = phone in imconnector.send.messages)
+        let contact = null;
+        const { data: contactByPhone } = await supabase
           .from("contacts")
           .select("*")
           .eq("instance_id", instanceId)
-          .contains("metadata", { bitrix24_user_id: userId })
+          .eq("phone_number", cleanUserId)
           .maybeSingle();
 
+        if (contactByPhone) {
+          contact = contactByPhone;
+          console.log("Contact found by phone_number:", contact.id);
+        } else {
+          // Fallback: try to find by metadata (for legacy cases)
+          const { data: contactByMetadata } = await supabase
+            .from("contacts")
+            .select("*")
+            .eq("instance_id", instanceId)
+            .contains("metadata", { bitrix24_user_id: userId })
+            .maybeSingle();
+          
+          if (contactByMetadata) {
+            contact = contactByMetadata;
+            console.log("Contact found by metadata:", contact.id);
+          }
+        }
+
         if (!contact) {
-          console.error("Contact not found for:", userId);
+          console.error("Contact not found for userId:", userId, "cleanUserId:", cleanUserId);
           break;
         }
 
