@@ -5,7 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { CheckCircle, Loader2, MessageSquare, Phone, AlertCircle, Plug, Key, TestTube, XCircle, Trash2 } from "lucide-react";
+import { CheckCircle, Loader2, MessageSquare, Phone, AlertCircle, Plug, Key, TestTube, XCircle, Trash2, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
@@ -78,6 +78,7 @@ const [loading, setLoading] = useState(true);
   // Legacy states (kept for compatibility but auto_setup handles these now)
   const [cleaningConnectors, setCleaningConnectors] = useState(false);
   const [registering, setRegistering] = useState(false);
+  const [reconfiguring, setReconfiguring] = useState(false);
 
   useEffect(() => {
     // Extract params from URL (provided by Bitrix24 iframe)
@@ -571,6 +572,51 @@ const [loading, setLoading] = useState(true);
     }
   };
 
+  // Reconfigure connector with clean URLs
+  const handleReconfigureConnector = async () => {
+    if (!integrationId && !status?.integration_id) {
+      toast.error("Integração não encontrada");
+      return;
+    }
+
+    try {
+      setReconfiguring(true);
+
+      const response = await fetch(
+        `${SUPABASE_URL}/functions/v1/bitrix24-webhook`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            action: "reconfigure_connector",
+            integration_id: integrationId || status?.integration_id,
+            line_id: 2, // Default to LINE 2 where "Thoth whatsapp" is configured
+          }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error || "Erro ao reconfigurar conector");
+      }
+
+      if (data?.success) {
+        toast.success(data.message || "Conector reconfigurado com sucesso!");
+        await loadData();
+      } else {
+        throw new Error(data?.error || "Erro ao reconfigurar conector");
+      }
+    } catch (err: any) {
+      console.error("Error reconfiguring connector:", err);
+      toast.error(err.message || "Erro ao reconfigurar conector");
+    } finally {
+      setReconfiguring(false);
+    }
+  };
+
   const handleRegisterConnector = async () => {
     if (!selectedInstance) {
       toast.error("Selecione uma instância WhatsApp");
@@ -1036,7 +1082,29 @@ const [loading, setLoading] = useState(true);
         {/* Clean Connectors Button - Mostrar quando tem integração OAuth */}
         {(tokenValidated || status?.found) && (
           <Card className="border-amber-500/30">
-            <CardContent className="pt-6">
+            <CardContent className="pt-6 space-y-3">
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={handleReconfigureConnector}
+                disabled={reconfiguring}
+              >
+                {reconfiguring ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Reconfigurando conector...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    Reconfigurar Conector (Reset Completo)
+                  </>
+                )}
+              </Button>
+              <p className="text-xs text-muted-foreground text-center">
+                Remove e recria o conector com URLs limpas e eventos revinculados na LINE 2
+              </p>
+              
               <Button
                 variant="outline"
                 className="w-full border-destructive/50 text-destructive hover:bg-destructive/10"
@@ -1055,7 +1123,7 @@ const [loading, setLoading] = useState(true);
                   </>
                 )}
               </Button>
-              <p className="text-xs text-muted-foreground text-center mt-2">
+              <p className="text-xs text-muted-foreground text-center">
                 Remove todos os conectores "Thoth WhatsApp" do Contact Center
               </p>
             </CardContent>

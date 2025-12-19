@@ -1195,6 +1195,242 @@ async function handleRegisterRobot(supabase: any, payload: any, supabaseUrl: str
   }
 }
 
+// Handle reconfigure_connector action - Completely reconfigure connector with clean URLs
+async function handleReconfigureConnector(supabase: any, payload: any, supabaseUrl: string) {
+  console.log("=== RECONFIGURE CONNECTOR (Full Reset) ===");
+  const { integration_id, line_id } = payload;
+
+  if (!integration_id) {
+    return new Response(
+      JSON.stringify({ error: "Integration ID é obrigatório" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const { data: integration, error: integrationError } = await supabase
+    .from("integrations")
+    .select("*")
+    .eq("id", integration_id)
+    .single();
+
+  if (integrationError || !integration) {
+    console.error("Integration not found:", integrationError);
+    return new Response(
+      JSON.stringify({ error: "Integração não encontrada" }),
+      { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const accessToken = await refreshBitrixToken(integration, supabase);
+  if (!accessToken) {
+    return new Response(
+      JSON.stringify({ error: "Token de acesso não disponível" }),
+      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const config = integration.config;
+  const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
+  
+  // Use fixed connector ID - avoid duplicates
+  const connectorId = "thoth_whatsapp";
+  
+  // CRITICAL: Use CLEAN webhook URL without query parameters
+  const cleanWebhookUrl = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
+  
+  // Default to LINE 2 if not specified (where "Thoth whatsapp" channel is configured)
+  const targetLineId = line_id || 2;
+
+  const results = {
+    connector_unregistered: false,
+    connector_registered: false,
+    connector_activated: false,
+    events_bound: false,
+    data_set: false,
+    errors: [] as string[],
+  };
+
+  try {
+    // 1. Unregister existing connector (clean slate)
+    console.log("Step 1: Unregistering existing connector...");
+    try {
+      const unregisterResponse = await fetch(`${clientEndpoint}imconnector.unregister`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          auth: accessToken,
+          ID: connectorId
+        })
+      });
+      const unregisterResult = await unregisterResponse.json();
+      console.log("Unregister result:", unregisterResult);
+      results.connector_unregistered = true;
+    } catch (e: any) {
+      console.log("Unregister failed (may not exist):", e.message);
+    }
+
+    // 2. Register connector fresh
+    console.log("Step 2: Registering connector fresh...");
+    try {
+      const registerResponse = await fetch(`${clientEndpoint}imconnector.register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          auth: accessToken,
+          ID: connectorId,
+          NAME: "Thoth WhatsApp",
+          ICON: {
+            DATA_IMAGE: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0OCIgaGVpZ2h0PSI0OCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IiMyNUQzNjYiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWxpbmVjYXA9InJvdW5kIiBzdHJva2UtbGluZWpvaW49InJvdW5kIj48cGF0aCBkPSJNMjEgMTEuNWE4LjM4IDguMzggMCAwIDEtLjkgMy44IDguNSA4LjUgMCAwIDEtNy42IDQuNyA4LjM4IDguMzggMCAwIDEtMy44LS45TDMgMjFsMS45LTUuN2E4LjM4IDguMzggMCAwIDEtLjktMy44IDguNSA4LjUgMCAwIDEgNC43LTcuNiA4LjM4IDguMzggMCAwIDEgMy44LS45aDEgMCA4LjUgOC41IDAgMCAxIDguNSA4LjV2LjVaIj48L3BhdGg+PC9zdmc+"
+          },
+          PLACEMENT_HANDLER: cleanWebhookUrl
+        })
+      });
+      const registerResult = await registerResponse.json();
+      console.log("Register result:", registerResult);
+      
+      if (registerResult.result || registerResult.error === "ERROR_CONNECTOR_ALREADY_EXISTS") {
+        results.connector_registered = true;
+      } else if (registerResult.error) {
+        results.errors.push(`Register: ${registerResult.error_description || registerResult.error}`);
+      }
+    } catch (e: any) {
+      console.error("Register error:", e);
+      results.errors.push(`Register: ${e.message}`);
+    }
+
+    // 3. Activate connector for target line
+    console.log(`Step 3: Activating connector for LINE ${targetLineId}...`);
+    try {
+      const activateResponse = await fetch(`${clientEndpoint}imconnector.activate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          auth: accessToken,
+          CONNECTOR: connectorId,
+          LINE: targetLineId,
+          ACTIVE: 1
+        })
+      });
+      const activateResult = await activateResponse.json();
+      console.log("Activate result:", activateResult);
+      
+      if (activateResult.result || !activateResult.error) {
+        results.connector_activated = true;
+      } else if (activateResult.error) {
+        results.errors.push(`Activate: ${activateResult.error_description || activateResult.error}`);
+      }
+    } catch (e: any) {
+      console.error("Activate error:", e);
+      results.errors.push(`Activate: ${e.message}`);
+    }
+
+    // 4. Set connector data with CLEAN URL
+    console.log("Step 4: Setting connector data with clean URL...");
+    try {
+      const dataSetResponse = await fetch(`${clientEndpoint}imconnector.connector.data.set`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          auth: accessToken,
+          CONNECTOR: connectorId,
+          LINE: targetLineId,
+          DATA: {
+            id: `${connectorId}_line_${targetLineId}`,
+            url: cleanWebhookUrl,
+            url_im: cleanWebhookUrl,
+            name: "Thoth WhatsApp"
+          }
+        })
+      });
+      const dataSetResult = await dataSetResponse.json();
+      console.log("Data set result:", dataSetResult);
+      
+      if (dataSetResult.result || !dataSetResult.error) {
+        results.data_set = true;
+      }
+    } catch (e: any) {
+      console.error("Data set error:", e);
+    }
+
+    // 5. Bind events with CLEAN URL (no query params!)
+    console.log("Step 5: Binding events with CLEAN URL...");
+    const events = [
+      "OnImConnectorMessageAdd",
+      "OnImConnectorDialogStart", 
+      "OnImConnectorDialogFinish",
+      "OnImConnectorStatusDelete",
+    ];
+
+    let eventsBound = 0;
+    for (const event of events) {
+      try {
+        const bindResponse = await fetch(`${clientEndpoint}event.bind`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            auth: accessToken,
+            event: event,
+            handler: cleanWebhookUrl  // CLEAN URL - no query params!
+          })
+        });
+        const bindResult = await bindResponse.json();
+        console.log(`event.bind ${event}:`, bindResult);
+        
+        if (bindResult.result || !bindResult.error) {
+          eventsBound++;
+        }
+      } catch (e: any) {
+        console.error(`Event bind error for ${event}:`, e);
+      }
+    }
+    results.events_bound = eventsBound === events.length;
+
+    // 6. Update integration config
+    console.log("Step 6: Updating integration config...");
+    await supabase
+      .from("integrations")
+      .update({
+        config: {
+          ...config,
+          connector_id: connectorId,
+          line_id: String(targetLineId),
+          activated_line_id: targetLineId,
+          events_url: cleanWebhookUrl,
+          reconfigured_at: new Date().toISOString(),
+          connector_registered: results.connector_registered,
+        },
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", integration.id);
+
+    console.log("Reconfigure completed:", results);
+
+    const success = results.connector_registered && results.connector_activated && results.events_bound;
+
+    return new Response(
+      JSON.stringify({
+        success,
+        message: success 
+          ? `Conector reconfigurado com sucesso na LINE ${targetLineId}! Eventos vinculados com URL limpa.`
+          : "Reconfiguração parcial. Verifique os erros.",
+        results,
+        webhook_url: cleanWebhookUrl,
+        line_id: targetLineId,
+      }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  } catch (error) {
+    console.error("Reconfigure error:", error);
+    return new Response(
+      JSON.stringify({ 
+        error: error instanceof Error ? error.message : "Erro na reconfiguração",
+        results 
+      }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+}
+
 // Handle auto_setup action - Automatically configure all Bitrix24 integrations
 async function handleAutoSetup(supabase: any, payload: any, supabaseUrl: string) {
   console.log("=== AUTO SETUP ===");
@@ -1231,7 +1467,11 @@ async function handleAutoSetup(supabase: any, payload: any, supabaseUrl: string)
 
   const config = integration.config;
   const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
-  const connectorId = config.connector_id || "thoth_whatsapp";
+  
+  // Use fixed connector ID to avoid duplicates
+  const connectorId = "thoth_whatsapp";
+  
+  // CRITICAL: Use CLEAN webhook URL without query parameters for event handlers
   const webhookUrl = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
   const effectiveInstanceId = instance_id || config.instance_id;
 
@@ -1957,6 +2197,11 @@ serve(async (req) => {
     // Handle auto setup (configures everything automatically)
     if (action === "auto_setup" || payload.action === "auto_setup") {
       return await handleAutoSetup(supabase, payload, supabaseUrl);
+    }
+
+    // Handle reconfigure connector (full reset with clean URLs)
+    if (action === "reconfigure_connector" || payload.action === "reconfigure_connector") {
+      return await handleReconfigureConnector(supabase, payload, supabaseUrl);
     }
 
     // Handle automation robot registration

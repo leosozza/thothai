@@ -505,13 +505,16 @@ serve(async (req) => {
       );
     }
 
-    // 2. ACTIVATE connector immediately with default line (LINE: 1)
+    // 2. ACTIVATE connector immediately with default line (LINE: 2)
     // This ensures "Setup concluído" in Bitrix24 Contact Center
+    // IMPORTANT: Use LINE 2 as that's where the "Thoth whatsapp" channel is configured
     console.log("=== ACTIVATING CONNECTOR IMMEDIATELY ===");
-    const workspaceIdForWebhook = workspace_id || integration?.workspace_id || "default";
-    const webhookEndpoint = `${supabaseUrl}/functions/v1/bitrix24-webhook?workspace_id=${workspaceIdForWebhook}&connector_id=${finalConnectorId}`;
     
-    const defaultLineId = 1; // Default to first Open Line
+    // CRITICAL: Use CLEAN webhook URL without query parameters for event.bind
+    // Bitrix24 documentation states event handlers must use clean URLs
+    const cleanWebhookUrl = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
+    
+    const defaultLineId = 2; // Default to LINE 2 where "Thoth whatsapp" is configured
     
     // Call imconnector.activate
     const activateUrl = `${bitrixApiUrl}imconnector.activate?auth=${accessToken}`;
@@ -529,8 +532,8 @@ serve(async (req) => {
     const activateResult = await activateResponse.json();
     console.log("imconnector.activate result:", JSON.stringify(activateResult));
     
-    // 3. Set connector data with URLs
-    console.log("Setting connector data...");
+    // 3. Set connector data with CLEAN URLs (no query params)
+    console.log("Setting connector data with clean webhook URL...");
     const dataSetUrl = `${bitrixApiUrl}imconnector.connector.data.set?auth=${accessToken}`;
     
     const dataSetResponse = await fetch(dataSetUrl, {
@@ -541,8 +544,8 @@ serve(async (req) => {
         LINE: defaultLineId,
         DATA: {
           id: `${finalConnectorId}_line_${defaultLineId}`,
-          url: webhookEndpoint,
-          url_im: webhookEndpoint,
+          url: cleanWebhookUrl,
+          url_im: cleanWebhookUrl,
           name: "Thoth WhatsApp"
         }
       })
@@ -551,7 +554,8 @@ serve(async (req) => {
     console.log("imconnector.connector.data.set result:", JSON.stringify(dataSetResult));
 
     // 4. Bind events to receive messages from Bitrix24 operators
-    console.log("Binding events for message handling...");
+    // CRITICAL: Use CLEAN URL without query parameters
+    console.log("Binding events with CLEAN webhook URL:", cleanWebhookUrl);
     
     const events = [
       "OnImConnectorMessageAdd",      // When operator sends message
@@ -568,7 +572,7 @@ serve(async (req) => {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           event: event,
-          handler: webhookEndpoint,
+          handler: cleanWebhookUrl, // CLEAN URL - no query params
         }),
       });
       const bindResult = await bindResponse.json();
@@ -583,7 +587,7 @@ serve(async (req) => {
       registered: true,
       activated: activated,
       activated_line_id: activated ? defaultLineId : null,
-      events_url: webhookEndpoint,
+      events_url: cleanWebhookUrl,
       line_id: String(defaultLineId),
     };
 
@@ -619,13 +623,14 @@ serve(async (req) => {
           ? "Conector registrado E ATIVADO com sucesso no Contact Center!" 
           : "Conector registrado mas ativação pendente. Use 'Ativar Manualmente' na interface.",
         connector_id: finalConnectorId,
-        events_url: webhookEndpoint,
+        events_url: cleanWebhookUrl,
         mode: "oauth",
         activated: activated,
+        line_id: defaultLineId,
         activate_result: activateResult,
         data_set_result: dataSetResult,
         next_steps: activated 
-          ? "O conector está ativo! Teste enviando uma mensagem pelo WhatsApp."
+          ? "O conector está ativo na LINE 2! Teste enviando uma mensagem pelo WhatsApp."
           : "Vá em Contact Center → Thoth WhatsApp → Continuar para finalizar a configuração",
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
