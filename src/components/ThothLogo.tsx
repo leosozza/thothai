@@ -133,7 +133,7 @@ export function ThothLogo({ size = "md", showText = true, className, animated = 
       {showText && (
         <div className="flex flex-col leading-none">
           <span className={cn("font-display font-bold tracking-tight text-gradient-gold", textSizes[size])}>
-            thoth
+            Thoth
             <span className="text-primary">.AI</span>
           </span>
           {size !== "sm" && (
