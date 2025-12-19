@@ -2255,38 +2255,59 @@ serve(async (req) => {
 
     switch (event) {
       case "ONIMCONNECTORMESSAGEADD": {
-        const data = payload.data?.MESSAGES?.[0] || payload.data;
+        // This event is triggered when an operator sends a message from Bitrix24 Open Channel
+        // The message needs to be forwarded to WhatsApp
+        console.log("=== OPERATOR MESSAGE TO SEND TO WHATSAPP ===");
+        console.log("Full payload data:", JSON.stringify(payload.data, null, 2));
         
-        if (!data) {
-          console.log("No message data");
+        const messages = payload.data?.MESSAGES || [];
+        const firstMessage = messages[0] || payload.data;
+        
+        if (!firstMessage) {
+          console.log("No message data in ONIMCONNECTORMESSAGEADD");
           break;
         }
 
-        const userId = data.im?.chat_id || data.user?.id;
-        const messageText = data.message?.text || data.text || "";
-        const line = data.line || payload.data?.LINE;
+        // Extract message details - Bitrix24 sends operator's message to be delivered
+        // The user object contains the RECIPIENT (client) info, not the operator
+        const recipientId = firstMessage.user?.id || firstMessage.im?.user_id;
+        const recipientChatId = firstMessage.chat?.id || firstMessage.im?.chat_id;
+        const messageText = firstMessage.message?.text || firstMessage.text || "";
+        const line = firstMessage.line || payload.data?.LINE;
 
-        console.log("Operator message:", { userId, messageText, line });
+        console.log("Operator sending message:", { 
+          recipientId, 
+          recipientChatId, 
+          messageText: messageText.substring(0, 50) + "...", 
+          line 
+        });
 
-        if (!messageText) break;
+        if (!messageText) {
+          console.log("Empty message text, skipping");
+          break;
+        }
 
-        // Find instance from mapping
+        // Find the integration and instance for this line
         let instanceId: string | null = null;
+        let workspaceId: string | null = null;
 
         if (line) {
           const { data: mapping } = await supabase
             .from("bitrix_channel_mappings")
-            .select("instance_id")
+            .select("instance_id, workspace_id")
             .eq("line_id", line)
             .eq("is_active", true)
             .maybeSingle();
 
           if (mapping) {
             instanceId = mapping.instance_id;
+            workspaceId = mapping.workspace_id;
+            console.log("Found mapping for line:", line, "instance:", instanceId);
           }
         }
 
         if (!instanceId) {
+          // Fallback: find from integration config
           const { data: integration } = await supabase
             .from("integrations")
             .select("*")
@@ -2296,51 +2317,120 @@ serve(async (req) => {
 
           if (integration?.config?.instance_id) {
             instanceId = integration.config.instance_id;
+            workspaceId = integration.workspace_id;
+            console.log("Using instance from integration config:", instanceId);
           }
         }
 
         if (!instanceId) {
-          console.error("No instance_id found");
+          console.error("No instance_id found for sending message");
           break;
         }
 
-        // Find contact - userId from Bitrix24 is the phone number we sent as user.id
-        const cleanUserId = userId?.toString().replace(/\D/g, "");
-        console.log("Looking for contact with userId/phone:", { userId, cleanUserId, instanceId });
+        // The recipientId should be the phone number we originally sent as user.id 
+        // when creating the chat in imconnector.send.messages
+        const cleanRecipientId = recipientId?.toString().replace(/\D/g, "");
+        console.log("Looking for contact:", { recipientId, cleanRecipientId, instanceId });
 
-        // Try to find by phone_number first (since user.id = phone in imconnector.send.messages)
+        // Try multiple strategies to find the contact
         let contact = null;
-        const { data: contactByPhone } = await supabase
-          .from("contacts")
-          .select("*")
-          .eq("instance_id", instanceId)
-          .eq("phone_number", cleanUserId)
-          .maybeSingle();
 
-        if (contactByPhone) {
-          contact = contactByPhone;
-          console.log("Contact found by phone_number:", contact.id);
-        } else {
-          // Fallback: try to find by metadata (for legacy cases)
+        // Strategy 1: Find by phone_number (exact match with cleaned ID)
+        if (cleanRecipientId) {
+          const { data: contactByPhone } = await supabase
+            .from("contacts")
+            .select("*")
+            .eq("instance_id", instanceId)
+            .eq("phone_number", cleanRecipientId)
+            .maybeSingle();
+
+          if (contactByPhone) {
+            contact = contactByPhone;
+            console.log("Contact found by exact phone_number:", contact.id, contact.phone_number);
+          }
+        }
+
+        // Strategy 2: Find by phone ending with the recipientId (in case of formatting differences)
+        if (!contact && cleanRecipientId && cleanRecipientId.length >= 8) {
+          const { data: contactByPhoneSuffix } = await supabase
+            .from("contacts")
+            .select("*")
+            .eq("instance_id", instanceId)
+            .ilike("phone_number", `%${cleanRecipientId.slice(-10)}`)
+            .maybeSingle();
+
+          if (contactByPhoneSuffix) {
+            contact = contactByPhoneSuffix;
+            console.log("Contact found by phone suffix:", contact.id, contact.phone_number);
+          }
+        }
+
+        // Strategy 3: Find by bitrix24_user_id in metadata
+        if (!contact && recipientId) {
           const { data: contactByMetadata } = await supabase
             .from("contacts")
             .select("*")
             .eq("instance_id", instanceId)
-            .contains("metadata", { bitrix24_user_id: userId })
+            .contains("metadata", { bitrix24_user_id: recipientId.toString() })
             .maybeSingle();
           
           if (contactByMetadata) {
             contact = contactByMetadata;
-            console.log("Contact found by metadata:", contact.id);
+            console.log("Contact found by bitrix24_user_id metadata:", contact.id);
+          }
+        }
+
+        // Strategy 4: Find by bitrix24_chat_id in metadata
+        if (!contact && recipientChatId) {
+          const { data: contactByChatId } = await supabase
+            .from("contacts")
+            .select("*")
+            .eq("instance_id", instanceId)
+            .contains("metadata", { bitrix24_chat_id: recipientChatId.toString() })
+            .maybeSingle();
+          
+          if (contactByChatId) {
+            contact = contactByChatId;
+            console.log("Contact found by bitrix24_chat_id metadata:", contact.id);
           }
         }
 
         if (!contact) {
-          console.error("Contact not found for userId:", userId, "cleanUserId:", cleanUserId);
+          console.error("Contact not found. recipientId:", recipientId, "recipientChatId:", recipientChatId, "cleanRecipientId:", cleanRecipientId);
+          console.log("Listing contacts for this instance for debugging...");
+          
+          const { data: allContacts } = await supabase
+            .from("contacts")
+            .select("id, phone_number, name, metadata")
+            .eq("instance_id", instanceId)
+            .limit(5);
+          
+          console.log("Sample contacts:", JSON.stringify(allContacts, null, 2));
           break;
         }
 
-        // Send to WhatsApp
+        // Get conversation if exists
+        let conversationId = null;
+        const { data: conversation } = await supabase
+          .from("conversations")
+          .select("id")
+          .eq("contact_id", contact.id)
+          .eq("instance_id", instanceId)
+          .in("status", ["open", "pending"])
+          .order("created_at", { ascending: false })
+          .maybeSingle();
+
+        if (conversation) {
+          conversationId = conversation.id;
+        }
+
+        // Send to WhatsApp via W-API
+        console.log("Sending message to WhatsApp:", {
+          instance_id: instanceId,
+          phone_number: contact.phone_number,
+          message_preview: messageText.substring(0, 30) + "..."
+        });
+
         const sendResponse = await fetch(`${supabaseUrl}/functions/v1/wapi-send-message`, {
           method: "POST",
           headers: {
@@ -2351,12 +2441,51 @@ serve(async (req) => {
             instance_id: instanceId,
             phone_number: contact.phone_number,
             message: messageText,
-            source: "bitrix24",
+            message_type: "text",
+            conversation_id: conversationId,
+            contact_id: contact.id,
+            workspace_id: workspaceId,
+            internal_call: true,
           }),
         });
 
         const sendResult = await sendResponse.json();
-        console.log("Send result:", sendResult);
+        console.log("WhatsApp send result:", JSON.stringify(sendResult));
+
+        if (sendResult.error) {
+          console.error("Error sending to WhatsApp:", sendResult.error);
+        } else {
+          console.log("Message successfully sent to WhatsApp, messageId:", sendResult.messageId);
+          
+          // If we have a conversation, also save the outgoing message
+          if (conversationId && !sendResult.message) {
+            await supabase
+              .from("messages")
+              .insert({
+                conversation_id: conversationId,
+                contact_id: contact.id,
+                instance_id: instanceId,
+                content: messageText,
+                direction: "outgoing",
+                is_from_bot: false,
+                message_type: "text",
+                status: "sent",
+                metadata: { source: "bitrix24_operator" }
+              });
+          }
+
+          // Update conversation
+          if (conversationId) {
+            await supabase
+              .from("conversations")
+              .update({ 
+                last_message_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+              })
+              .eq("id", conversationId);
+          }
+        }
+
         break;
       }
 
