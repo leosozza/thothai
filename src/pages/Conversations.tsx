@@ -901,7 +901,7 @@ export default function Conversations() {
                           {msg.is_from_bot && msg.direction === "outgoing" && (
                             <div className="flex items-center gap-1 text-xs opacity-70 mb-1">
                               <Bot className="h-3 w-3" />
-                              <span>thoth.AI</span>
+                              <span>Thoth.AI</span>
                             </div>
                           )}
                           <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
@@ -972,7 +972,7 @@ export default function Conversations() {
               <div className="h-20 w-20 rounded-full bg-primary/10 flex items-center justify-center mb-6">
                 <MessageSquare className="h-10 w-10 text-primary" />
               </div>
-              <h2 className="text-2xl font-semibold mb-2">thoth.AI Inbox</h2>
+              <h2 className="text-2xl font-semibold mb-2">Thoth.AI Inbox</h2>
               <p className="text-muted-foreground max-w-md">
                 Selecione uma conversa para começar a atender ou aguarde novas mensagens
                 dos seus clientes.
