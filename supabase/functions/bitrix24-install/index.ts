@@ -855,30 +855,79 @@ serve(async (req) => {
     }
 
     if (event === "ONAPPUNINSTALL") {
+      console.log("=== ONAPPUNINSTALL EVENT (Marketplace compliance) ===");
       console.log(`Uninstalling Bitrix24 app for member_id: ${memberId}`);
 
       if (memberId) {
-        // Mark integration as inactive
+        // Find the integration
         const { data: existing } = await supabase
           .from("integrations")
-          .select("id, config")
+          .select("id, config, workspace_id")
           .eq("type", "bitrix24")
           .filter("config->>member_id", "eq", memberId)
           .maybeSingle();
 
         if (existing) {
+          console.log("Found integration to uninstall:", existing.id);
+
+          // 1. Delete channel mappings for this integration
+          const { error: mappingError } = await supabase
+            .from("bitrix_channel_mappings")
+            .delete()
+            .eq("integration_id", existing.id);
+          
+          if (mappingError) {
+            console.error("Error deleting channel mappings:", mappingError);
+          } else {
+            console.log("Deleted channel mappings for integration:", existing.id);
+          }
+
+          // 2. Clear sensitive tokens from config (GDPR/security compliance)
+          const sanitizedConfig = {
+            member_id: existing.config?.member_id,
+            domain: existing.config?.domain,
+            uninstalled_at: new Date().toISOString(),
+            uninstall_reason: "ONAPPUNINSTALL event",
+            // Remove sensitive data
+            access_token: null,
+            refresh_token: null,
+            client_secret: null,
+            application_token: null,
+          };
+
+          // 3. Mark integration as inactive with sanitized config
           await supabase
             .from("integrations")
             .update({ 
               is_active: false,
-              config: { ...existing.config, uninstalled_at: new Date().toISOString() }
+              config: sanitizedConfig,
+              updated_at: new Date().toISOString(),
             })
             .eq("id", existing.id);
+
+          console.log("Integration marked as uninstalled, tokens cleared");
+
+          // 4. Optionally revoke OAuth token at Bitrix24 (best effort)
+          if (existing.config?.access_token && existing.config?.domain) {
+            try {
+              const revokeUrl = `https://${existing.config.domain}/oauth/revoke/`;
+              await fetch(revokeUrl, {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                body: new URLSearchParams({
+                  token: existing.config.access_token,
+                }),
+              });
+              console.log("OAuth token revoked at Bitrix24");
+            } catch (revokeError) {
+              console.log("Could not revoke OAuth token (best effort):", revokeError);
+            }
+          }
         }
       }
 
       return new Response(
-        JSON.stringify({ success: true, message: "App uninstalled" }),
+        JSON.stringify({ success: true, message: "App uninstalled, user data cleaned" }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }

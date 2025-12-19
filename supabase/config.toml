@@ -54,6 +54,9 @@ verify_jwt = true
 [functions.bitrix24-test]
 verify_jwt = true
 
+[functions.bitrix24-connector-settings]
+verify_jwt = false
+
 [functions.gupshup-connect]
 verify_jwt = true
 
