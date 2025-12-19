@@ -348,7 +348,10 @@ export type Database = {
       }
       instances: {
         Row: {
+          connection_type: string | null
           created_at: string
+          gupshup_api_key: string | null
+          gupshup_app_id: string | null
           id: string
           instance_key: string | null
           name: string
@@ -361,7 +364,10 @@ export type Database = {
           workspace_id: string | null
         }
         Insert: {
+          connection_type?: string | null
           created_at?: string
+          gupshup_api_key?: string | null
+          gupshup_app_id?: string | null
           id?: string
           instance_key?: string | null
           name: string
@@ -374,7 +380,10 @@ export type Database = {
           workspace_id?: string | null
         }
         Update: {
+          connection_type?: string | null
           created_at?: string
+          gupshup_api_key?: string | null
+          gupshup_app_id?: string | null
           id?: string
           instance_key?: string | null
           name?: string

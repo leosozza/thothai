@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
   Dialog,
   DialogContent,
@@ -28,7 +29,8 @@ import {
   Trash2,
   Settings,
   RefreshCw,
-  X,
+  Shield,
+  MessageSquare,
 } from "lucide-react";
 
 interface Instance {
@@ -40,6 +42,8 @@ interface Instance {
   profile_picture_url: string | null;
   qr_code: string | null;
   created_at: string;
+  connection_type?: string;
+  gupshup_app_id?: string | null;
 }
 
 const statusConfig: Record<string, { label: string; color: string; icon: typeof Wifi }> = {
@@ -49,11 +53,17 @@ const statusConfig: Record<string, { label: string; color: string; icon: typeof 
   qr_pending: { label: "Aguardando QR", color: "bg-blue-500", icon: QrCode },
 };
 
+type ConnectionType = "waba" | "official";
+
 export default function Instances() {
   const [instances, setInstances] = useState<Instance[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [newInstanceName, setNewInstanceName] = useState("");
+  const [connectionType, setConnectionType] = useState<ConnectionType>("waba");
+  const [gupshupApiKey, setGupshupApiKey] = useState("");
+  const [gupshupAppId, setGupshupAppId] = useState("");
+  const [gupshupPhoneNumber, setGupshupPhoneNumber] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [qrDialogOpen, setQrDialogOpen] = useState(false);
   const [connectingInstance, setConnectingInstance] = useState<Instance | null>(null);
@@ -116,30 +126,71 @@ export default function Instances() {
     }
   };
 
+  const resetForm = () => {
+    setNewInstanceName("");
+    setConnectionType("waba");
+    setGupshupApiKey("");
+    setGupshupAppId("");
+    setGupshupPhoneNumber("");
+  };
+
   const createInstance = async () => {
     if (!newInstanceName.trim()) {
       toast.error("Digite um nome para a instância");
       return;
     }
 
+    if (connectionType === "official") {
+      if (!gupshupApiKey.trim() || !gupshupAppId.trim()) {
+        toast.error("Preencha a API Key e o App ID do Gupshup");
+        return;
+      }
+    }
+
     setCreating(true);
     try {
-      const { error } = await supabase.from("instances").insert({
+      // Create instance in database
+      const { data: newInstance, error } = await supabase.from("instances").insert({
         user_id: user?.id,
         workspace_id: workspace?.id,
         name: newInstanceName.trim(),
-        status: "disconnected",
-      });
+        status: connectionType === "official" ? "connecting" : "disconnected",
+        connection_type: connectionType,
+      }).select().single();
 
       if (error) throw error;
 
-      toast.success("Instância criada com sucesso!");
-      setNewInstanceName("");
+      // If official (Gupshup), connect immediately
+      if (connectionType === "official" && newInstance) {
+        const response = await supabase.functions.invoke("gupshup-connect", {
+          body: {
+            instanceId: newInstance.id,
+            workspaceId: workspace?.id,
+            gupshupApiKey: gupshupApiKey.trim(),
+            gupshupAppId: gupshupAppId.trim(),
+            phoneNumber: gupshupPhoneNumber.trim() || null,
+          },
+        });
+
+        if (response.error) {
+          throw new Error(response.error.message || "Erro ao conectar Gupshup");
+        }
+
+        if (response.data?.error) {
+          throw new Error(response.data.error);
+        }
+
+        toast.success("Instância criada e conectada via Gupshup!");
+      } else {
+        toast.success("Instância criada! Clique em Conectar para escanear o QR Code.");
+      }
+
+      resetForm();
       setDialogOpen(false);
       fetchInstances();
     } catch (error) {
       console.error("Error creating instance:", error);
-      toast.error("Erro ao criar instância");
+      toast.error(error instanceof Error ? error.message : "Erro ao criar instância");
     } finally {
       setCreating(false);
     }
@@ -162,6 +213,12 @@ export default function Instances() {
   const connectInstance = async (instance: Instance) => {
     if (!workspace) {
       toast.error("Selecione um workspace");
+      return;
+    }
+
+    // If it's an official (Gupshup) instance, show settings dialog instead
+    if (instance.connection_type === "official") {
+      toast.info("Para reconectar, edite as configurações da instância.");
       return;
     }
 
@@ -234,6 +291,23 @@ export default function Instances() {
     );
   };
 
+  const getConnectionTypeBadge = (connectionType?: string) => {
+    if (connectionType === "official") {
+      return (
+        <Badge variant="outline" className="gap-1 text-green-600 border-green-200 bg-green-50">
+          <Shield className="h-3 w-3" />
+          Oficial
+        </Badge>
+      );
+    }
+    return (
+      <Badge variant="outline" className="gap-1 text-blue-600 border-blue-200 bg-blue-50">
+        <QrCode className="h-3 w-3" />
+        WABA
+      </Badge>
+    );
+  };
+
   return (
     <AppLayout title="Instâncias WhatsApp">
       <div className="p-6 space-y-6">
@@ -245,21 +319,25 @@ export default function Instances() {
               Conecte e gerencie seus números do WhatsApp Business.
             </p>
           </div>
-          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+          <Dialog open={dialogOpen} onOpenChange={(open) => {
+            setDialogOpen(open);
+            if (!open) resetForm();
+          }}>
             <DialogTrigger asChild>
               <Button className="gap-2">
                 <Plus className="h-4 w-4" />
                 Nova Instância
               </Button>
             </DialogTrigger>
-            <DialogContent>
+            <DialogContent className="max-w-lg">
               <DialogHeader>
                 <DialogTitle>Criar Nova Instância</DialogTitle>
                 <DialogDescription>
-                  Dê um nome para identificar este número do WhatsApp.
+                  Configure seu número do WhatsApp Business.
                 </DialogDescription>
               </DialogHeader>
-              <div className="space-y-4 py-4">
+              <div className="space-y-6 py-4">
+                {/* Instance Name */}
                 <div className="space-y-2">
                   <Label htmlFor="instance-name">Nome da Instância</Label>
                   <Input
@@ -270,6 +348,85 @@ export default function Instances() {
                     disabled={creating}
                   />
                 </div>
+
+                {/* Connection Type Selector */}
+                <div className="space-y-3">
+                  <Label>Tipo de Conexão</Label>
+                  <RadioGroup 
+                    value={connectionType} 
+                    onValueChange={(v) => setConnectionType(v as ConnectionType)}
+                    className="space-y-3"
+                  >
+                    <div className="flex items-start space-x-3 p-3 border rounded-lg hover:bg-muted/50 transition-colors">
+                      <RadioGroupItem value="waba" id="waba" className="mt-1" />
+                      <Label htmlFor="waba" className="flex-1 cursor-pointer">
+                        <div className="flex items-center gap-2 font-medium">
+                          <QrCode className="h-4 w-4 text-blue-500" />
+                          WhatsApp WABA (QR Code)
+                        </div>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          Conecte escaneando QR Code. Requer W-API configurado na integração.
+                        </p>
+                      </Label>
+                    </div>
+                    <div className="flex items-start space-x-3 p-3 border rounded-lg hover:bg-muted/50 transition-colors">
+                      <RadioGroupItem value="official" id="official" className="mt-1" />
+                      <Label htmlFor="official" className="flex-1 cursor-pointer">
+                        <div className="flex items-center gap-2 font-medium">
+                          <Shield className="h-4 w-4 text-green-500" />
+                          WhatsApp Oficial (Gupshup)
+                        </div>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          API oficial da Meta via Gupshup. Requer conta verificada no Meta Business.
+                        </p>
+                      </Label>
+                    </div>
+                  </RadioGroup>
+                </div>
+
+                {/* Gupshup Fields (only shown when official is selected) */}
+                {connectionType === "official" && (
+                  <div className="space-y-4 p-4 bg-muted/30 rounded-lg border">
+                    <div className="flex items-center gap-2 text-sm font-medium text-green-600">
+                      <Shield className="h-4 w-4" />
+                      Configuração Gupshup
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="gupshup-api-key">API Key *</Label>
+                      <Input
+                        id="gupshup-api-key"
+                        type="password"
+                        placeholder="Sua API Key do Gupshup"
+                        value={gupshupApiKey}
+                        onChange={(e) => setGupshupApiKey(e.target.value)}
+                        disabled={creating}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="gupshup-app-id">App ID / Source Name *</Label>
+                      <Input
+                        id="gupshup-app-id"
+                        placeholder="Nome do app no Gupshup"
+                        value={gupshupAppId}
+                        onChange={(e) => setGupshupAppId(e.target.value)}
+                        disabled={creating}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="gupshup-phone">Número do WhatsApp (opcional)</Label>
+                      <Input
+                        id="gupshup-phone"
+                        placeholder="5511999999999"
+                        value={gupshupPhoneNumber}
+                        onChange={(e) => setGupshupPhoneNumber(e.target.value)}
+                        disabled={creating}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Formato internacional sem + ou espaços
+                      </p>
+                    </div>
+                  </div>
+                )}
               </div>
               <DialogFooter>
                 <Button variant="outline" onClick={() => setDialogOpen(false)}>
@@ -279,10 +436,10 @@ export default function Instances() {
                   {creating ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Criando...
+                      {connectionType === "official" ? "Conectando..." : "Criando..."}
                     </>
                   ) : (
-                    "Criar Instância"
+                    connectionType === "official" ? "Criar e Conectar" : "Criar Instância"
                   )}
                 </Button>
               </DialogFooter>
@@ -410,6 +567,10 @@ export default function Instances() {
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">Tipo</span>
+                    {getConnectionTypeBadge(instance.connection_type)}
+                  </div>
+                  <div className="flex items-center justify-between">
                     <span className="text-sm text-muted-foreground">Status</span>
                     {getStatusBadge(instance.status)}
                   </div>
@@ -424,6 +585,16 @@ export default function Instances() {
                       >
                         <Wifi className="h-4 w-4" />
                         Conectado
+                      </Button>
+                    ) : instance.connection_type === "official" ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="flex-1 gap-2"
+                        disabled
+                      >
+                        <Shield className="h-4 w-4" />
+                        Verificar Conexão
                       </Button>
                     ) : (
                       <Button
@@ -466,13 +637,13 @@ export default function Instances() {
           </CardHeader>
           <CardContent className="text-sm text-muted-foreground space-y-2">
             <p>
-              • Cada instância representa um número do WhatsApp Business conectado.
+              • <strong>WABA (QR Code)</strong>: Conecta via W-API escaneando QR Code. Requer configuração prévia em Integrações.
             </p>
             <p>
-              • Configure a W-API em Integrações antes de conectar.
+              • <strong>Oficial (Gupshup)</strong>: Usa a API oficial do WhatsApp via Gupshup. Requer conta verificada no Meta Business.
             </p>
             <p>
-              • As mensagens recebidas aparecerão na página de Conversas.
+              • As mensagens recebidas aparecerão na página de Conversas independente do tipo de conexão.
             </p>
           </CardContent>
         </Card>
