@@ -24,6 +24,7 @@ import Playground from "./pages/Playground";
 import Bitrix24Setup from "./pages/Bitrix24Setup";
 import License from "./pages/License";
 import Privacy from "./pages/Privacy";
+import Docs from "./pages/Docs";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -46,6 +47,7 @@ const App = () => (
             <Route path="/bitrix24-setup" element={<Bitrix24Setup />} />
             <Route path="/license" element={<License />} />
             <Route path="/privacy" element={<Privacy />} />
+            <Route path="/docs" element={<Docs />} />
             
             {/* Rotas protegidas com autenticação */}
             <Route

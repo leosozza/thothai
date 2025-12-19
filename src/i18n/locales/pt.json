@@ -14,7 +14,8 @@
     "termsOfUse": "Termos de Uso",
     "privacy": "Privacidade",
     "contact": "Contato",
-    "language": "Idioma"
+    "language": "Idioma",
+    "documentation": "Documentação"
   },
   "landing": {
     "badge": "Agente Inteligente de Atendimento",
@@ -35,6 +36,149 @@
       "automations": {
         "title": "Automações",
         "description": "Crie fluxos visuais para automatizar respostas e ações de atendimento."
+      }
+    }
+  },
+  "docs": {
+    "title": "Documentação",
+    "subtitle": "Guia completo para instalar, configurar e usar a integração Thoth.AI WhatsApp com Bitrix24",
+    "lastUpdated": "Última atualização",
+    "quickStart": {
+      "installation": {
+        "title": "Instalação",
+        "description": "Instale o app no seu Bitrix24 em minutos"
+      },
+      "configuration": {
+        "title": "Configuração",
+        "description": "Configure os Canais Abertos e conecte seu WhatsApp"
+      },
+      "messaging": {
+        "title": "Mensagens",
+        "description": "Envie e receba mensagens pelo Contact Center"
+      },
+      "ai": {
+        "title": "Automação IA",
+        "description": "Configure o bot para respostas automáticas"
+      }
+    },
+    "sections": {
+      "installation": {
+        "title": "Instalação",
+        "requirements": {
+          "title": "Requisitos",
+          "items": [
+            "Conta ativa no Bitrix24 (qualquer plano com Contact Center)",
+            "Acesso de administrador ao Bitrix24",
+            "Número WhatsApp Business ativo",
+            "Conexão estável com a internet"
+          ]
+        },
+        "steps": {
+          "title": "Passos da Instalação",
+          "items": [
+            "Acesse o Marketplace do Bitrix24 e pesquise por 'Thoth.AI WhatsApp'",
+            "Clique em 'Instalar' e autorize as permissões solicitadas",
+            "Aguarde a instalação ser concluída (geralmente menos de 1 minuto)",
+            "Acesse o app pelo menu lateral ou pelo Contact Center",
+            "Siga o assistente de configuração inicial para conectar seu primeiro número WhatsApp"
+          ]
+        }
+      },
+      "whatsapp": {
+        "title": "Conexão WhatsApp",
+        "description": "Conecte seu WhatsApp Business para começar a receber e enviar mensagens pelo Bitrix24.",
+        "steps": [
+          "No painel Thoth.AI, clique em 'Adicionar Instância'",
+          "Escolha o tipo de conexão: QR Code ou WhatsApp Business API",
+          "Para QR Code: Escaneie o código com o app WhatsApp do seu celular",
+          "Para Business API: Insira suas credenciais Gupshup (App ID e API Key)",
+          "Aguarde a confirmação da conexão (status verde)",
+          "Seu número está pronto para ser vinculado a um Canal Aberto"
+        ]
+      },
+      "openChannels": {
+        "title": "Configuração de Canais Abertos",
+        "description": "Configure o conector de Canal Aberto para rotear mensagens para sua equipe de atendimento.",
+        "steps": [
+          "Acesse 'Contact Center' > 'Canais Abertos' no Bitrix24",
+          "Crie um novo canal ou edite um existente",
+          "Na seção 'Conectores', encontre 'Thoth WhatsApp'",
+          "Clique em 'Conectar' e selecione a instância WhatsApp para vincular",
+          "Configure horário de atendimento, mensagem de boas-vindas e regras de roteamento",
+          "Salve as configurações e teste enviando uma mensagem para seu WhatsApp"
+        ]
+      },
+      "aiBot": {
+        "title": "Configuração do Bot IA",
+        "description": "Configure o assistente de IA para responder automaticamente aos clientes quando a equipe não está disponível ou para fazer a triagem inicial.",
+        "features": {
+          "title": "Recursos Disponíveis",
+          "items": [
+            "Respostas automáticas baseadas em base de conhecimento",
+            "Compreensão de linguagem natural com IA",
+            "Persona personalizada com nome e personalidade",
+            "Escalonamento automático para agente humano",
+            "Suporte multi-idioma",
+            "Atraso de resposta configurável"
+          ]
+        },
+        "setup": {
+          "title": "Passos de Configuração",
+          "steps": [
+            "Acesse a seção 'Personas' no painel Thoth.AI",
+            "Crie uma nova persona ou edite a padrão",
+            "Defina o nome, descrição e instruções do sistema",
+            "Vá para 'Treinamento' para adicionar documentos e FAQs",
+            "Em 'Instâncias', ative o bot para a instância desejada",
+            "Configure a temperatura (criatividade) e mensagem de boas-vindas",
+            "Teste o bot enviando mensagens para seu WhatsApp"
+          ]
+        }
+      },
+      "contactSync": {
+        "title": "Sincronização de Contatos",
+        "description": "Mantenha seus contatos sincronizados entre WhatsApp e Bitrix24 CRM.",
+        "features": [
+          "Sincronização automática de novos contatos",
+          "Atualização bidirecional de dados de contato",
+          "Importação de nome e foto de perfil do WhatsApp",
+          "Vinculação com contatos existentes do CRM por telefone",
+          "Histórico de conversas no cartão do contato"
+        ]
+      },
+      "troubleshooting": {
+        "title": "Solução de Problemas",
+        "items": [
+          {
+            "question": "QR Code não aparece ou expira rapidamente",
+            "answer": "Verifique sua conexão com a internet. Se o problema persistir, desconecte de todas as sessões do WhatsApp Web e tente novamente. Certifique-se de que o WhatsApp do celular está atualizado."
+          },
+          {
+            "question": "Mensagens não estão chegando no Bitrix24",
+            "answer": "Verifique se a instância WhatsApp está conectada (status verde). Confira se o conector do Canal Aberto está configurado corretamente. Certifique-se de que o número WhatsApp está vinculado a uma linha ativa."
+          },
+          {
+            "question": "Mensagens enviadas do Bitrix24 não são entregues",
+            "answer": "Verifique se o número de telefone inclui o código do país (ex: +55). Verifique se o contato não bloqueou seu número. Para Business API, verifique se você tem créditos suficientes."
+          },
+          {
+            "question": "Bot IA não está respondendo",
+            "answer": "Verifique se o bot está ativado nas configurações da instância. Verifique se há documentos treinados na seção 'Treinamento'. Certifique-se de que o modo de atendimento está como 'Bot' ou 'Híbrido'."
+          },
+          {
+            "question": "Conexão foi perdida",
+            "answer": "Para conexões por QR Code, o vínculo pode ser perdido se o celular ficar offline por um período prolongado. Reconecte usando um novo QR Code. Para Business API, verifique se suas credenciais de API ainda são válidas."
+          }
+        ]
+      },
+      "support": {
+        "title": "Precisa de mais ajuda?",
+        "description": "Nossa equipe de suporte está disponível para ajudar com qualquer dúvida ou problema.",
+        "email": "E-mail",
+        "hours": "Horário de Atendimento",
+        "hoursValue": "Segunda a Sexta, 9h às 18h (Horário de Brasília)",
+        "response": "Tempo Médio de Resposta",
+        "responseValue": "Até 24 horas úteis"
       }
     }
   },
