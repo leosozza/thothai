@@ -208,6 +208,7 @@ serve(async (req) => {
     const { 
       integration_id,
       workspace_id,
+      instance_id,
       contact_phone, 
       contact_name, 
       contact_picture,
@@ -218,7 +219,7 @@ serve(async (req) => {
       is_first_message,
     } = await req.json();
 
-    console.log("Bitrix24 send - sending message to Bitrix24:", { contact_phone, message, create_lead });
+    console.log("Bitrix24 send - sending message to Bitrix24:", { contact_phone, message, create_lead, instance_id });
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -255,8 +256,35 @@ serve(async (req) => {
     const config = integration.config as Record<string, unknown>;
     let webhookUrl = config?.webhook_url as string;
     const connectorId = config?.connector_id as string;
-    const lineId = config?.line_id as string || "1";
     const isOAuth = !!config?.access_token;
+
+    // Fetch line_id from bitrix_channel_mappings based on instance
+    let lineId = "1"; // default fallback
+    
+    if (instance_id) {
+      const { data: channelMapping } = await supabase
+        .from("bitrix_channel_mappings")
+        .select("line_id, line_name")
+        .eq("integration_id", integration.id)
+        .eq("instance_id", instance_id)
+        .eq("is_active", true)
+        .maybeSingle();
+      
+      if (channelMapping?.line_id) {
+        lineId = channelMapping.line_id.toString();
+        console.log(`Using line_id ${lineId} (${channelMapping.line_name}) from channel mapping`);
+      } else {
+        // Fallback to config.line_id
+        lineId = (config?.line_id as string) || "1";
+        console.log(`No channel mapping found for instance ${instance_id}, using config line_id: ${lineId}`);
+      }
+    } else {
+      // No instance_id provided, use config line_id
+      lineId = (config?.line_id as string) || "1";
+      console.log(`No instance_id provided, using config line_id: ${lineId}`);
+    }
+    
+    console.log("Final line_id to be used:", lineId);
     let accessToken: string | null = null;
 
     // For OAuth-based integrations, ensure we have a valid access token
