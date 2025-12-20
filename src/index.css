@@ -3,48 +3,49 @@
 @tailwind utilities;
 
 /* 
-  THOTH.AI DESIGN SYSTEM
-  Inspired by Egyptian wisdom - Dark, elegant, with gold accents
+  THOTH24 DESIGN SYSTEM
+  Dark theme with emerald/teal accents
+  Glassmorphism and glow effects
   All colors in HSL format
 */
 
 @layer base {
   :root {
-    /* Light theme - Clean and professional */
-    --background: 220 20% 97%;
-    --foreground: 220 30% 10%;
+    /* Default to dark emerald theme */
+    --background: 180 25% 4%;
+    --foreground: 0 0% 98%;
 
-    --card: 0 0% 100%;
-    --card-foreground: 220 30% 10%;
+    --card: 180 20% 7%;
+    --card-foreground: 0 0% 98%;
 
-    --popover: 0 0% 100%;
-    --popover-foreground: 220 30% 10%;
+    --popover: 180 20% 7%;
+    --popover-foreground: 0 0% 98%;
 
-    /* Gold accent - thoth.AI signature */
-    --primary: 42 85% 50%;
-    --primary-foreground: 220 30% 10%;
+    /* Emerald/Teal accent - THOTH24 signature */
+    --primary: 160 100% 40%;
+    --primary-foreground: 180 25% 4%;
 
-    --secondary: 220 20% 92%;
-    --secondary-foreground: 220 30% 20%;
+    --secondary: 180 15% 12%;
+    --secondary-foreground: 0 0% 95%;
 
-    --muted: 220 15% 94%;
-    --muted-foreground: 220 15% 45%;
+    --muted: 180 12% 14%;
+    --muted-foreground: 180 8% 55%;
 
-    --accent: 220 60% 95%;
-    --accent-foreground: 220 60% 35%;
+    --accent: 180 20% 12%;
+    --accent-foreground: 0 0% 98%;
 
-    --destructive: 0 72% 51%;
+    --destructive: 0 62% 45%;
     --destructive-foreground: 0 0% 100%;
 
-    --success: 142 70% 40%;
+    --success: 160 70% 42%;
     --success-foreground: 0 0% 100%;
 
     --warning: 38 92% 50%;
-    --warning-foreground: 220 30% 10%;
+    --warning-foreground: 180 25% 4%;
 
-    --border: 220 20% 88%;
-    --input: 220 20% 88%;
-    --ring: 42 85% 50%;
+    --border: 180 15% 15%;
+    --input: 180 15% 15%;
+    --ring: 160 100% 40%;
 
     --radius: 0.75rem;
 
@@ -53,133 +54,74 @@
     --whatsapp-foreground: 0 0% 100%;
 
     /* Status colors */
-    --status-connected: 142 70% 45%;
-    --status-disconnected: 0 72% 51%;
-    --status-pending: 38 92% 50%;
-
-    /* Sidebar - Light */
-    --sidebar-background: 0 0% 100%;
-    --sidebar-foreground: 220 15% 35%;
-    --sidebar-primary: 42 85% 50%;
-    --sidebar-primary-foreground: 220 30% 10%;
-    --sidebar-accent: 220 20% 96%;
-    --sidebar-accent-foreground: 220 30% 15%;
-    --sidebar-border: 220 20% 92%;
-    --sidebar-ring: 42 85% 50%;
-  }
-
-  .dark {
-    /* Dark theme - Egyptian night with gold */
-    --background: 225 25% 8%;
-    --foreground: 220 20% 95%;
-
-    --card: 225 25% 11%;
-    --card-foreground: 220 20% 95%;
-
-    --popover: 225 25% 11%;
-    --popover-foreground: 220 20% 95%;
-
-    /* Gold accent - more vibrant in dark */
-    --primary: 42 90% 55%;
-    --primary-foreground: 225 25% 8%;
-
-    --secondary: 225 20% 18%;
-    --secondary-foreground: 220 20% 90%;
-
-    --muted: 225 20% 15%;
-    --muted-foreground: 220 15% 55%;
-
-    --accent: 225 30% 20%;
-    --accent-foreground: 220 20% 95%;
-
-    --destructive: 0 62% 45%;
-    --destructive-foreground: 0 0% 100%;
-
-    --success: 142 60% 45%;
-    --success-foreground: 0 0% 100%;
-
-    --warning: 38 92% 55%;
-    --warning-foreground: 225 25% 8%;
-
-    --border: 225 20% 18%;
-    --input: 225 20% 18%;
-    --ring: 42 90% 55%;
-
-    /* WhatsApp */
-    --whatsapp: 142 70% 45%;
-    --whatsapp-foreground: 0 0% 100%;
-
-    /* Status colors */
-    --status-connected: 142 60% 50%;
+    --status-connected: 160 70% 45%;
     --status-disconnected: 0 62% 50%;
     --status-pending: 38 92% 55%;
 
-    /* Sidebar - Dark Egyptian */
-    --sidebar-background: 225 30% 6%;
-    --sidebar-foreground: 220 15% 75%;
-    --sidebar-primary: 42 90% 55%;
-    --sidebar-primary-foreground: 225 25% 8%;
-    --sidebar-accent: 225 25% 12%;
-    --sidebar-accent-foreground: 220 20% 95%;
-    --sidebar-border: 225 25% 15%;
-    --sidebar-ring: 42 90% 55%;
-  }
-
-  /* Thoth24 theme - Dark with cyan accent */
-  .thoth24 {
-    --background: 190 30% 5%;
-    --foreground: 0 0% 98%;
-
-    --card: 190 25% 8%;
-    --card-foreground: 0 0% 98%;
-
-    --popover: 190 25% 8%;
-    --popover-foreground: 0 0% 98%;
-
-    /* Cyan accent - Thoth24 signature */
-    --primary: 175 100% 45%;
-    --primary-foreground: 190 30% 5%;
-
-    --secondary: 190 20% 12%;
-    --secondary-foreground: 0 0% 95%;
-
-    --muted: 190 15% 15%;
-    --muted-foreground: 190 10% 55%;
-
-    --accent: 190 25% 15%;
-    --accent-foreground: 0 0% 98%;
-
-    --destructive: 0 62% 45%;
-    --destructive-foreground: 0 0% 100%;
-
-    --success: 142 60% 45%;
-    --success-foreground: 0 0% 100%;
-
-    --warning: 38 92% 55%;
-    --warning-foreground: 190 30% 5%;
-
-    --border: 190 20% 15%;
-    --input: 190 20% 15%;
-    --ring: 175 100% 45%;
-
-    /* WhatsApp */
-    --whatsapp: 142 70% 45%;
-    --whatsapp-foreground: 0 0% 100%;
-
-    /* Status colors */
-    --status-connected: 142 60% 50%;
-    --status-disconnected: 0 62% 50%;
-    --status-pending: 38 92% 55%;
-
-    /* Sidebar - Thoth24 dark */
-    --sidebar-background: 190 35% 4%;
-    --sidebar-foreground: 190 10% 70%;
-    --sidebar-primary: 175 100% 45%;
-    --sidebar-primary-foreground: 190 30% 5%;
-    --sidebar-accent: 190 25% 10%;
+    /* Sidebar - Dark emerald */
+    --sidebar-background: 180 30% 3%;
+    --sidebar-foreground: 180 8% 70%;
+    --sidebar-primary: 160 100% 40%;
+    --sidebar-primary-foreground: 180 25% 4%;
+    --sidebar-accent: 180 20% 8%;
     --sidebar-accent-foreground: 0 0% 98%;
-    --sidebar-border: 190 20% 12%;
-    --sidebar-ring: 175 100% 45%;
+    --sidebar-border: 180 15% 12%;
+    --sidebar-ring: 160 100% 40%;
+
+    /* Glass effect variables */
+    --glass-bg: 180 20% 8% / 0.6;
+    --glass-border: 160 100% 40% / 0.15;
+    --glass-glow: 160 100% 45%;
+  }
+
+  /* Light theme fallback - still uses emerald but lighter */
+  .light {
+    --background: 180 15% 97%;
+    --foreground: 180 25% 10%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 180 25% 10%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 180 25% 10%;
+
+    --primary: 160 85% 35%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 180 15% 92%;
+    --secondary-foreground: 180 25% 20%;
+
+    --muted: 180 12% 94%;
+    --muted-foreground: 180 10% 45%;
+
+    --accent: 180 60% 95%;
+    --accent-foreground: 180 60% 25%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 160 70% 38%;
+    --success-foreground: 0 0% 100%;
+
+    --warning: 38 92% 50%;
+    --warning-foreground: 180 25% 10%;
+
+    --border: 180 15% 88%;
+    --input: 180 15% 88%;
+    --ring: 160 85% 35%;
+
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 180 12% 35%;
+    --sidebar-primary: 160 85% 35%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 180 15% 96%;
+    --sidebar-accent-foreground: 180 25% 15%;
+    --sidebar-border: 180 15% 92%;
+    --sidebar-ring: 160 85% 35%;
+
+    --glass-bg: 0 0% 100% / 0.8;
+    --glass-border: 160 85% 35% / 0.2;
+    --glass-glow: 160 85% 40%;
   }
 }
 
@@ -195,46 +137,104 @@
 }
 
 @layer utilities {
-  .gradient-gold {
-    background: linear-gradient(135deg, hsl(42 90% 55%) 0%, hsl(32 85% 45%) 100%);
+  /* Gradient utilities */
+  .gradient-primary {
+    background: linear-gradient(135deg, hsl(160 100% 45%) 0%, hsl(180 80% 35%) 100%);
   }
 
   .gradient-dark {
-    background: linear-gradient(180deg, hsl(225 25% 11%) 0%, hsl(225 30% 6%) 100%);
+    background: linear-gradient(180deg, hsl(180 25% 7%) 0%, hsl(180 30% 3%) 100%);
   }
 
-  .gradient-cyan {
-    background: linear-gradient(135deg, hsl(175 100% 45%) 0%, hsl(185 90% 35%) 100%);
+  .gradient-radial {
+    background: radial-gradient(ellipse at center, hsl(160 100% 40% / 0.15) 0%, transparent 70%);
   }
 
+  /* Text gradients */
+  .text-gradient-primary {
+    background: linear-gradient(135deg, hsl(160 100% 50%) 0%, hsl(180 90% 40%) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* Legacy gold support */
   .text-gradient-gold {
-    background: linear-gradient(135deg, hsl(42 90% 60%) 0%, hsl(32 85% 50%) 100%);
+    background: linear-gradient(135deg, hsl(160 100% 50%) 0%, hsl(180 90% 40%) 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
   }
 
-  .text-gradient-cyan {
-    background: linear-gradient(135deg, hsl(175 100% 50%) 0%, hsl(185 90% 40%) 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+  /* Glow effects */
+  .glow-primary {
+    box-shadow: 0 0 30px hsl(160 100% 45% / 0.35);
   }
 
+  .glow-primary-sm {
+    box-shadow: 0 0 15px hsl(160 100% 45% / 0.25);
+  }
+
+  .glow-primary-lg {
+    box-shadow: 0 0 50px hsl(160 100% 45% / 0.4);
+  }
+
+  /* Legacy glow support */
   .glow-gold {
-    box-shadow: 0 0 30px hsl(42 90% 55% / 0.3);
+    box-shadow: 0 0 30px hsl(160 100% 45% / 0.35);
   }
 
   .glow-gold-sm {
-    box-shadow: 0 0 15px hsl(42 90% 55% / 0.2);
+    box-shadow: 0 0 15px hsl(160 100% 45% / 0.25);
   }
 
-  .glow-cyan {
-    box-shadow: 0 0 30px hsl(175 100% 45% / 0.3);
+  /* Glassmorphism */
+  .glass {
+    background: hsl(var(--glass-bg));
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid hsl(var(--glass-border));
   }
 
-  .glow-cyan-sm {
-    box-shadow: 0 0 15px hsl(175 100% 45% / 0.2);
+  .glass-card {
+    background: hsl(180 20% 8% / 0.7);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid hsl(160 100% 40% / 0.12);
+    box-shadow: 
+      0 0 0 1px hsl(160 100% 40% / 0.05),
+      0 4px 24px -4px hsl(180 100% 5% / 0.5);
+  }
+
+  .glass-card-hover {
+    @apply glass-card transition-all duration-300;
+  }
+
+  .glass-card-hover:hover {
+    border-color: hsl(160 100% 40% / 0.25);
+    box-shadow: 
+      0 0 0 1px hsl(160 100% 40% / 0.1),
+      0 0 30px -5px hsl(160 100% 45% / 0.2),
+      0 8px 32px -8px hsl(180 100% 5% / 0.6);
+  }
+
+  /* Border glow effect */
+  .border-glow {
+    position: relative;
+  }
+
+  .border-glow::before {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    padding: 1px;
+    background: linear-gradient(135deg, hsl(160 100% 45% / 0.3), transparent 50%, hsl(180 80% 40% / 0.2));
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    pointer-events: none;
   }
 
   /* Custom scrollbar */
@@ -258,12 +258,23 @@
 }
 
 /* Animations */
-@keyframes pulse-gold {
+@keyframes pulse-primary {
   0%, 100% {
-    box-shadow: 0 0 0 0 hsl(42 90% 55% / 0.4);
+    box-shadow: 0 0 0 0 hsl(160 100% 45% / 0.4);
   }
   50% {
-    box-shadow: 0 0 20px 5px hsl(42 90% 55% / 0.2);
+    box-shadow: 0 0 25px 8px hsl(160 100% 45% / 0.15);
+  }
+}
+
+@keyframes glow-pulse {
+  0%, 100% {
+    opacity: 0.5;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.8;
+    transform: scale(1.05);
   }
 }
 
@@ -272,14 +283,43 @@
     transform: translateY(0);
   }
   50% {
-    transform: translateY(-5px);
+    transform: translateY(-8px);
   }
 }
 
-.animate-pulse-gold {
-  animation: pulse-gold 2s ease-in-out infinite;
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.animate-pulse-primary {
+  animation: pulse-primary 2.5s ease-in-out infinite;
+}
+
+.animate-glow-pulse {
+  animation: glow-pulse 3s ease-in-out infinite;
 }
 
 .animate-float {
-  animation: float 3s ease-in-out infinite;
+  animation: float 4s ease-in-out infinite;
+}
+
+.animate-shimmer {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    hsl(160 100% 45% / 0.1) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 3s infinite;
+}
+
+/* Legacy animation support */
+.animate-pulse-gold {
+  animation: pulse-primary 2.5s ease-in-out infinite;
 }
