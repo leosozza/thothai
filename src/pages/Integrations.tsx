@@ -95,15 +95,15 @@ interface ChannelMapping {
 const integrationTypes = [
   {
     type: "wapi",
-    name: "W-API",
-    description: "Conecte ao WhatsApp Business via W-API para enviar e receber mensagens.",
+    name: "WhatsApp QR Code",
+    description: "Configure a conexão do WhatsApp via QR Code para enviar e receber mensagens.",
     icon: MessageSquare,
     color: "bg-green-500",
     fields: [
-      { key: "api_key", label: "API Key", type: "password", placeholder: "Sua chave da W-API" },
-      { key: "instance_id", label: "Instance ID", type: "text", placeholder: "ID da instância W-API" },
+      { key: "api_key", label: "API Key", type: "password", placeholder: "Sua chave de API" },
+      { key: "instance_id", label: "Instance ID", type: "text", placeholder: "ID da instância" },
     ],
-    docs: "https://w-api.io/docs",
+    docs: null,
   },
   {
     type: "openai",

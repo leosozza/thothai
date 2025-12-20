@@ -142,7 +142,7 @@ export default function Instances() {
 
     if (connectionType === "official") {
       if (!gupshupApiKey.trim() || !gupshupAppId.trim()) {
-        toast.error("Preencha a API Key e o App ID do Gupshup");
+        toast.error("Preencha a API Key e o App ID");
         return;
       }
     }
@@ -176,11 +176,11 @@ export default function Instances() {
           throw new Error(response.error.message || "Erro ao conectar Gupshup");
         }
 
-        if (response.data?.error) {
+      if (response.data?.error) {
           throw new Error(response.data.error);
         }
 
-        toast.success("Instância criada e conectada via Gupshup!");
+        toast.success("Instância criada e conectada com sucesso!");
       } else {
         toast.success("Instância criada! Clique em Conectar para escanear o QR Code.");
       }
@@ -291,7 +291,7 @@ export default function Instances() {
     );
   };
 
-  const getConnectionTypeBadge = (connectionType?: string) => {
+const getConnectionTypeBadge = (connectionType?: string) => {
     if (connectionType === "official") {
       return (
         <Badge variant="outline" className="gap-1 text-green-600 border-green-200 bg-green-50">
@@ -303,7 +303,7 @@ export default function Instances() {
     return (
       <Badge variant="outline" className="gap-1 text-blue-600 border-blue-200 bg-blue-50">
         <QrCode className="h-3 w-3" />
-        WABA
+        QR Code
       </Badge>
     );
   };
@@ -362,10 +362,10 @@ export default function Instances() {
                       <Label htmlFor="waba" className="flex-1 cursor-pointer">
                         <div className="flex items-center gap-2 font-medium">
                           <QrCode className="h-4 w-4 text-blue-500" />
-                          WhatsApp WABA (QR Code)
+                          WhatsApp QR Code
                         </div>
                         <p className="text-sm text-muted-foreground mt-1">
-                          Conecte escaneando QR Code. Requer W-API configurado na integração.
+                          Conecte escaneando o QR Code pelo celular.
                         </p>
                       </Label>
                     </div>
@@ -374,10 +374,10 @@ export default function Instances() {
                       <Label htmlFor="official" className="flex-1 cursor-pointer">
                         <div className="flex items-center gap-2 font-medium">
                           <Shield className="h-4 w-4 text-green-500" />
-                          WhatsApp Oficial (Gupshup)
+                          WhatsApp Business Oficial
                         </div>
                         <p className="text-sm text-muted-foreground mt-1">
-                          API oficial da Meta via Gupshup. Requer conta verificada no Meta Business.
+                          API oficial da Meta. Requer conta verificada no Meta Business.
                         </p>
                       </Label>
                     </div>
@@ -389,14 +389,14 @@ export default function Instances() {
                   <div className="space-y-4 p-4 bg-muted/30 rounded-lg border">
                     <div className="flex items-center gap-2 text-sm font-medium text-green-600">
                       <Shield className="h-4 w-4" />
-                      Configuração Gupshup
+                      Configuração da API Oficial
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="gupshup-api-key">API Key *</Label>
                       <Input
                         id="gupshup-api-key"
                         type="password"
-                        placeholder="Sua API Key do Gupshup"
+                        placeholder="Sua API Key"
                         value={gupshupApiKey}
                         onChange={(e) => setGupshupApiKey(e.target.value)}
                         disabled={creating}
@@ -406,7 +406,7 @@ export default function Instances() {
                       <Label htmlFor="gupshup-app-id">App ID / Source Name *</Label>
                       <Input
                         id="gupshup-app-id"
-                        placeholder="Nome do app no Gupshup"
+                        placeholder="Identificador do app"
                         value={gupshupAppId}
                         onChange={(e) => setGupshupAppId(e.target.value)}
                         disabled={creating}
