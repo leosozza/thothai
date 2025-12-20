@@ -377,7 +377,7 @@ const getConnectionTypeBadge = (connectionType?: string) => {
                           WhatsApp Business Oficial
                         </div>
                         <p className="text-sm text-muted-foreground mt-1">
-                          API oficial da Meta. Requer conta verificada no Meta Business.
+                          API oficial da Meta via parceiro certificado. Requer cadastro gratuito.
                         </p>
                       </Label>
                     </div>
@@ -391,12 +391,35 @@ const getConnectionTypeBadge = (connectionType?: string) => {
                       <Shield className="h-4 w-4" />
                       Configuração da API Oficial
                     </div>
+                    
+                    {/* Instructions block */}
+                    <div className="p-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg">
+                      <p className="text-sm text-blue-800 dark:text-blue-200 font-medium mb-2">
+                        📋 Como obter suas credenciais:
+                      </p>
+                      <ol className="text-xs text-blue-700 dark:text-blue-300 space-y-1 list-decimal list-inside">
+                        <li>
+                          Crie uma conta gratuita em{" "}
+                          <a 
+                            href="https://www.gupshup.io" 
+                            target="_blank" 
+                            rel="noopener noreferrer"
+                            className="underline font-medium hover:text-blue-900 dark:hover:text-blue-100"
+                          >
+                            gupshup.io
+                          </a>
+                        </li>
+                        <li>Configure seu número WhatsApp Business no painel</li>
+                        <li>Copie a API Key e App ID gerados</li>
+                      </ol>
+                    </div>
+
                     <div className="space-y-2">
                       <Label htmlFor="gupshup-api-key">API Key *</Label>
                       <Input
                         id="gupshup-api-key"
                         type="password"
-                        placeholder="Sua API Key"
+                        placeholder="Cole sua API Key do painel"
                         value={gupshupApiKey}
                         onChange={(e) => setGupshupApiKey(e.target.value)}
                         disabled={creating}
@@ -406,7 +429,7 @@ const getConnectionTypeBadge = (connectionType?: string) => {
                       <Label htmlFor="gupshup-app-id">App ID / Source Name *</Label>
                       <Input
                         id="gupshup-app-id"
-                        placeholder="Identificador do app"
+                        placeholder="Ex: MyApp ou nome do seu app"
                         value={gupshupAppId}
                         onChange={(e) => setGupshupAppId(e.target.value)}
                         disabled={creating}
