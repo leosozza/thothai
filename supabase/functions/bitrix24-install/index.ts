@@ -640,6 +640,108 @@ serve(async (req) => {
     if (body.PLACEMENT) {
       console.log("=== PLACEMENT EVENT ===");
       console.log("Placement type:", body.PLACEMENT);
+      console.log("Member ID:", memberId, "Domain:", domain);
+      
+      // Check if integration exists for this portal
+      const searchId = memberId || domain;
+      let integration = null;
+      
+      if (searchId) {
+        const { data: existingInt, error: findError } = await supabase
+          .from("integrations")
+          .select("*")
+          .eq("type", "bitrix24")
+          .or(`config->>member_id.eq.${searchId},config->>domain.eq.${searchId}`)
+          .maybeSingle();
+        
+        if (findError) {
+          console.log("Error finding integration:", findError);
+        }
+        integration = existingInt;
+        console.log("Existing integration found:", integration?.id || "none");
+      }
+      
+      // AUTO-CREATE: If no integration exists, create workspace + integration
+      if (!integration && searchId) {
+        console.log("=== AUTO-CREATING WORKSPACE AND INTEGRATION ===");
+        
+        // Try to get actual domain from Bitrix24 API
+        let actualDomain = domain;
+        if (body.AUTH_ID && !actualDomain) {
+          try {
+            const serverEndpoint = body.SERVER_ENDPOINT || `https://oauth.bitrix.info/rest/`;
+            const profileResp = await fetch(`${serverEndpoint}profile?auth=${body.AUTH_ID}`);
+            if (profileResp.ok) {
+              const profileData = await profileResp.json();
+              console.log("Profile data for domain:", JSON.stringify(profileData.result).substring(0, 200));
+            }
+          } catch (e) {
+            console.log("Could not fetch profile for domain:", e);
+          }
+        }
+        
+        // Create workspace
+        const workspaceName = `Bitrix24 - ${actualDomain || searchId}`;
+        const workspaceSlug = `bitrix24-${(searchId).toString().toLowerCase().replace(/[^a-z0-9-]/g, '-').substring(0, 50)}-${Date.now()}`;
+        
+        const { data: newWorkspace, error: wsError } = await supabase
+          .from("workspaces")
+          .insert({
+            name: workspaceName,
+            slug: workspaceSlug,
+            plan: 'free',
+            owner_id: '00000000-0000-0000-0000-000000000000',
+            settings: { 
+              source: 'bitrix24_marketplace_placement',
+              member_id: memberId,
+              domain: actualDomain,
+              created_at: new Date().toISOString()
+            }
+          })
+          .select()
+          .single();
+        
+        if (wsError) {
+          console.error("Error creating workspace:", wsError);
+        } else {
+          console.log("Created workspace:", newWorkspace?.id, newWorkspace?.name);
+        }
+        
+        // Create integration with workspace_id
+        if (newWorkspace?.id) {
+          const configData: Record<string, any> = {
+            member_id: memberId,
+            domain: actualDomain,
+            auth_id: body.AUTH_ID,
+            refresh_id: body.REFRESH_ID,
+            server_endpoint: body.SERVER_ENDPOINT,
+            auth_expires: body.AUTH_EXPIRES,
+            status: body.status,
+            placement: body.PLACEMENT,
+            created_via: 'placement_auto_create',
+            created_at: new Date().toISOString()
+          };
+          
+          const { data: newInt, error: intError } = await supabase
+            .from("integrations")
+            .insert({
+              workspace_id: newWorkspace.id,
+              type: "bitrix24",
+              name: workspaceName,
+              config: configData,
+              is_active: true
+            })
+            .select()
+            .single();
+          
+          if (intError) {
+            console.error("Error creating integration:", intError);
+          } else {
+            console.log("Created integration:", newInt?.id, "with workspace_id:", newInt?.workspace_id);
+            integration = newInt;
+          }
+        }
+      }
       
       // CRITICAL: Do NOT use 302 redirect - return HTML with BX24.installFinish() and JS redirect
       // 302 redirects break the Bitrix24 iframe flow
@@ -665,6 +767,7 @@ serve(async (req) => {
           
           <script>
             console.log('PLACEMENT event HTML loaded');
+            console.log('Integration auto-created: ${integration?.id || "none"}');
             
             if (typeof BX24 !== 'undefined') {
               BX24.init(function() {
