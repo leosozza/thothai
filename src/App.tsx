@@ -26,6 +26,7 @@ import Bitrix24App from "./pages/Bitrix24App";
 import License from "./pages/License";
 import Privacy from "./pages/Privacy";
 import Docs from "./pages/Docs";
+import GenerateLogo from "./pages/GenerateLogo";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -50,6 +51,7 @@ const App = () => (
             <Route path="/license" element={<License />} />
             <Route path="/privacy" element={<Privacy />} />
             <Route path="/docs" element={<Docs />} />
+            <Route path="/generate-logo" element={<GenerateLogo />} />
             
             {/* Rotas protegidas com autenticação */}
             <Route
