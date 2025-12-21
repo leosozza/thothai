@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { CheckCircle, Loader2, MessageSquare, Phone, AlertCircle, RefreshCw, Zap, XCircle } from "lucide-react";
 import { toast } from "sonner";
+import type { BX24Result, BX24AppInfo } from "@/types/bitrix24";
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 
@@ -69,12 +70,12 @@ export default function Bitrix24Setup() {
 
   const initBitrix24SDK = () => {
     try {
-      // @ts-ignore - Bitrix24 JS SDK
+      // @ts-expect-error - Bitrix24 JS SDK types are defined but window.BX24 may not be loaded yet
       if (window.BX24) {
-        // @ts-ignore
+        // @ts-expect-error - window.BX24 is checked above
         window.BX24.init(() => {
-          // @ts-ignore
-          window.BX24.callMethod("app.info", {}, (result: any) => {
+          // @ts-expect-error - window.BX24 is checked above
+          window.BX24.callMethod<BX24AppInfo>("app.info", {}, (result: BX24Result<BX24AppInfo>) => {
             const appInfo = result.data();
             if (appInfo?.member_id) setMemberId(appInfo.member_id);
             if (appInfo?.DOMAIN) setDomain(appInfo.DOMAIN);
@@ -190,8 +191,9 @@ export default function Bitrix24Setup() {
           setStep("error");
         }
       }
-    } catch (err: any) {
-      toast.error(err.message || "Erro ao validar token");
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Erro ao validar token";
+      toast.error(errorMessage);
     } finally {
       setValidatingToken(false);
     }
@@ -244,9 +246,10 @@ export default function Bitrix24Setup() {
       } else {
         throw new Error(data?.error || data?.message || "Erro na configuração");
       }
-    } catch (err: any) {
+    } catch (err) {
       console.error("Error in auto setup:", err);
-      toast.error(err.message || "Erro na configuração automática");
+      const errorMessage = err instanceof Error ? err.message : "Erro na configuração automática";
+      toast.error(errorMessage);
       setStep("selecting");
     } finally {
       setConnecting(false);
