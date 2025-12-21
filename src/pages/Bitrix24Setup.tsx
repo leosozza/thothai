@@ -79,6 +79,16 @@ const [loading, setLoading] = useState(true);
   const [cleaningConnectors, setCleaningConnectors] = useState(false);
   const [registering, setRegistering] = useState(false);
   const [reconfiguring, setReconfiguring] = useState(false);
+  
+  // Connector status check
+  const [checkingStatus, setCheckingStatus] = useState(false);
+  const [connectorStatus, setConnectorStatus] = useState<{
+    active: boolean;
+    registered: boolean;
+    connection: boolean;
+    line_id: number;
+    error?: string;
+  } | null>(null);
 
   useEffect(() => {
     // Extract params from URL (provided by Bitrix24 iframe)
@@ -617,6 +627,63 @@ const [loading, setLoading] = useState(true);
     }
   };
 
+  // Check connector status on Bitrix24
+  const handleCheckConnectorStatus = async () => {
+    if (!integrationId && !status?.integration_id) {
+      toast.error("Integração não encontrada");
+      return;
+    }
+
+    try {
+      setCheckingStatus(true);
+
+      const response = await fetch(
+        `${SUPABASE_URL}/functions/v1/bitrix24-webhook`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            action: "check_connector_status",
+            integration_id: integrationId || status?.integration_id,
+            line_id: 2, // Check LINE 2 where "Thoth whatsapp" is configured
+          }),
+        }
+      );
+
+      const data = await response.json();
+      console.log("Connector status check result:", data);
+
+      if (!response.ok) {
+        throw new Error(data?.error || "Erro ao verificar status");
+      }
+
+      if (data?.success) {
+        setConnectorStatus({
+          active: data.status?.active || false,
+          registered: data.status?.registered || false,
+          connection: data.status?.connection || false,
+          line_id: data.line_id,
+          error: data.status?.error
+        });
+        
+        if (data.status?.active) {
+          toast.success("Conector está ativo e funcionando!");
+        } else {
+          toast.warning("Conector NÃO está ativo. Clique em 'Reconfigurar' para corrigir.");
+        }
+      } else {
+        throw new Error(data?.error || "Erro ao verificar status");
+      }
+    } catch (err: any) {
+      console.error("Error checking connector status:", err);
+      toast.error(err.message || "Erro ao verificar status");
+    } finally {
+      setCheckingStatus(false);
+    }
+  };
+
   const handleRegisterConnector = async () => {
     if (!selectedInstance) {
       toast.error("Selecione uma instância WhatsApp");
@@ -1079,53 +1146,128 @@ const [loading, setLoading] = useState(true);
           </Card>
         )}
 
-        {/* Clean Connectors Button - Mostrar quando tem integração OAuth */}
+        {/* Connector Status Check & Maintenance */}
         {(tokenValidated || status?.found) && (
           <Card className="border-amber-500/30">
-            <CardContent className="pt-6 space-y-3">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Plug className="h-5 w-5" />
+                Diagnóstico do Conector
+              </CardTitle>
+              <CardDescription>
+                Verifique e corrija o status do conector WhatsApp no Bitrix24
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {/* Status Check Button */}
               <Button
                 variant="outline"
                 className="w-full"
-                onClick={handleReconfigureConnector}
-                disabled={reconfiguring}
+                onClick={handleCheckConnectorStatus}
+                disabled={checkingStatus}
               >
-                {reconfiguring ? (
+                {checkingStatus ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Reconfigurando conector...
+                    Verificando status...
                   </>
                 ) : (
                   <>
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                    Reconfigurar Conector (Reset Completo)
+                    <TestTube className="h-4 w-4 mr-2" />
+                    Verificar Status do Conector
                   </>
                 )}
               </Button>
-              <p className="text-xs text-muted-foreground text-center">
-                Remove e recria o conector com URLs limpas e eventos revinculados na LINE 2
-              </p>
               
-              <Button
-                variant="outline"
-                className="w-full border-destructive/50 text-destructive hover:bg-destructive/10"
-                onClick={handleCleanConnectors}
-                disabled={cleaningConnectors}
-              >
-                {cleaningConnectors ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Limpando conectores...
-                  </>
-                ) : (
-                  <>
-                    <Trash2 className="h-4 w-4 mr-2" />
-                    Limpar Conectores Duplicados
-                  </>
-                )}
-              </Button>
-              <p className="text-xs text-muted-foreground text-center">
-                Remove todos os conectores "Thoth WhatsApp" do Contact Center
-              </p>
+              {/* Status Display */}
+              {connectorStatus && (
+                <div className={`p-3 rounded-lg border ${
+                  connectorStatus.active 
+                    ? "bg-green-500/10 border-green-500/30" 
+                    : "bg-destructive/10 border-destructive/30"
+                }`}>
+                  <div className="flex items-center gap-2 mb-2">
+                    {connectorStatus.active ? (
+                      <CheckCircle className="h-4 w-4 text-green-500" />
+                    ) : (
+                      <XCircle className="h-4 w-4 text-destructive" />
+                    )}
+                    <span className={`font-medium ${connectorStatus.active ? "text-green-600" : "text-destructive"}`}>
+                      {connectorStatus.active ? "Conector Ativo" : "Conector Inativo"}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="flex items-center gap-1">
+                      <span className="text-muted-foreground">LINE:</span>
+                      <span className="font-mono">{connectorStatus.line_id}</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-muted-foreground">Registrado:</span>
+                      <span>{connectorStatus.registered ? "✓" : "✗"}</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <span className="text-muted-foreground">Conexão:</span>
+                      <span>{connectorStatus.connection ? "✓" : "✗"}</span>
+                    </div>
+                    {connectorStatus.error && (
+                      <div className="col-span-2 text-destructive">
+                        Erro: {connectorStatus.error}
+                      </div>
+                    )}
+                  </div>
+                  {!connectorStatus.active && (
+                    <p className="text-xs text-muted-foreground mt-2 pt-2 border-t">
+                      O conector não está ativo. Clique em "Reconfigurar Conector" para corrigir.
+                    </p>
+                  )}
+                </div>
+              )}
+              
+              <div className="border-t pt-3 mt-3 space-y-3">
+                <Button
+                  variant="outline"
+                  className="w-full"
+                  onClick={handleReconfigureConnector}
+                  disabled={reconfiguring}
+                >
+                  {reconfiguring ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Reconfigurando conector...
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="h-4 w-4 mr-2" />
+                      Reconfigurar Conector (Reset Completo)
+                    </>
+                  )}
+                </Button>
+                <p className="text-xs text-muted-foreground text-center">
+                  Remove e recria o conector com URLs limpas e eventos revinculados na LINE 2
+                </p>
+                
+                <Button
+                  variant="outline"
+                  className="w-full border-destructive/50 text-destructive hover:bg-destructive/10"
+                  onClick={handleCleanConnectors}
+                  disabled={cleaningConnectors}
+                >
+                  {cleaningConnectors ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Limpando conectores...
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="h-4 w-4 mr-2" />
+                      Limpar Conectores Duplicados
+                    </>
+                  )}
+                </Button>
+                <p className="text-xs text-muted-foreground text-center">
+                  Remove todos os conectores "Thoth WhatsApp" do Contact Center
+                </p>
+              </div>
             </CardContent>
           </Card>
         )}
