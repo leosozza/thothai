@@ -357,8 +357,14 @@ serve(async (req) => {
       request_method: req.method
     });
 
-    // Parse PLACEMENT_OPTIONS
-    let options: { LINE?: number; ACTIVE_STATUS?: number; CONNECTOR?: string } = {};
+    // Parse PLACEMENT_OPTIONS - includes REGISTER_STATUS and CONNECTION_STATUS from Bitrix24
+    let options: { 
+      LINE?: number; 
+      ACTIVE_STATUS?: number; 
+      CONNECTOR?: string;
+      REGISTER_STATUS?: boolean;
+      CONNECTION_STATUS?: boolean;
+    } = {};
     if (typeof body.PLACEMENT_OPTIONS === "string") {
       try {
         options = JSON.parse(body.PLACEMENT_OPTIONS);
@@ -378,6 +384,16 @@ serve(async (req) => {
     const lineId = options.LINE || 1;
     const activeStatus = options.ACTIVE_STATUS ?? 1;
     const connectorId = options.CONNECTOR || "thoth_whatsapp";
+    
+    // CRITICAL: These values come from Bitrix24 and tell us the REAL status
+    const bitrixRegisterStatus = options.REGISTER_STATUS ?? false;
+    const bitrixConnectionStatus = options.CONNECTION_STATUS ?? false;
+    
+    logger.info("Bitrix24 reports connector status", {
+      register_status: bitrixRegisterStatus,
+      connection_status: bitrixConnectionStatus,
+      line_id: lineId
+    });
 
     // Find integration
     let integration = null;
@@ -553,7 +569,7 @@ serve(async (req) => {
     const config = integration.config || {};
     const eventsUrl = `${supabaseUrl}/functions/v1/bitrix24-events`;
 
-    // Check if connector is already fully configured
+    // Check if connector is already fully configured IN OUR DATABASE
     const isFullyConfigured = integration.workspace_id && 
                               config.connector_configured_at && 
                               config.activated_line_id;
@@ -563,13 +579,116 @@ serve(async (req) => {
       connector_configured_at: config.connector_configured_at,
       activated_line_id: config.activated_line_id,
       is_fully_configured: isFullyConfigured,
+      bitrix_register_status: bitrixRegisterStatus,
+      bitrix_connection_status: bitrixConnectionStatus,
       placement
     });
 
-    // If already fully configured and this is a status check, return "successfully"
-    // Bitrix24 expects "successfully" (plain text) to mark connector as ready
+    // CRITICAL: Even if our database says "configured", check Bitrix24's REAL status
+    // If Bitrix24 says REGISTER_STATUS=false or CONNECTION_STATUS=false, we MUST register/activate
+    const needsRegistration = !bitrixRegisterStatus || !bitrixConnectionStatus;
+    
+    if (needsRegistration && integration.workspace_id) {
+      logger.info("Bitrix24 reports connector NOT registered/connected, forcing registration...", {
+        bitrix_register_status: bitrixRegisterStatus,
+        bitrix_connection_status: bitrixConnectionStatus
+      });
+      
+      const accessToken = authId || await refreshBitrixToken(integration, supabase, logger);
+      const apiUrl = domain ? `https://${domain}/rest/` : `https://${config.domain}/rest/`;
+      
+      if (accessToken && apiUrl) {
+        try {
+          // 1. REGISTER the connector
+          logger.info("Registering connector in Bitrix24...");
+          const iconUrl = `${supabaseUrl}/storage/v1/object/public/assets/thoth-whatsapp-icon.png`;
+          const registerResult = await fetch(`${apiUrl}imconnector.register?auth=${accessToken}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              ID: connectorId,
+              NAME: "Thoth WhatsApp",
+              ICON: { DATA_IMAGE: iconUrl },
+              PLACEMENT_HANDLER: `${supabaseUrl}/functions/v1/bitrix24-connector-settings`,
+            }),
+          });
+          const registerData = await registerResult.json();
+          logger.apiResponse(`${apiUrl}imconnector.register`, registerResult.status, registerData);
+          
+          // 2. ACTIVATE the connector
+          logger.info("Activating connector...");
+          const activateResult = await fetch(`${apiUrl}imconnector.activate?auth=${accessToken}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              CONNECTOR: connectorId,
+              LINE: lineId,
+              ACTIVE: 1,
+            }),
+          });
+          const activateData = await activateResult.json();
+          logger.apiResponse(`${apiUrl}imconnector.activate`, activateResult.status, activateData);
+          
+          // 3. SET connector data
+          logger.info("Setting connector data...");
+          const dataSetResult = await fetch(`${apiUrl}imconnector.connector.data.set?auth=${accessToken}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              CONNECTOR: connectorId,
+              LINE: lineId,
+              DATA: {
+                id: `${connectorId}_line_${lineId}`,
+                url: eventsUrl,
+                url_im: eventsUrl,
+                name: "Thoth WhatsApp"
+              }
+            }),
+          });
+          const dataSetData = await dataSetResult.json();
+          logger.apiResponse(`${apiUrl}imconnector.connector.data.set`, dataSetResult.status, dataSetData);
+          
+          // 4. Update our database
+          await supabase
+            .from("integrations")
+            .update({
+              config: {
+                ...config,
+                registered: true,
+                registered_at: new Date().toISOString(),
+                connector_id: connectorId,
+                line_id: lineId,
+                activated_line_id: lineId,
+                connector_active: true,
+                connector_configured_at: new Date().toISOString(),
+                activation_verified: true,
+              },
+              updated_at: new Date().toISOString()
+            })
+            .eq("id", integration.id);
+          
+          logger.info("Connector registration and activation complete!");
+          
+        } catch (error) {
+          logger.error("Error during forced registration", { error: error instanceof Error ? error.message : "Unknown" });
+        }
+      }
+      
+      // NOW return "successfully" after registration
+      logger.info("Returning 'successfully' after registration");
+      await logger.flush();
+      return new Response("successfully", {
+        status: 200,
+        headers: { 
+          ...corsHeaders, 
+          "Content-Type": "text/plain; charset=utf-8" 
+        }
+      });
+    }
+
+    // If already fully configured AND Bitrix24 confirms it, return "successfully"
     if (isFullyConfigured && (placement === "SETTING_CONNECTOR" || !placement)) {
-      logger.info("Connector already configured, returning 'successfully'");
+      logger.info("Connector already configured and Bitrix24 confirms, returning 'successfully'");
       await logger.flush();
       return new Response("successfully", {
         status: 200,
