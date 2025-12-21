@@ -18,10 +18,8 @@ import {
   Phone,
   AlertCircle,
   AlertTriangle,
-  Wrench,
   XCircle,
   RotateCcw,
-  Zap,
 } from "lucide-react";
 
 interface Integration {
@@ -66,18 +64,18 @@ interface VerificationResult {
   issues: string[];
   recommendations: string[];
   warnings?: string[];
+  fixes_applied?: string[];
 }
 
 export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }: Bitrix24CardProps) {
   const [linkingToken, setLinkingToken] = useState<string | null>(null);
   const [generatingToken, setGeneratingToken] = useState(false);
   const [verifying, setVerifying] = useState(false);
-  const [fixing, setFixing] = useState(false);
   const [reconfiguring, setReconfiguring] = useState(false);
-  const [forcingActivation, setForcingActivation] = useState<number | null>(null);
   const [verification, setVerification] = useState<VerificationResult | null>(null);
   const [isHealthy, setIsHealthy] = useState<boolean | null>(null);
   const [summary, setSummary] = useState<string>("");
+  const [fixesApplied, setFixesApplied] = useState<string[]>([]);
   const autoVerifiedRef = useRef(false);
 
   const config = integration?.config || {};
@@ -87,8 +85,8 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
   
   const linkedInstance = instances.find(i => i.id === instanceId);
 
-  // Auto-verify on mount when connected
-  const handleVerifyIntegration = useCallback(async (silent = false) => {
+  // Auto-verify AND auto-fix on mount (aggressive auto-correction)
+  const handleVerifyAndFix = useCallback(async (silent = false) => {
     if (!integration?.id) return;
 
     if (!silent) setVerifying(true);
@@ -98,6 +96,7 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
         body: {
           action: "verify_integration",
           integration_id: integration.id,
+          auto_fix: true, // Always auto-fix
         }
       });
 
@@ -105,13 +104,20 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
         setVerification(response.data.verification);
         setIsHealthy(response.data.healthy);
         setSummary(response.data.summary || "");
+        setFixesApplied(response.data.fixes_applied || []);
         
+        // Only show toast if not silent AND there were fixes or issues
         if (!silent) {
-          if (response.data.healthy) {
-            toast.success(response.data.summary || "Integração funcionando!");
+          if (response.data.fixes_applied?.length > 0) {
+            toast.success(`${response.data.fixes_applied.length} correção(ões) aplicada(s) automaticamente!`);
+          } else if (response.data.healthy) {
+            toast.success("Integração funcionando!");
           } else {
-            toast.warning(response.data.summary || "Problemas encontrados");
+            toast.warning(response.data.summary || "Alguns problemas não puderam ser corrigidos");
           }
+        } else if (response.data.fixes_applied?.length > 0) {
+          // Show toast even in silent mode if fixes were applied
+          toast.success(`Auto-correção: ${response.data.fixes_applied.length} problema(s) corrigido(s)`);
         }
       } else if (!silent) {
         toast.error(response.data?.error || "Erro na verificação");
@@ -124,14 +130,14 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
     }
   }, [integration?.id]);
 
-  // Auto-verify and auto-fix on mount
+  // Auto-verify and auto-fix on mount - AGGRESSIVE auto-correction
   useEffect(() => {
     if (isConnected && integration?.id && !autoVerifiedRef.current) {
       autoVerifiedRef.current = true;
-      // Auto-verify silently on mount
-      handleVerifyIntegration(true);
+      // Auto-verify AND auto-fix silently on mount
+      handleVerifyAndFix(true);
     }
-  }, [isConnected, integration?.id, handleVerifyIntegration]);
+  }, [isConnected, integration?.id, handleVerifyAndFix]);
 
   // Fetch existing token on mount
   useEffect(() => {
@@ -191,46 +197,6 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
     }
   };
 
-  const handleAutoFix = async () => {
-    if (!integration?.id) {
-      toast.error("Integração não encontrada");
-      return;
-    }
-
-    setFixing(true);
-    
-    try {
-      const response = await supabase.functions.invoke("bitrix24-webhook", {
-        body: {
-          action: "diagnose_connector",
-          integration_id: integration.id,
-          auto_fix: true,
-        }
-      });
-
-      if (response.data?.success) {
-        if (response.data.diagnosis?.fixes_applied?.length > 0) {
-          toast.success(`${response.data.diagnosis.fixes_applied.length} correção(ões) aplicada(s)!`);
-        }
-        if (response.data.healthy) {
-          toast.success("Conector corrigido e funcionando!");
-        } else {
-          toast.warning("Alguns problemas não puderam ser corrigidos automaticamente");
-        }
-        // Re-verify to show updated status
-        await handleVerifyIntegration(true);
-        onRefresh();
-      } else {
-        toast.error(response.data?.error || "Erro ao corrigir");
-      }
-    } catch (error) {
-      console.error("Error fixing:", error);
-      toast.error("Erro ao corrigir");
-    } finally {
-      setFixing(false);
-    }
-  };
-
   const handleReconfigureFromZero = async () => {
     if (!integration?.id) {
       toast.error("Integração não encontrada");
@@ -262,9 +228,9 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
           toast.warning("Reconfiguração parcial - verifique o diagnóstico");
         }
         
-        // Wait and re-verify
+        // Wait and re-verify with auto-fix
         await new Promise(resolve => setTimeout(resolve, 2000));
-        await handleVerifyIntegration(true);
+        await handleVerifyAndFix(true);
         onRefresh();
       } else {
         toast.error(response.data?.error || "Erro na reconfiguração");
@@ -274,43 +240,6 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
       toast.error("Erro na reconfiguração");
     } finally {
       setReconfiguring(false);
-    }
-  };
-
-  const handleForceActivateLine = async (lineId: number) => {
-    if (!integration?.id) {
-      toast.error("Integração não encontrada");
-      return;
-    }
-
-    setForcingActivation(lineId);
-    
-    try {
-      const response = await supabase.functions.invoke("bitrix24-webhook", {
-        body: {
-          action: "force_activate",
-          integration_id: integration.id,
-          line_id: lineId,
-        }
-      });
-
-      if (response.data?.success) {
-        if (response.data.active) {
-          toast.success(`Linha ${lineId} ativada com sucesso!`);
-        } else {
-          toast.info("Comandos enviados. A ativação pode levar alguns segundos.");
-        }
-        // Re-verify
-        await handleVerifyIntegration(true);
-        onRefresh();
-      } else {
-        toast.error(response.data?.error || "Erro ao forçar ativação");
-      }
-    } catch (error) {
-      console.error("Error forcing activation:", error);
-      toast.error("Erro ao forçar ativação");
-    } finally {
-      setForcingActivation(null);
     }
   };
 
@@ -461,33 +390,18 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
             </div>
           )}
 
-          {/* Lines status with force activate button - only show inactive */}
-          {verification?.lines && verification.lines.some(l => l.active && !l.connector_active) && (
-            <div className="space-y-2">
-              <span className="text-sm font-medium">Linhas Inativas:</span>
-              {verification.lines
-                .filter(l => l.active && !l.connector_active)
-                .map((line) => (
-                  <div key={line.id} className="flex items-center justify-between text-sm bg-red-500/5 border border-red-500/20 rounded p-2">
-                    <span>{line.name} (ID: {line.id})</span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => handleForceActivateLine(line.id)}
-                      disabled={forcingActivation === line.id}
-                      className="h-7 text-xs"
-                    >
-                      {forcingActivation === line.id ? (
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                      ) : (
-                        <>
-                          <Zap className="h-3 w-3 mr-1" />
-                          Ativar
-                        </>
-                      )}
-                    </Button>
-                  </div>
+          {/* Fixes Applied - show if any auto-corrections were made */}
+          {fixesApplied.length > 0 && (
+            <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-3">
+              <div className="flex items-center gap-2 mb-2">
+                <CheckCircle2 className="h-4 w-4 text-green-500" />
+                <span className="font-medium text-green-600">Correções Automáticas</span>
+              </div>
+              <ul className="text-sm text-green-600 space-y-1">
+                {fixesApplied.map((fix, i) => (
+                  <li key={i}>✓ {fix}</li>
                 ))}
+              </ul>
             </div>
           )}
 
@@ -499,12 +413,12 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
             </AlertDescription>
           </Alert>
 
-          {/* Simplified Action buttons - just 2 main actions */}
+          {/* Simplified Action buttons - single action + reset */}
           <div className="flex gap-2">
             <Button 
               variant="outline" 
-              onClick={() => handleVerifyIntegration(false)}
-              disabled={verifying || fixing}
+              onClick={() => handleVerifyAndFix(false)}
+              disabled={verifying || reconfiguring}
               className="flex-1"
             >
               {verifying ? (
@@ -512,27 +426,13 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
               ) : (
                 <RefreshCw className="h-4 w-4 mr-2" />
               )}
-              Verificar
-            </Button>
-
-            <Button 
-              variant="outline" 
-              onClick={handleAutoFix}
-              disabled={fixing || verifying}
-              className="flex-1"
-            >
-              {fixing ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <Wrench className="h-4 w-4 mr-2" />
-              )}
-              Corrigir
+              Verificar e Corrigir
             </Button>
 
             <Button 
               variant="destructive"
               onClick={handleReconfigureFromZero}
-              disabled={reconfiguring}
+              disabled={reconfiguring || verifying}
               size="icon"
               title="Reconfigurar do Zero"
             >

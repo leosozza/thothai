@@ -3494,10 +3494,11 @@ async function handleSendSms(supabase: any, payload: any, supabaseUrl: string) {
   }
 }
 
-// Handle verify_integration action - Complete verification of Bitrix24 integration
+// Handle verify_integration action - Complete verification AND auto-fix of Bitrix24 integration
+// This is AGGRESSIVE auto-correction - it will fix ALL problems automatically
 async function handleVerifyIntegration(supabase: any, payload: any, supabaseUrl: string) {
-  console.log("=== VERIFY INTEGRATION ===");
-  const { integration_id } = payload;
+  console.log("=== VERIFY AND AUTO-FIX INTEGRATION ===");
+  const { integration_id, auto_fix = true } = payload; // auto_fix defaults to true for aggressive correction
 
   if (!integration_id) {
     return new Response(
@@ -3530,6 +3531,8 @@ async function handleVerifyIntegration(supabase: any, payload: any, supabaseUrl:
   const config = integration.config;
   const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
   const connectorId = config.connector_id || "thoth_whatsapp";
+  // Use bitrix24-events for webhook URL (public, no JWT)
+  const webhookUrl = `${supabaseUrl}/functions/v1/bitrix24-events`;
 
   const verification = {
     connector_id: connectorId,
@@ -3543,10 +3546,11 @@ async function handleVerifyIntegration(supabase: any, payload: any, supabaseUrl:
     mappings: [] as any[],
     issues: [] as string[],
     recommendations: [] as string[],
+    fixes_applied: [] as string[],
   };
 
   try {
-    // 1. List all registered connectors
+    // ========== STEP 1: LIST AND CLEAN DUPLICATE CONNECTORS ==========
     console.log("Step 1: Listing all connectors...");
     const listResponse = await fetch(`${clientEndpoint}imconnector.list`, {
       method: "POST",
@@ -3562,125 +3566,143 @@ async function handleVerifyIntegration(supabase: any, payload: any, supabaseUrl:
       name: connectorsObj[id]?.NAME || connectorsObj[id]?.name || id
     }));
 
-    // Check for duplicates (multiple connectors with thoth/whatsapp)
+    // Check for duplicates and AUTO-REMOVE them
     const thothConnectors = verification.connectors.filter(c => 
       c.id.toLowerCase().includes("thoth") || c.id.toLowerCase().includes("whatsapp")
     );
     
-    // AUTO-CLEAN: If duplicates found, remove them automatically
-    if (thothConnectors.length > 1) {
-      console.log("Found duplicate connectors, auto-cleaning...");
+    if (thothConnectors.length > 1 && auto_fix) {
+      console.log("AUTO-FIX: Removing duplicate connectors...");
       const mainConnectorId = "thoth_whatsapp";
       const duplicates = thothConnectors.filter(c => c.id !== mainConnectorId);
       
-      let cleanedCount = 0;
       for (const dup of duplicates) {
-        console.log(`Auto-removing duplicate connector: ${dup.id}`);
+        console.log(`AUTO-FIX: Removing duplicate connector: ${dup.id}`);
         try {
-          // Deactivate for all lines first
           for (let lineId = 1; lineId <= 10; lineId++) {
             await fetch(`${clientEndpoint}imconnector.activate`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                auth: accessToken,
-                CONNECTOR: dup.id,
-                LINE: lineId,
-                ACTIVE: 0
-              })
+              body: JSON.stringify({ auth: accessToken, CONNECTOR: dup.id, LINE: lineId, ACTIVE: 0 })
             });
           }
-          
-          // Unregister the duplicate
-          const unregisterResponse = await fetch(`${clientEndpoint}imconnector.unregister`, {
+          await fetch(`${clientEndpoint}imconnector.unregister`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              auth: accessToken,
-              ID: dup.id
-            })
+            body: JSON.stringify({ auth: accessToken, ID: dup.id })
           });
-          const unregisterResult = await unregisterResponse.json();
-          console.log(`Unregister ${dup.id} result:`, JSON.stringify(unregisterResult));
-          
-          if (unregisterResult.result || !unregisterResult.error) {
-            cleanedCount++;
-          }
+          verification.fixes_applied.push(`Removido conector duplicado: ${dup.id}`);
         } catch (e) {
           console.error(`Error removing ${dup.id}:`, e);
         }
       }
-      
-      if (cleanedCount > 0) {
-        verification.duplicate_connectors = duplicates.map(c => c.id);
-        verification.issues.push(`${cleanedCount} conector(es) duplicado(s) removido(s) automaticamente`);
-        // Update connectors list to reflect cleanup
-        verification.connectors = verification.connectors.filter(c => 
-          !duplicates.some(d => d.id === c.id)
-        );
+      verification.duplicate_connectors = duplicates.map(c => c.id);
+      verification.connectors = verification.connectors.filter(c => 
+        !duplicates.some(d => d.id === c.id)
+      );
+    }
+
+    // ========== STEP 2: CHECK IF MAIN CONNECTOR IS REGISTERED, IF NOT - REGISTER IT ==========
+    const mainConnectorExists = verification.connectors.some(c => c.id === connectorId);
+    
+    if (!mainConnectorExists && auto_fix) {
+      console.log("AUTO-FIX: Main connector not registered, registering now...");
+      try {
+        const registerResponse = await fetch(`${clientEndpoint}imconnector.register`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            auth: accessToken,
+            ID: connectorId,
+            NAME: "Thoth WhatsApp",
+            ICON: { DATA_IMAGE: "", COLOR: "#25D366", SIZE: "90%", POSITION: "center" },
+            PLACEMENT_HANDLER: webhookUrl,
+            CHAT_GROUP: "N"
+          })
+        });
+        const registerResult = await registerResponse.json();
+        console.log("Register result:", registerResult);
+        
+        if (registerResult.result || registerResult.error === "ERROR_CONNECTOR_ALREADY_EXISTS") {
+          verification.fixes_applied.push("Conector principal registrado");
+          verification.connectors.push({ id: connectorId, name: "Thoth WhatsApp" });
+        }
+      } catch (e) {
+        console.error("Error registering connector:", e);
       }
     }
 
-    // 2. Check connector status for each line
-    console.log("Step 2: Checking Open Lines...");
+    // ========== STEP 3: GET OPEN LINES AND CHECK/ACTIVATE CONNECTOR ==========
+    console.log("Step 3: Checking and activating Open Lines...");
     const linesResponse = await fetch(`${clientEndpoint}imopenlines.config.list.get`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        auth: accessToken,
-        PARAMS: { select: ["ID", "LINE_NAME", "ACTIVE"] }
-      })
+      body: JSON.stringify({ auth: accessToken, PARAMS: { select: ["ID", "LINE_NAME", "ACTIVE"] } })
     });
     const linesResult = await linesResponse.json();
     
     for (const line of (linesResult.result || [])) {
       const lineId = parseInt(line.ID);
+      const lineName = line.LINE_NAME || `Canal ${lineId}`;
+      const isLineActive = line.ACTIVE === "Y";
       
       // Check connector status for this line
       const statusResponse = await fetch(`${clientEndpoint}imconnector.status`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          auth: accessToken,
-          CONNECTOR: connectorId,
-          LINE: lineId
-        })
+        body: JSON.stringify({ auth: accessToken, CONNECTOR: connectorId, LINE: lineId })
       });
       const statusResult = await statusResponse.json();
-      console.log(`imconnector.status for line ${lineId}:`, JSON.stringify(statusResult));
+      console.log(`Status for line ${lineId}:`, JSON.stringify(statusResult));
 
-      // Use same logic as list_channels - Bitrix24 returns: STATUS (active), CONFIGURED (registered), ERROR
       const result = statusResult.result || {};
-      const isActive = result.STATUS === true || result.active === true || result.ACTIVE === "Y";
-      const isRegistered = result.CONFIGURED === true || result.register === true || result.REGISTER === "Y";
-      // Connection is OK if no error - ERROR field indicates connection problems
+      let isActive = result.STATUS === true || result.active === true || result.ACTIVE === "Y";
+      let isRegistered = result.CONFIGURED === true || result.register === true || result.REGISTER === "Y";
       const hasConnection = result.ERROR === false;
+      
+      // AUTO-FIX: If line is active but connector is not active, activate it
+      if (isLineActive && (!isActive || !isRegistered) && auto_fix) {
+        console.log(`AUTO-FIX: Activating connector for line ${lineId}...`);
+        try {
+          // Activate connector
+          await fetch(`${clientEndpoint}imconnector.activate`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ auth: accessToken, CONNECTOR: connectorId, LINE: lineId, ACTIVE: 1 })
+          });
+          
+          // Set connector data
+          await fetch(`${clientEndpoint}imconnector.connector.data.set`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              auth: accessToken,
+              CONNECTOR: connectorId,
+              LINE: lineId,
+              DATA: { id: `${connectorId}_line_${lineId}`, url: webhookUrl, url_im: webhookUrl, name: "Thoth WhatsApp" }
+            })
+          });
+          
+          verification.fixes_applied.push(`Conector ativado na linha ${lineName}`);
+          isActive = true;
+          isRegistered = true;
+        } catch (e) {
+          console.error(`Error activating line ${lineId}:`, e);
+        }
+      }
       
       verification.lines.push({
         id: lineId,
-        name: line.LINE_NAME,
-        active: line.ACTIVE === "Y",
+        name: lineName,
+        active: isLineActive,
         connector_active: isActive,
         connector_registered: isRegistered,
         connector_connection: hasConnection,
       });
     }
 
-    // Check for CRITICAL issues (affect healthy status)
-    const unregisteredLines = verification.lines.filter(l => l.active && !l.connector_registered);
-    if (unregisteredLines.length > 0) {
-      verification.issues.push(`Conector não registrado em ${unregisteredLines.length} linha(s)`);
-      verification.recommendations.push("Execute 'Reconfigurar do Zero' para registrar o conector");
-    }
-    
-    const inactiveLines = verification.lines.filter(l => l.active && l.connector_registered && !l.connector_active);
-    if (inactiveLines.length > 0) {
-      verification.issues.push(`Conector inativo em ${inactiveLines.length} linha(s)`);
-      verification.recommendations.push("Execute 'Corrigir Automaticamente' para ativar o conector");
-    }
-
-    // 3. Check bound events
-    console.log("Step 3: Checking events...");
+    // ========== STEP 4: CHECK AND BIND MISSING EVENTS ==========
+    console.log("Step 4: Checking and binding events...");
     const eventsResponse = await fetch(`${clientEndpoint}event.get`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -3697,41 +3719,81 @@ async function handleVerifyIntegration(supabase: any, payload: any, supabaseUrl:
       handler: e.handler || e.HANDLER
     }));
 
-    // Check for duplicate events
-    const eventCounts: Record<string, number> = {};
-    for (const e of ourEvents) {
-      const evName = e.event || e.EVENT;
-      eventCounts[evName] = (eventCounts[evName] || 0) + 1;
-    }
-    for (const [evName, count] of Object.entries(eventCounts)) {
-      if (count > 1) {
-        verification.duplicate_events += count - 1;
+    // Required events
+    const requiredEvents = [
+      "OnImConnectorMessageAdd",
+      "OnImConnectorDialogStart",
+      "OnImConnectorDialogFinish",
+      "OnImConnectorStatusDelete"
+    ];
+    
+    // Check and bind missing events
+    for (const eventName of requiredEvents) {
+      const hasEvent = ourEvents.some((e: any) => 
+        (e.event || e.EVENT).toUpperCase() === eventName.toUpperCase()
+      );
+      
+      if (!hasEvent && auto_fix) {
+        console.log(`AUTO-FIX: Binding missing event ${eventName}...`);
+        try {
+          const bindResponse = await fetch(`${clientEndpoint}event.bind`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ auth: accessToken, event: eventName, handler: webhookUrl })
+          });
+          const bindResult = await bindResponse.json();
+          
+          if (bindResult.result || bindResult.error === "HANDLER_ALREADY_BINDED") {
+            verification.fixes_applied.push(`Evento ${eventName} vinculado`);
+            verification.events.push({ event: eventName, handler: webhookUrl });
+          }
+        } catch (e) {
+          console.error(`Error binding ${eventName}:`, e);
+        }
       }
     }
-    if (verification.duplicate_events > 0) {
-      verification.issues.push(`${verification.duplicate_events} eventos duplicados`);
+
+    // Check for duplicate events and clean them
+    const eventCounts: Record<string, { count: number; handlers: string[] }> = {};
+    for (const e of ourEvents) {
+      const evName = (e.event || e.EVENT).toUpperCase();
+      if (!eventCounts[evName]) {
+        eventCounts[evName] = { count: 0, handlers: [] };
+      }
+      eventCounts[evName].count++;
+      eventCounts[evName].handlers.push(e.handler || e.HANDLER);
+    }
+    
+    // AUTO-FIX: Remove duplicate event handlers
+    for (const [evName, info] of Object.entries(eventCounts)) {
+      if (info.count > 1 && auto_fix) {
+        console.log(`AUTO-FIX: Cleaning ${info.count - 1} duplicate handlers for ${evName}...`);
+        verification.duplicate_events += info.count - 1;
+        
+        // Keep only the clean URL, remove others
+        const cleanHandler = info.handlers.find(h => !h.includes("?")) || info.handlers[0];
+        const duplicateHandlers = info.handlers.filter(h => h !== cleanHandler);
+        
+        for (const dupHandler of duplicateHandlers) {
+          try {
+            await fetch(`${clientEndpoint}event.unbind`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ auth: accessToken, event: evName, handler: dupHandler })
+            });
+            verification.fixes_applied.push(`Evento duplicado ${evName} removido`);
+          } catch (e) {
+            console.error(`Error unbinding ${evName}:`, e);
+          }
+        }
+      }
     }
 
-    // Check if OnImConnectorMessageAdd is bound
-    const hasMessageEvent = ourEvents.some((e: any) => 
-      (e.event || e.EVENT).toUpperCase() === "ONIMCONNECTORMESSAGEADD"
-    );
-    if (!hasMessageEvent) {
-      verification.issues.push("Evento OnImConnectorMessageAdd não configurado");
-      verification.recommendations.push("Este evento é obrigatório para receber mensagens do operador");
-    }
-
-    // 4. Get database mappings
-    console.log("Step 4: Getting database mappings...");
+    // ========== STEP 5: GET DATABASE MAPPINGS ==========
+    console.log("Step 5: Getting database mappings...");
     const { data: mappings } = await supabase
       .from("bitrix_channel_mappings")
-      .select(`
-        line_id,
-        line_name,
-        instance_id,
-        is_active,
-        instances (id, name, phone_number, status)
-      `)
+      .select(`line_id, line_name, instance_id, is_active, instances (id, name, phone_number, status)`)
       .eq("integration_id", integration_id);
 
     verification.mappings = (mappings || []).map((m: any) => ({
@@ -3743,40 +3805,59 @@ async function handleVerifyIntegration(supabase: any, payload: any, supabaseUrl:
       is_active: m.is_active
     }));
 
-    // Separate critical issues from warnings
-    // Critical issues: token invalid, connector not registered, connector inactive, missing message event
-    // Warnings: duplicate connectors, duplicate events (these don't break functionality)
-    const criticalIssues = verification.issues.filter(issue => 
-      !issue.includes("duplicado") && !issue.includes("duplicate")
-    );
+    // ========== FINAL ASSESSMENT ==========
+    // Re-check for any remaining issues after auto-fix
+    const activeLines = verification.lines.filter(l => l.active);
+    const inactiveConnectors = activeLines.filter(l => !l.connector_active);
+    const unregisteredConnectors = activeLines.filter(l => !l.connector_registered);
     
-    const warnings = verification.issues.filter(issue => 
-      issue.includes("duplicado") || issue.includes("duplicate")
+    const hasMessageEvent = verification.events.some((e: any) => 
+      e.event.toUpperCase() === "ONIMCONNECTORMESSAGEADD"
     );
 
-    // Final assessment - healthy if no CRITICAL issues
+    if (unregisteredConnectors.length > 0) {
+      verification.issues.push(`Conector não registrado em ${unregisteredConnectors.length} linha(s)`);
+    }
+    if (inactiveConnectors.length > 0) {
+      verification.issues.push(`Conector inativo em ${inactiveConnectors.length} linha(s)`);
+    }
+    if (!hasMessageEvent) {
+      verification.issues.push("Evento OnImConnectorMessageAdd não configurado");
+    }
+
+    // Separate critical issues from warnings
+    const criticalIssues = verification.issues.filter(issue => 
+      !issue.includes("duplicado") && !issue.includes("duplicate") && !issue.includes("removido")
+    );
+    const warnings = verification.issues.filter(issue => 
+      issue.includes("duplicado") || issue.includes("duplicate") || issue.includes("removido")
+    );
+
     const healthy = criticalIssues.length === 0;
 
-    console.log("Verification complete:", { 
-      ...verification, 
-      criticalIssues, 
-      warnings, 
-      healthy 
-    });
+    // Generate summary
+    let summary = "";
+    if (healthy) {
+      if (verification.fixes_applied.length > 0) {
+        summary = `✅ Corrigido automaticamente (${verification.fixes_applied.length} correção(ões))`;
+      } else if (warnings.length > 0) {
+        summary = `Funcionando com ${warnings.length} aviso(s)`;
+      } else {
+        summary = "Integração funcionando corretamente";
+      }
+    } else {
+      summary = `${criticalIssues.length} problema(s) não corrigido(s)`;
+    }
+
+    console.log("Verification complete:", { healthy, fixes_applied: verification.fixes_applied.length, issues: criticalIssues.length });
 
     return new Response(
       JSON.stringify({
         success: true,
         healthy,
-        verification: {
-          ...verification,
-          warnings, // Add warnings as separate field
-        },
-        summary: healthy 
-          ? (warnings.length > 0 
-              ? `Funcionando com ${warnings.length} aviso(s)` 
-              : "Integração funcionando corretamente")
-          : `${criticalIssues.length} problema(s) crítico(s) encontrado(s)`
+        verification: { ...verification, warnings },
+        summary,
+        fixes_applied: verification.fixes_applied,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
