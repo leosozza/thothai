@@ -282,9 +282,22 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
         }
       });
 
+      console.log("Reconfigure result:", response.data);
+
       if (response.data?.success) {
-        toast.success("Reconfiguração completa realizada!");
-        console.log("Reconfigure result:", response.data);
+        const result = response.data;
+        if (result.connector_registered && result.connector_activated) {
+          toast.success("✅ Conector registrado e ativado com sucesso!");
+        } else if (result.connector_registered) {
+          toast.warning("Conector registrado, mas ativação pendente. Execute 'Verificar Integração' para confirmar.");
+        } else {
+          toast.warning("Reconfiguração parcial - verifique o diagnóstico");
+        }
+        
+        // Aguardar 2 segundos para o Bitrix24 processar
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        // Forçar refresh com status completo
         onRefresh();
       } else {
         toast.error(response.data?.error || "Erro na reconfiguração");
@@ -294,7 +307,7 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
       console.error("Error reconfiguring:", error);
       toast.error("Erro na reconfiguração");
     } finally {
-    setReconfiguring(false);
+      setReconfiguring(false);
     }
   };
 
