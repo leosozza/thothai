@@ -22,7 +22,10 @@ async function refreshBitrixToken(integration: any, supabase: any): Promise<stri
   console.log("Token expired, refreshing...");
 
   // Token needs refresh
-  const refreshUrl = `https://oauth.bitrix.info/oauth/token/?grant_type=refresh_token&client_id=${config.client_id || ""}&client_secret=${config.client_secret || ""}&refresh_token=${config.refresh_token}`;
+  // MARKETPLACE: Use credentials from environment variables, NOT from database
+  const clientId = Deno.env.get("BITRIX24_CLIENT_ID") || "";
+  const clientSecret = Deno.env.get("BITRIX24_CLIENT_SECRET") || "";
+  const refreshUrl = `https://oauth.bitrix.info/oauth/token/?grant_type=refresh_token&client_id=${clientId}&client_secret=${clientSecret}&refresh_token=${config.refresh_token}`;
   
   try {
     const response = await fetch(refreshUrl);
