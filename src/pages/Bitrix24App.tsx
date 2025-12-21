@@ -14,7 +14,7 @@ interface BitrixStatus {
   found: boolean;
   integration_id?: string;
   domain?: string;
-  workspace_id?: string;
+  is_active?: boolean;
   has_access_token?: boolean;
   instances?: Array<{ id: string; name: string; phone_number: string | null; status: string }>;
 }
@@ -216,9 +216,9 @@ export default function Bitrix24App() {
         <Card className="w-full max-w-md">
           <CardHeader className="text-center">
             <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto mb-4" />
-            <CardTitle>Instalação em Andamento</CardTitle>
+            <CardTitle>Finalizando Instalação</CardTitle>
             <CardDescription>
-              Aguarde enquanto configuramos seu workspace automaticamente.
+              Aguarde enquanto finalizamos a configuração.
               Se demorar mais de 30 segundos, recarregue a página.
             </CardDescription>
           </CardHeader>
@@ -583,10 +583,7 @@ function SettingsView({
         recommendations.push("Reinstale o app no Bitrix24");
       }
 
-      if (!status?.workspace_id) {
-        issues.push({ level: "error", message: "Workspace não vinculado" });
-        recommendations.push("Vincule um workspace Thoth.ai usando um token de vinculação");
-      }
+      // Workspace check removed - no longer required
 
       if (!status?.has_access_token) {
         issues.push({ level: "warning", message: "Access token pode estar expirado" });
@@ -724,11 +721,11 @@ function SettingsView({
             <span className="font-mono text-xs">{status?.integration_id || "-"}</span>
           </div>
           <div className="flex justify-between items-center py-2 border-b">
-            <span className="text-muted-foreground">Workspace Vinculado</span>
-            {status?.workspace_id ? (
-              <Badge variant="default" className="bg-green-500">Sim</Badge>
+            <span className="text-muted-foreground">Status</span>
+            {status?.is_active ? (
+              <Badge variant="default" className="bg-green-500">Ativo</Badge>
             ) : (
-              <Badge variant="destructive">Não</Badge>
+              <Badge variant="secondary">Inativo</Badge>
             )}
           </div>
           <div className="flex justify-between items-center py-2 border-b">
