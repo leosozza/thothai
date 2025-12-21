@@ -66,16 +66,11 @@ verify_jwt = false
 [functions.gupshup-send-message]
 verify_jwt = false
 
-# ========================================
-# NOVA ARQUITETURA BITRIX24 (ACK Rápido)
-# ========================================
-
-# Função PÚBLICA para receber eventos do Bitrix24
-# ACK rápido + enfileiramento para processamento assíncrono
 [functions.bitrix24-events]
 verify_jwt = false
 
-# Worker para processar fila de eventos
-# Acessível para cron jobs e chamadas internas
 [functions.bitrix24-worker]
 verify_jwt = false
+
+[functions.bitrix24-debug-logger]
+verify_jwt = true

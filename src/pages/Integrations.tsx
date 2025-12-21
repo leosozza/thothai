@@ -56,6 +56,7 @@ import {
   Phone,
   Bot,
   AlertTriangle,
+  Bug,
 } from "lucide-react";
 import {
   Table,
@@ -65,6 +66,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { DebugConsole } from "@/components/integrations/DebugConsole";
 
 interface Integration {
   id: string;
@@ -1948,6 +1950,16 @@ export default function Integrations() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* Debug Console Section */}
+        {integrations.find(i => i.type === "bitrix24") && (
+          <div className="mt-8">
+            <DebugConsole 
+              integrationId={integrations.find(i => i.type === "bitrix24")?.id}
+              workspaceId={workspace?.id}
+            />
+          </div>
+        )}
       </div>
     </AppLayout>
   );
