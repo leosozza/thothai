@@ -354,20 +354,40 @@ serve(async (req) => {
       console.log("Connector data.set result:", JSON.stringify(configResult));
 
       // Build message payload for Bitrix24
+      // Required structure per Bitrix24 API docs:
+      // - user: { id*, name, last_name, picture: { url }, phone, skip_phone_validate }
+      // - message: { id*, date* (timestamp), text, files }
+      // - chat: { id*, name, url }
+      const chatId = `wa_${contact_phone}`; // Unique chat ID per WhatsApp contact
+      const messageTimestamp = Math.floor(Date.now() / 1000);
+      const messageUniqueId = message_id || `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      
+      // Parse contact name into first/last name if possible
+      const nameParts = (contact_name || contact_phone).split(' ');
+      const firstName = nameParts[0] || contact_phone;
+      const lastName = nameParts.slice(1).join(' ') || '';
+      
       const messagePayload = {
         CONNECTOR: connectorId,
         LINE: lineId,
         MESSAGES: [
           {
             user: {
-              id: contact_phone,
-              name: contact_name || contact_phone,
-              picture: contact_picture ? { url: contact_picture } : undefined,
+              id: String(contact_phone), // Must be string ID in external system
+              name: firstName,
+              last_name: lastName || undefined,
+              phone: contact_phone,
+              skip_phone_validate: "Y", // Skip phone validation
+              ...(contact_picture ? { picture: { url: contact_picture } } : {}),
             },
             message: {
-              id: message_id || `msg_${Date.now()}`,
-              date: Math.floor(Date.now() / 1000),
-              text: message,
+              id: String(messageUniqueId), // Must be string ID in external system
+              date: messageTimestamp, // Unix timestamp
+              text: message || "",
+            },
+            chat: {
+              id: chatId, // Required: Chat ID in external system
+              name: `WhatsApp - ${contact_name || contact_phone}`,
             },
           },
         ],
