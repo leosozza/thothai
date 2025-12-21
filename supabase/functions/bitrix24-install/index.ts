@@ -658,6 +658,77 @@ serve(async (req) => {
       console.log("=== PLACEMENT EVENT ===");
       console.log("Placement type:", body.PLACEMENT);
       console.log("Member ID:", memberId, "Domain:", domain);
+      console.log("AUTH_ID:", body.AUTH_ID, "SERVER_ENDPOINT:", body.SERVER_ENDPOINT);
+      
+      // === CAPTURE REAL DOMAIN VIA BITRIX24 API ===
+      let realDomain: string | null = null;
+      
+      // First, try to get domain from body.DOMAIN (if it looks like a real domain)
+      if (domain && domain.includes("bitrix24")) {
+        realDomain = domain;
+        console.log("Using domain from body.DOMAIN:", realDomain);
+      }
+      
+      // If no real domain yet and we have AUTH_ID, try to fetch from Bitrix24 API
+      if (!realDomain && body.AUTH_ID) {
+        try {
+          console.log("Fetching real domain from Bitrix24 profile API...");
+          const profileResp = await fetch(
+            `https://oauth.bitrix.info/rest/profile?auth=${body.AUTH_ID}`
+          );
+          
+          if (profileResp.ok) {
+            const profile = await profileResp.json();
+            console.log("Profile API response:", JSON.stringify(profile.result || {}));
+            
+            // profile.result.CLIENT_ENDPOINT contains something like:
+            // "https://thoth24.bitrix24.com.br/rest/"
+            if (profile.result?.CLIENT_ENDPOINT) {
+              try {
+                const url = new URL(profile.result.CLIENT_ENDPOINT);
+                realDomain = url.hostname; // "thoth24.bitrix24.com.br"
+                console.log("Extracted real domain from CLIENT_ENDPOINT:", realDomain);
+              } catch (e) {
+                console.log("Could not parse CLIENT_ENDPOINT as URL:", e);
+              }
+            }
+            
+            // Alternative: try ADMIN field
+            if (!realDomain && profile.result?.ADMIN) {
+              try {
+                const adminUrl = profile.result.ADMIN.replace(/\/[^\/]+$/, ''); // Remove trailing path
+                const url = new URL(adminUrl.startsWith('http') ? adminUrl : `https://${adminUrl}`);
+                realDomain = url.hostname;
+                console.log("Extracted real domain from ADMIN:", realDomain);
+              } catch (e) {
+                console.log("Could not parse ADMIN as URL:", e);
+              }
+            }
+          } else {
+            console.log("Profile API request failed:", profileResp.status);
+          }
+        } catch (e) {
+          console.log("Error fetching real domain from profile API:", e);
+        }
+      }
+      
+      // If still no real domain, try SERVER_ENDPOINT
+      if (!realDomain && body.SERVER_ENDPOINT) {
+        try {
+          const serverUrl = new URL(body.SERVER_ENDPOINT);
+          // Only use if it's not oauth.bitrix.info
+          if (!serverUrl.hostname.includes("oauth.bitrix.info")) {
+            realDomain = serverUrl.hostname;
+            console.log("Extracted domain from SERVER_ENDPOINT:", realDomain);
+          }
+        } catch (e) {
+          console.log("Could not parse SERVER_ENDPOINT:", e);
+        }
+      }
+      
+      // Final fallback: use domain from body or generate from member_id
+      const actualDomain = realDomain || domain || (memberId ? `portal-${memberId}` : 'unknown');
+      console.log("Final domain to use:", actualDomain);
       
       // Check if integration exists for this portal
       const searchId = memberId || domain;
@@ -676,14 +747,23 @@ serve(async (req) => {
         }
         integration = existingInt;
         console.log("Existing integration found:", integration?.id || "none");
+        
+        // If integration exists but has fictional domain, update with real domain
+        if (integration && realDomain && integration.config?.domain?.startsWith('portal-')) {
+          console.log("Updating integration with real domain:", realDomain);
+          const updatedConfig = { ...integration.config, domain: realDomain };
+          await supabase
+            .from("integrations")
+            .update({ config: updatedConfig, updated_at: new Date().toISOString() })
+            .eq("id", integration.id);
+          integration.config = updatedConfig;
+        }
       }
       
       // AUTO-CREATE: If no integration exists, create integration WITHOUT workspace
       if (!integration && searchId) {
         console.log("=== AUTO-CREATING INTEGRATION (NO WORKSPACE) ===");
         
-        // Use domain from body or try to extract from member_id
-        const actualDomain = domain || (memberId ? `portal-${memberId}` : 'unknown');
         const integrationName = `Bitrix24 - ${actualDomain}`;
         
         const configData: Record<string, any> = {
