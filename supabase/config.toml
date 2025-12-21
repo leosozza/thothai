@@ -73,4 +73,4 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.bitrix24-debug-logger]
-verify_jwt = true
+verify_jwt = false

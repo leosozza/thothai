@@ -250,14 +250,20 @@ serve(async (req) => {
   // Initialize debug logger
   const logger = new DebugLogger(supabase, requestId);
   
-  // Collect request headers
-  const relevantHeaders: Record<string, string> = {};
-  ["referer", "origin", "user-agent", "content-type", "x-forwarded-for"].forEach(h => {
-    const v = req.headers.get(h);
-    if (v) relevantHeaders[h] = v;
+  // Collect ALL request headers for debugging
+  const allHeaders: Record<string, string> = {};
+  req.headers.forEach((value, key) => {
+    allHeaders[key] = value.substring(0, 200); // Limit value length
   });
   
-  logger.request(req.method, new URL(req.url).pathname, relevantHeaders);
+  const url = new URL(req.url);
+  logger.info("=== CONNECTOR-SETTINGS REQUEST ===", {
+    method: req.method,
+    url: req.url,
+    pathname: url.pathname,
+    search: url.search,
+    headers: allHeaders
+  });
   
   if (req.method === "OPTIONS") {
     logger.response(200, "CORS preflight");
@@ -270,36 +276,66 @@ serve(async (req) => {
     let body: Record<string, any> = {};
     const contentType = req.headers.get("content-type") || "";
 
-    if (contentType.includes("application/json")) {
-      body = await req.json();
+    // For GET requests, try to get parameters from URL
+    if (req.method === "GET") {
+      url.searchParams.forEach((value, key) => {
+        body[key] = value;
+      });
+      logger.info("GET request - parsed URL params", { params: body });
+    } else if (contentType.includes("application/json")) {
+      try {
+        body = await req.json();
+      } catch (e) {
+        logger.warn("Failed to parse JSON body", { error: e instanceof Error ? e.message : "Unknown" });
+      }
     } else if (contentType.includes("application/x-www-form-urlencoded")) {
-      const formData = await req.formData();
-      for (const [key, value] of formData.entries()) {
-        if (key.startsWith("auth[")) {
-          const authKey = key.replace("auth[", "").replace("]", "");
-          if (!body.auth) body.auth = {};
-          body.auth[authKey] = value;
-        } else {
-          body[key] = value;
+      try {
+        const formData = await req.formData();
+        for (const [key, value] of formData.entries()) {
+          if (key.startsWith("auth[")) {
+            const authKey = key.replace("auth[", "").replace("]", "");
+            if (!body.auth) body.auth = {};
+            body.auth[authKey] = value;
+          } else {
+            body[key] = value;
+          }
         }
+      } catch (e) {
+        logger.warn("Failed to parse form data", { error: e instanceof Error ? e.message : "Unknown" });
       }
     }
 
     logger.info("Request body parsed", { 
-      keys: Object.keys(body),
+      body_keys: Object.keys(body),
+      body_preview: JSON.stringify(body).substring(0, 500),
       has_placement: !!body.PLACEMENT,
       has_auth: !!body.AUTH_ID || !!body.auth,
-      content_type: contentType
+      content_type: contentType,
+      method: req.method
     });
 
     // Extract auth data from Bitrix24 PLACEMENT call
     const authId = body.AUTH_ID || body.auth?.access_token;
-    const domain = body.auth?.domain || body.DOMAIN;
-    const memberId = body.auth?.member_id || body.member_id;
+    let domain = body.auth?.domain || body.DOMAIN;
+    let memberId = body.auth?.member_id || body.member_id;
     const placement = body.PLACEMENT;
+
+    // For GET requests without domain/memberId, try to extract from referer
+    if (!domain && !memberId) {
+      const referer = req.headers.get("referer") || "";
+      const origin = req.headers.get("origin") || "";
+      
+      // Try to extract domain from referer (e.g., https://thoth24.bitrix24.com.br/...)
+      const domainMatch = (referer || origin).match(/https?:\/\/([^\/]+\.bitrix24\.[^\/]+)/);
+      if (domainMatch) {
+        domain = domainMatch[1];
+        logger.info("Extracted domain from referer/origin", { domain, referer, origin });
+      }
+    }
 
     logger.info("Parsed Bitrix24 parameters", {
       auth_id_present: !!authId,
+      auth_id_preview: authId ? authId.substring(0, 20) + "..." : null,
       domain,
       member_id: memberId,
       placement,
@@ -498,6 +534,33 @@ serve(async (req) => {
     // Check if already configured
     const config = integration.config || {};
     const eventsUrl = `${supabaseUrl}/functions/v1/bitrix24-events`;
+
+    // Check if connector is already fully configured
+    const isFullyConfigured = integration.workspace_id && 
+                              config.connector_configured_at && 
+                              config.activated_line_id;
+
+    logger.info("Configuration status check", {
+      workspace_linked: !!integration.workspace_id,
+      connector_configured_at: config.connector_configured_at,
+      activated_line_id: config.activated_line_id,
+      is_fully_configured: isFullyConfigured,
+      placement
+    });
+
+    // If already fully configured and this is a status check, return "successfully"
+    // Bitrix24 expects "successfully" (plain text) to mark connector as ready
+    if (isFullyConfigured && (placement === "SETTING_CONNECTOR" || !placement)) {
+      logger.info("Connector already configured, returning 'successfully'");
+      await logger.flush();
+      return new Response("successfully", {
+        status: 200,
+        headers: { 
+          ...corsHeaders, 
+          "Content-Type": "text/plain; charset=utf-8" 
+        }
+      });
+    }
 
     // If this is a SETTING_CONNECTOR placement call, activate the connector
     if (placement === "SETTING_CONNECTOR" || activeStatus === 1) {
