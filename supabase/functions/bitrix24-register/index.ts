@@ -594,9 +594,9 @@ serve(async (req) => {
     // IMPORTANT: Use LINE 2 as that's where the "Thoth whatsapp" channel is configured
     console.log("=== ACTIVATING CONNECTOR IMMEDIATELY ===");
     
-    // CRITICAL: Use CLEAN webhook URL without query parameters for event.bind
+    // CRITICAL: Use bitrix24-events (PUBLIC) for receiving Bitrix24 events
     // Bitrix24 documentation states event handlers must use clean URLs
-    const cleanWebhookUrl = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
+    const cleanWebhookUrl = `${supabaseUrl}/functions/v1/bitrix24-events`;
     
     const defaultLineId = 2; // Default to LINE 2 where "Thoth whatsapp" is configured
     

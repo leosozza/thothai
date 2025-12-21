@@ -72,6 +72,45 @@ export type Database = {
           },
         ]
       }
+      bitrix_event_queue: {
+        Row: {
+          attempts: number | null
+          created_at: string
+          event_type: string
+          id: string
+          last_error: string | null
+          max_attempts: number | null
+          payload: Json
+          processed_at: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          attempts?: number | null
+          created_at?: string
+          event_type: string
+          id?: string
+          last_error?: string | null
+          max_attempts?: number | null
+          payload: Json
+          processed_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          attempts?: number | null
+          created_at?: string
+          event_type?: string
+          id?: string
+          last_error?: string | null
+          max_attempts?: number | null
+          payload?: Json
+          processed_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       bot_settings: {
         Row: {
           created_at: string
