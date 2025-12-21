@@ -307,6 +307,11 @@ export default function Integrations() {
         setBitrixWebhookUrl((bitrixIntegration.config.webhook_url as string) || "");
         setBitrixConnectorId((bitrixIntegration.config.connector_id as string) || "thoth_whatsapp");
         setBitrixInstanceId((bitrixIntegration.config.instance_id as string) || "");
+        // Load portal domain for display
+        const domain = bitrixIntegration.config.domain as string;
+        if (domain) {
+          setBitrixPortalUrl(domain.startsWith("http") ? domain : `https://${domain}`);
+        }
         // If has member_id, it was installed via internal app
         if (bitrixIntegration.config.member_id) {
           setBitrixConfigMode("app");
@@ -1240,7 +1245,7 @@ export default function Integrations() {
 
       if (response.data?.success) {
         toast.success(response.data.message || "Portal vinculado com sucesso!");
-        setBitrixPortalUrl("");
+        // Keep the URL visible - don't clear it
         fetchIntegrations();
       } else {
         toast.error(response.data?.error || "Erro ao vincular portal");
@@ -1541,28 +1546,51 @@ export default function Integrations() {
                     {/* Link existing portal */}
                     <div className="border-t pt-4">
                       <p className="text-sm font-medium mb-3">Já instalou o app no Bitrix24?</p>
-                      <div className="flex gap-2">
-                        <Input
-                          placeholder="https://seuportal.bitrix24.com.br"
-                          value={bitrixPortalUrl}
-                          onChange={(e) => setBitrixPortalUrl(e.target.value)}
-                          className="flex-1"
-                        />
-                        <Button 
-                          onClick={handleLinkBitrixPortal}
-                          disabled={linkingPortal || !bitrixPortalUrl.trim()}
-                        >
-                          {linkingPortal ? (
-                            <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                          ) : (
-                            <ArrowLeftRight className="h-4 w-4 mr-2" />
-                          )}
-                          Vincular
-                        </Button>
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-2">
-                        Digite a URL do seu portal Bitrix24 para vincular a integração existente à sua conta Thoth.
-                      </p>
+                      {bitrixPortalUrl && integrations.some(i => i.type === "bitrix24" && i.config?.domain) ? (
+                        /* Already linked - show status */
+                        <div className="flex items-center gap-2 p-3 bg-muted/50 rounded-lg">
+                          <CheckCircle2 className="h-5 w-5 text-green-500 shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium">Portal vinculado</p>
+                            <p className="text-xs text-muted-foreground truncate">{bitrixPortalUrl}</p>
+                          </div>
+                          <Button 
+                            variant="ghost" 
+                            size="sm"
+                            onClick={() => {
+                              setBitrixPortalUrl("");
+                            }}
+                          >
+                            Alterar
+                          </Button>
+                        </div>
+                      ) : (
+                        /* Not linked - show input */
+                        <>
+                          <div className="flex gap-2">
+                            <Input
+                              placeholder="https://seuportal.bitrix24.com.br"
+                              value={bitrixPortalUrl}
+                              onChange={(e) => setBitrixPortalUrl(e.target.value)}
+                              className="flex-1"
+                            />
+                            <Button 
+                              onClick={handleLinkBitrixPortal}
+                              disabled={linkingPortal || !bitrixPortalUrl.trim()}
+                            >
+                              {linkingPortal ? (
+                                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                              ) : (
+                                <ArrowLeftRight className="h-4 w-4 mr-2" />
+                              )}
+                              Vincular
+                            </Button>
+                          </div>
+                          <p className="text-xs text-muted-foreground mt-2">
+                            Digite a URL do seu portal Bitrix24 para vincular a integração existente à sua conta Thoth.
+                          </p>
+                        </>
+                      )}
                     </div>
 
                     <div className="bg-muted/50 rounded-lg p-4 text-sm space-y-2">
