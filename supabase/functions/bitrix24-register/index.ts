@@ -334,14 +334,14 @@ serve(async (req) => {
     const dataSetResult = await dataSetResponse.json();
     console.log("imconnector.connector.data.set result:", JSON.stringify(dataSetResult));
 
-    // Bind events
-    const events = [
+    // Bind connector events
+    const connectorEvents = [
       "OnImConnectorMessageAdd",
       "OnImConnectorDialogStart", 
       "OnImConnectorDialogFinish",
     ];
 
-    for (const eventName of events) {
+    for (const eventName of connectorEvents) {
       try {
         await fetch(`${clientEndpoint}event.bind?auth=${accessToken}`, {
           method: "POST",
@@ -357,15 +357,104 @@ serve(async (req) => {
       }
     }
 
-    // Update integration config
+    // === AUTO-REGISTER BOT ===
+    console.log("=== AUTO-REGISTERING BOT ===");
+    
+    let botId: number | null = null;
+    let botRegistered = false;
+    
+    try {
+      const botRegisterUrl = `${clientEndpoint}imbot.register?auth=${accessToken}`;
+      const botPayload = {
+        CODE: "thoth_ai_bot",
+        TYPE: "B", // Chatbot
+        OPENLINE: "Y",
+        EVENT_MESSAGE_ADD: eventsUrl,
+        EVENT_WELCOME_MESSAGE: eventsUrl,
+        EVENT_BOT_DELETE: eventsUrl,
+        PROPERTIES: {
+          NAME: "Thoth AI",
+          WORK_POSITION: "Assistente Virtual com IA",
+          COLOR: "PURPLE",
+        }
+      };
+
+      console.log("Calling imbot.register with payload:", JSON.stringify(botPayload));
+      
+      const botResponse = await fetch(botRegisterUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(botPayload),
+      });
+
+      const botResult = await botResponse.json();
+      console.log("imbot.register result:", JSON.stringify(botResult));
+      
+      if (botResult.result && !botResult.error) {
+        botId = botResult.result;
+        botRegistered = true;
+        console.log("Bot registered successfully with ID:", botId);
+      } else if (botResult.error) {
+        // Check if bot already exists
+        console.log("Bot registration error:", botResult.error);
+        
+        // Try to get existing bot
+        const botListUrl = `${clientEndpoint}imbot.list?auth=${accessToken}`;
+        const botListResponse = await fetch(botListUrl);
+        const botListResult = await botListResponse.json();
+        
+        if (botListResult.result) {
+          const existingBot = botListResult.result.find((bot: any) => 
+            bot.CODE === "thoth_ai_bot" || bot.NAME === "Thoth AI"
+          );
+          if (existingBot) {
+            botId = existingBot.ID;
+            botRegistered = true;
+            console.log("Found existing bot with ID:", botId);
+          }
+        }
+      }
+
+      // Bind bot events
+      if (botId) {
+        const botEvents = ["ONIMBOTMESSAGEADD", "ONIMBOTJOINCHAT", "ONIMBOTDELETE"];
+        for (const eventName of botEvents) {
+          try {
+            await fetch(`${clientEndpoint}event.bind?auth=${accessToken}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                event: eventName,
+                handler: eventsUrl,
+              }),
+            });
+            console.log(`Bot event ${eventName} bound`);
+          } catch (e) {
+            console.error(`Error binding bot event ${eventName}:`, e);
+          }
+        }
+      }
+    } catch (botError) {
+      console.error("Error registering bot:", botError);
+    }
+
+    // Update integration config with connector AND bot info
     const updatedConfig = {
       ...integration.config,
+      // Connector info
       connector_id: finalConnectorId,
       instance_id: instance_id || integration.config.instance_id,
       registered: true,
       registered_at: new Date().toISOString(),
       activated: !activateResult.error,
       activated_line_id: 1,
+      // Bot info
+      bot_id: botId,
+      bot_code: "thoth_ai_bot",
+      bot_name: "Thoth AI",
+      bot_registered: botRegistered,
+      bot_registered_at: botRegistered ? new Date().toISOString() : null,
+      bot_enabled: botRegistered, // Enable by default if registered
     };
 
     await supabase
@@ -379,10 +468,12 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({ 
         success: true, 
-        message: "Conector registrado e ativado via Marketplace OAuth",
+        message: "Conector e Bot AI registrados e ativados via Marketplace OAuth",
         connector_id: finalConnectorId,
         registered: !registerResult.error || registerResult.error.includes("already"),
         activated: !activateResult.error,
+        bot_id: botId,
+        bot_registered: botRegistered,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
