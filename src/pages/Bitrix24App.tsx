@@ -1,16 +1,14 @@
 import { useState, useEffect } from "react";
-import { Loader2, MessageSquare, Bot, BookOpen, Settings, Phone, LayoutDashboard, Zap, AlertCircle, ExternalLink, RefreshCw, RotateCcw, Search, Stethoscope, CheckCircle, XCircle, Info } from "lucide-react";
+import { Loader2, MessageSquare, Bot, BookOpen, Settings, Phone, LayoutDashboard, AlertCircle, ExternalLink, RefreshCw, RotateCcw, Search, Stethoscope, CheckCircle, XCircle, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 
-type AppView = "loading" | "token" | "dashboard" | "instances" | "training" | "personas" | "settings" | "not-in-bitrix";
+type AppView = "loading" | "pending" | "dashboard" | "instances" | "training" | "personas" | "settings" | "not-in-bitrix";
 
 interface BitrixStatus {
   found: boolean;
@@ -26,9 +24,6 @@ export default function Bitrix24App() {
   const [memberId, setMemberId] = useState<string | null>(null);
   const [domain, setDomain] = useState<string | null>(null);
   const [status, setStatus] = useState<BitrixStatus | null>(null);
-  const [linkingToken, setLinkingToken] = useState("");
-  const [validatingToken, setValidatingToken] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   // Initialize from URL params and Bitrix24 SDK
   useEffect(() => {
@@ -128,49 +123,12 @@ export default function Bitrix24App() {
       if (data.workspace_id) {
         setView("dashboard");
       } else {
-        setView("token");
+        // Workspace not linked yet - show pending message instead of token
+        setView("pending");
       }
     } catch (err) {
       console.error("Error loading data:", err);
-      setError("Erro ao carregar dados");
-      setView("token");
-    }
-  };
-
-  const handleValidateToken = async () => {
-    if (!linkingToken.trim()) {
-      toast.error("Digite o token de vinculação");
-      return;
-    }
-
-    try {
-      setValidatingToken(true);
-
-      const response = await fetch(`${SUPABASE_URL}/functions/v1/bitrix24-install`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "validate_token",
-          token: linkingToken.trim().toUpperCase(),
-          member_id: memberId,
-          domain: domain,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data?.error || "Token inválido ou expirado");
-      }
-
-      if (data?.success) {
-        toast.success("Workspace vinculado com sucesso!");
-        await loadData();
-      }
-    } catch (err: any) {
-      toast.error(err.message || "Erro ao validar token");
-    } finally {
-      setValidatingToken(false);
+      setView("pending");
     }
   };
 
@@ -252,67 +210,27 @@ export default function Bitrix24App() {
     );
   }
 
-  if (view === "token") {
+  if (view === "pending") {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-4">
         <Card className="w-full max-w-md">
           <CardHeader className="text-center">
-            <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
-              <Zap className="h-8 w-8 text-primary" />
-            </div>
-            <CardTitle>Vincular Workspace Thoth.ai</CardTitle>
+            <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto mb-4" />
+            <CardTitle>Instalação em Andamento</CardTitle>
             <CardDescription>
-              Para acessar o painel completo, vincule seu workspace Thoth.ai a este portal Bitrix24
+              Aguarde enquanto configuramos seu workspace automaticamente.
+              Se demorar mais de 30 segundos, recarregue a página.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {error && (
-              <div className="bg-destructive/10 text-destructive text-sm p-3 rounded-lg flex items-center gap-2">
-                <AlertCircle className="h-4 w-4" />
-                {error}
-              </div>
-            )}
-            
-            <div className="space-y-2">
-              <Label htmlFor="token">Token de Vinculação</Label>
-              <Input
-                id="token"
-                placeholder="XXXX-XXXX"
-                value={linkingToken}
-                onChange={(e) => setLinkingToken(e.target.value.toUpperCase())}
-                className="text-center text-lg font-mono tracking-wider"
-                maxLength={9}
-              />
-              <p className="text-xs text-muted-foreground text-center">
-                Gere o token em <strong>chat.thoth24.com</strong> → Integrações → Bitrix24
-              </p>
-            </div>
-            
-            <Button 
-              onClick={handleValidateToken} 
-              className="w-full"
-              disabled={validatingToken || !linkingToken.trim()}
-            >
-              {validatingToken ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <Zap className="h-4 w-4 mr-2" />
-              )}
-              Vincular Workspace
+            <Button onClick={() => window.location.reload()} variant="outline" className="w-full">
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Recarregar Página
             </Button>
-
+            
             <div className="pt-4 border-t">
               <p className="text-xs text-muted-foreground text-center">
-                Não tem uma conta? Acesse{" "}
-                <a 
-                  href="https://chat.thoth24.com" 
-                  target="_blank" 
-                  rel="noopener noreferrer"
-                  className="text-primary hover:underline"
-                >
-                  chat.thoth24.com
-                </a>
-                {" "}para criar
+                Portal: {domain || memberId || "Identificando..."}
               </p>
             </div>
           </CardContent>
