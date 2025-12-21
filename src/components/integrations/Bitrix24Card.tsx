@@ -20,6 +20,7 @@ import {
   Stethoscope,
   Wrench,
   XCircle,
+  Search,
 } from "lucide-react";
 
 interface Integration {
@@ -55,13 +56,34 @@ interface DiagnosisResult {
   fixes_applied: string[];
 }
 
+interface VerificationResult {
+  connector_id: string;
+  domain: string;
+  token_valid: boolean;
+  connectors: { id: string; name: string }[];
+  duplicate_connectors: string[];
+  events: { event: string; handler: string }[];
+  duplicate_events: number;
+  lines: {
+    id: number;
+    name: string;
+    active: boolean;
+    connector_active: boolean;
+  }[];
+  mappings: any[];
+  issues: string[];
+  recommendations: string[];
+}
+
 export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }: Bitrix24CardProps) {
   const [linkingToken, setLinkingToken] = useState<string | null>(null);
   const [generatingToken, setGeneratingToken] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
   const [diagnosing, setDiagnosing] = useState(false);
   const [fixing, setFixing] = useState(false);
+  const [verifying, setVerifying] = useState(false);
   const [diagnosis, setDiagnosis] = useState<DiagnosisResult | null>(null);
+  const [verification, setVerification] = useState<VerificationResult | null>(null);
 
   const config = integration?.config || {};
   const isConnected = integration?.is_active && config.auto_setup_completed;
@@ -233,6 +255,41 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
     }
   };
 
+  const handleVerifyIntegration = async () => {
+    if (!integration?.id) {
+      toast.error("Integração não encontrada");
+      return;
+    }
+
+    setVerifying(true);
+    setVerification(null);
+    
+    try {
+      const response = await supabase.functions.invoke("bitrix24-webhook", {
+        body: {
+          action: "verify_integration",
+          integration_id: integration.id,
+        }
+      });
+
+      if (response.data?.success) {
+        setVerification(response.data.verification);
+        if (response.data.healthy) {
+          toast.success("Integração funcionando corretamente!");
+        } else {
+          toast.warning(`${response.data.verification.issues.length} problema(s) encontrado(s)`);
+        }
+      } else {
+        toast.error(response.data?.error || "Erro na verificação");
+      }
+    } catch (error) {
+      console.error("Error verifying:", error);
+      toast.error("Erro na verificação");
+    } finally {
+      setVerifying(false);
+    }
+  };
+
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
     toast.success("Copiado!");
@@ -349,6 +406,84 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
             </div>
           )}
 
+          {/* Verification Results */}
+          {verification && (
+            <div className="border rounded-lg p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <Search className="h-5 w-5 text-blue-500" />
+                <span className="font-medium">Verificação Completa</span>
+              </div>
+              
+              <div className="text-sm space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Conectores registrados:</span>
+                  <span className="font-medium">{verification.connectors.length}</span>
+                </div>
+                
+                {verification.duplicate_connectors.length > 0 && (
+                  <div className="bg-red-500/10 rounded p-2">
+                    <p className="text-sm font-medium text-red-600">
+                      ⚠️ {verification.duplicate_connectors.length} conectores duplicados: {verification.duplicate_connectors.join(", ")}
+                    </p>
+                  </div>
+                )}
+
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Eventos configurados:</span>
+                  <span className="font-medium">{verification.events.length}</span>
+                </div>
+
+                {verification.duplicate_events > 0 && (
+                  <div className="bg-yellow-500/10 rounded p-2 text-yellow-700">
+                    ⚠️ {verification.duplicate_events} eventos duplicados
+                  </div>
+                )}
+
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Linhas configuradas:</span>
+                  <span className="font-medium">{verification.lines.length}</span>
+                </div>
+
+                {/* Lines status */}
+                {verification.lines.map((line) => (
+                  <div key={line.id} className="flex items-center justify-between text-xs bg-muted/50 rounded p-2">
+                    <span>{line.name} (ID: {line.id})</span>
+                    <div className="flex items-center gap-1">
+                      {line.connector_active ? (
+                        <CheckCircle2 className="h-3 w-3 text-green-500" />
+                      ) : (
+                        <XCircle className="h-3 w-3 text-red-500" />
+                      )}
+                      <span>{line.connector_active ? "Ativo" : "Inativo"}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {verification.issues.length > 0 && (
+                <div className="bg-red-500/10 rounded p-2">
+                  <p className="text-sm font-medium text-red-600 mb-1">Problemas:</p>
+                  <ul className="text-sm text-red-600 list-disc list-inside">
+                    {verification.issues.map((issue, i) => (
+                      <li key={i}>{issue}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {verification.recommendations.length > 0 && (
+                <div className="bg-blue-500/10 rounded p-2">
+                  <p className="text-sm font-medium text-blue-600 mb-1">Recomendações:</p>
+                  <ul className="text-sm text-blue-600 list-disc list-inside">
+                    {verification.recommendations.map((rec, i) => (
+                      <li key={i}>{rec}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* How to use */}
           <Alert>
             <AlertCircle className="h-4 w-4" />
@@ -361,16 +496,16 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
           <div className="flex gap-2">
             <Button 
               variant="outline" 
-              onClick={handleDiagnose}
-              disabled={diagnosing}
+              onClick={handleVerifyIntegration}
+              disabled={verifying}
               className="flex-1"
             >
-              {diagnosing ? (
+              {verifying ? (
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
               ) : (
-                <Stethoscope className="h-4 w-4 mr-2" />
+                <Search className="h-4 w-4 mr-2" />
               )}
-              Diagnosticar
+              Verificar
             </Button>
 
             <Button 
@@ -384,7 +519,7 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
               ) : (
                 <Wrench className="h-4 w-4 mr-2" />
               )}
-              Corrigir Automaticamente
+              Corrigir
             </Button>
           </div>
 

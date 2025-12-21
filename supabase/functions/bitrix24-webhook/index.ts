@@ -2200,6 +2200,8 @@ async function handleAutoSetup(supabase: any, payload: any, supabaseUrl: string)
   const effectiveInstanceId = instance_id || config.instance_id;
 
   const results = {
+    connectors_cleaned: 0,
+    events_cleaned: 0,
     connector_registered: false,
     lines_activated: 0,
     lines_total: 0,
@@ -2211,6 +2213,113 @@ async function handleAutoSetup(supabase: any, payload: any, supabaseUrl: string)
   };
 
   try {
+    // STEP 0: CLEAN ALL DUPLICATE CONNECTORS FIRST (Critical for fixing duplicates!)
+    console.log("Step 0: Cleaning duplicate connectors and events...");
+    try {
+      // List all existing connectors
+      const listResponse = await fetch(`${clientEndpoint}imconnector.list`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ auth: accessToken })
+      });
+      const listResult = await listResponse.json();
+      console.log("Existing connectors:", JSON.stringify(listResult));
+
+      const connectorsObj = listResult.result || {};
+      const connectorIds = Object.keys(connectorsObj);
+      
+      // Find and remove ALL connectors with "thoth" or "whatsapp" in the ID
+      for (const cId of connectorIds) {
+        const cIdLower = cId.toLowerCase();
+        if (cIdLower.includes("thoth") || cIdLower.includes("whatsapp")) {
+          console.log(`Removing duplicate connector: ${cId}`);
+          
+          // First deactivate for all lines (0-10)
+          for (let lineId = 0; lineId <= 10; lineId++) {
+            try {
+              await fetch(`${clientEndpoint}imconnector.deactivate`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  auth: accessToken,
+                  CONNECTOR: cId,
+                  LINE: lineId
+                })
+              });
+            } catch (e) {
+              // Ignore errors
+            }
+          }
+          
+          // Then unregister
+          try {
+            const unregResponse = await fetch(`${clientEndpoint}imconnector.unregister`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ auth: accessToken, ID: cId })
+            });
+            const unregResult = await unregResponse.json();
+            console.log(`Unregister ${cId}:`, unregResult);
+            if (unregResult.result || !unregResult.error) {
+              results.connectors_cleaned++;
+            }
+          } catch (e) {
+            console.log(`Failed to unregister ${cId}`);
+          }
+        }
+      }
+
+      // Also clean duplicate events
+      const eventsResponse = await fetch(`${clientEndpoint}event.get`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ auth: accessToken })
+      });
+      const eventsResult = await eventsResponse.json();
+      const boundEvents = eventsResult.result || [];
+      
+      // Find events pointing to our webhook and group by event name
+      const eventsByName: Record<string, any[]> = {};
+      for (const ev of boundEvents) {
+        const handler = ev.handler || ev.HANDLER || "";
+        if (handler.includes("bitrix24-webhook")) {
+          const evName = ev.event || ev.EVENT;
+          if (!eventsByName[evName]) {
+            eventsByName[evName] = [];
+          }
+          eventsByName[evName].push(ev);
+        }
+      }
+
+      // Remove duplicate events (keep only one per event type)
+      for (const [evName, events] of Object.entries(eventsByName)) {
+        if (events.length > 1) {
+          console.log(`Cleaning ${events.length - 1} duplicate events for ${evName}`);
+          for (let i = 1; i < events.length; i++) {
+            try {
+              await fetch(`${clientEndpoint}event.unbind`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  auth: accessToken,
+                  event: evName,
+                  handler: events[i].handler || events[i].HANDLER
+                })
+              });
+              results.events_cleaned++;
+            } catch (e) {
+              // Ignore
+            }
+          }
+        }
+      }
+
+      console.log(`Cleanup complete: ${results.connectors_cleaned} connectors, ${results.events_cleaned} events removed`);
+    } catch (cleanupError) {
+      console.error("Error during cleanup:", cleanupError);
+      results.warnings.push("Limpeza parcial de conectores");
+    }
+
     // 1. Register connector if not already registered with Marketplace-compliant icons
     console.log("Step 1: Registering connector with Marketplace-compliant icons...");
     
@@ -2828,6 +2937,217 @@ async function handleSendSms(supabase: any, payload: any, supabaseUrl: string) {
   }
 }
 
+// Handle verify_integration action - Complete verification of Bitrix24 integration
+async function handleVerifyIntegration(supabase: any, payload: any, supabaseUrl: string) {
+  console.log("=== VERIFY INTEGRATION ===");
+  const { integration_id } = payload;
+
+  if (!integration_id) {
+    return new Response(
+      JSON.stringify({ error: "Integration ID não fornecido" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const { data: integration, error: integrationError } = await supabase
+    .from("integrations")
+    .select("*")
+    .eq("id", integration_id)
+    .single();
+
+  if (integrationError || !integration) {
+    return new Response(
+      JSON.stringify({ error: "Integração não encontrada" }),
+      { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const accessToken = await refreshBitrixToken(integration, supabase);
+  if (!accessToken) {
+    return new Response(
+      JSON.stringify({ error: "Token de acesso não disponível" }),
+      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const config = integration.config;
+  const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
+  const connectorId = config.connector_id || "thoth_whatsapp";
+
+  const verification = {
+    connector_id: connectorId,
+    domain: config.domain,
+    token_valid: true,
+    connectors: [] as any[],
+    duplicate_connectors: [] as string[],
+    events: [] as any[],
+    duplicate_events: 0,
+    lines: [] as any[],
+    mappings: [] as any[],
+    issues: [] as string[],
+    recommendations: [] as string[],
+  };
+
+  try {
+    // 1. List all registered connectors
+    console.log("Step 1: Listing all connectors...");
+    const listResponse = await fetch(`${clientEndpoint}imconnector.list`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ auth: accessToken })
+    });
+    const listResult = await listResponse.json();
+    console.log("Connectors:", JSON.stringify(listResult));
+
+    const connectorsObj = listResult.result || {};
+    verification.connectors = Object.keys(connectorsObj).map(id => ({
+      id,
+      name: connectorsObj[id]?.NAME || connectorsObj[id]?.name || id
+    }));
+
+    // Check for duplicates (multiple connectors with thoth/whatsapp)
+    const thothConnectors = verification.connectors.filter(c => 
+      c.id.toLowerCase().includes("thoth") || c.id.toLowerCase().includes("whatsapp")
+    );
+    if (thothConnectors.length > 1) {
+      verification.duplicate_connectors = thothConnectors.map(c => c.id);
+      verification.issues.push(`${thothConnectors.length} conectores duplicados encontrados`);
+      verification.recommendations.push("Execute 'Reconectar Completo' para limpar duplicados");
+    }
+
+    // 2. Check connector status for each line
+    console.log("Step 2: Checking Open Lines...");
+    const linesResponse = await fetch(`${clientEndpoint}imopenlines.config.list.get`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        auth: accessToken,
+        PARAMS: { select: ["ID", "LINE_NAME", "ACTIVE"] }
+      })
+    });
+    const linesResult = await linesResponse.json();
+    
+    for (const line of (linesResult.result || [])) {
+      const lineId = parseInt(line.ID);
+      
+      // Check connector status for this line
+      const statusResponse = await fetch(`${clientEndpoint}imconnector.status`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          auth: accessToken,
+          CONNECTOR: connectorId,
+          LINE: lineId
+        })
+      });
+      const statusResult = await statusResponse.json();
+
+      verification.lines.push({
+        id: lineId,
+        name: line.LINE_NAME,
+        active: line.ACTIVE === "Y",
+        connector_active: statusResult.result?.active === true || statusResult.result?.ACTIVE === "Y",
+        connector_registered: statusResult.result?.register === true || statusResult.result?.REGISTER === "Y",
+        connector_connection: statusResult.result?.connection === true || statusResult.result?.CONNECTION === "Y",
+      });
+    }
+
+    // Check if any line has inactive connector
+    const inactiveLines = verification.lines.filter(l => l.active && !l.connector_active);
+    if (inactiveLines.length > 0) {
+      verification.issues.push(`Conector inativo em ${inactiveLines.length} linha(s)`);
+      verification.recommendations.push("Execute 'Corrigir Automaticamente' para ativar o conector");
+    }
+
+    // 3. Check bound events
+    console.log("Step 3: Checking events...");
+    const eventsResponse = await fetch(`${clientEndpoint}event.get`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ auth: accessToken })
+    });
+    const eventsResult = await eventsResponse.json();
+    
+    const ourEvents = (eventsResult.result || []).filter((e: any) => 
+      (e.handler || e.HANDLER || "").includes("bitrix24")
+    );
+    
+    verification.events = ourEvents.map((e: any) => ({
+      event: e.event || e.EVENT,
+      handler: e.handler || e.HANDLER
+    }));
+
+    // Check for duplicate events
+    const eventCounts: Record<string, number> = {};
+    for (const e of ourEvents) {
+      const evName = e.event || e.EVENT;
+      eventCounts[evName] = (eventCounts[evName] || 0) + 1;
+    }
+    for (const [evName, count] of Object.entries(eventCounts)) {
+      if (count > 1) {
+        verification.duplicate_events += count - 1;
+      }
+    }
+    if (verification.duplicate_events > 0) {
+      verification.issues.push(`${verification.duplicate_events} eventos duplicados`);
+    }
+
+    // Check if OnImConnectorMessageAdd is bound
+    const hasMessageEvent = ourEvents.some((e: any) => 
+      (e.event || e.EVENT).toUpperCase() === "ONIMCONNECTORMESSAGEADD"
+    );
+    if (!hasMessageEvent) {
+      verification.issues.push("Evento OnImConnectorMessageAdd não configurado");
+      verification.recommendations.push("Este evento é obrigatório para receber mensagens do operador");
+    }
+
+    // 4. Get database mappings
+    console.log("Step 4: Getting database mappings...");
+    const { data: mappings } = await supabase
+      .from("bitrix_channel_mappings")
+      .select(`
+        line_id,
+        line_name,
+        instance_id,
+        is_active,
+        instances (id, name, phone_number, status)
+      `)
+      .eq("integration_id", integration_id);
+
+    verification.mappings = (mappings || []).map((m: any) => ({
+      line_id: m.line_id,
+      line_name: m.line_name,
+      instance_id: m.instance_id,
+      instance_name: m.instances?.name,
+      instance_status: m.instances?.status,
+      is_active: m.is_active
+    }));
+
+    // Final assessment
+    const healthy = verification.issues.length === 0;
+
+    console.log("Verification complete:", verification);
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        healthy,
+        verification,
+        summary: healthy 
+          ? "Integração funcionando corretamente"
+          : `${verification.issues.length} problema(s) encontrado(s)`
+      }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  } catch (error) {
+    console.error("Error verifying integration:", error);
+    return new Response(
+      JSON.stringify({ error: error instanceof Error ? error.message : "Erro na verificação" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+}
+
 serve(async (req) => {
   console.log("=== BITRIX24-WEBHOOK REQUEST ===");
   console.log("Method:", req.method);
@@ -2943,6 +3263,11 @@ serve(async (req) => {
     // Handle diagnose connector (check and auto-fix issues)
     if (action === "diagnose_connector" || payload.action === "diagnose_connector") {
       return await handleDiagnoseConnector(supabase, payload, supabaseUrl);
+    }
+
+    // Handle verify_integration action (full verification)
+    if (action === "verify_integration" || payload.action === "verify_integration") {
+      return await handleVerifyIntegration(supabase, payload, supabaseUrl);
     }
 
     // Handle clean connectors (remove duplicates)
@@ -3195,6 +3520,55 @@ serve(async (req) => {
           console.error("Error sending to WhatsApp:", sendResult.error);
         } else {
           console.log("Message successfully sent to WhatsApp, messageId:", sendResult.messageId);
+          
+          // CRITICAL: Call imconnector.send.status.delivery to confirm delivery to Bitrix24
+          // This is required for Bitrix24 to mark the message as delivered
+          try {
+            const messageId = firstMessage.message?.id || firstMessage.im?.message_id;
+            if (messageId && line) {
+              // Find integration to get access token
+              const { data: integrationData } = await supabase
+                .from("integrations")
+                .select("*")
+                .eq("type", "bitrix24")
+                .eq("is_active", true)
+                .maybeSingle();
+
+              if (integrationData?.config?.access_token) {
+                const bitrixAccessToken = await refreshBitrixToken(integrationData, supabase);
+                const bitrixEndpoint = integrationData.config.client_endpoint || `https://${integrationData.config.domain}/rest/`;
+                const bitrixConnectorId = integrationData.config.connector_id || "thoth_whatsapp";
+
+                console.log("Sending delivery status to Bitrix24...");
+                const deliveryResponse = await fetch(`${bitrixEndpoint}imconnector.send.status.delivery`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    auth: bitrixAccessToken,
+                    CONNECTOR: bitrixConnectorId,
+                    LINE: line,
+                    MESSAGES: [{
+                      im: {
+                        chat_id: recipientChatId,
+                        message_id: messageId
+                      },
+                      message: {
+                        id: [sendResult.messageId || sendResult.id || `wa_${Date.now()}`]
+                      },
+                      chat: {
+                        id: recipientChatId
+                      }
+                    }]
+                  })
+                });
+                const deliveryResult = await deliveryResponse.json();
+                console.log("imconnector.send.status.delivery result:", deliveryResult);
+              }
+            }
+          } catch (deliveryError) {
+            console.error("Error sending delivery status:", deliveryError);
+            // Don't fail the whole operation if delivery status fails
+          }
           
           // If we have a conversation, also save the outgoing message
           if (conversationId && !sendResult.message) {
