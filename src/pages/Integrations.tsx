@@ -155,9 +155,8 @@ const integrationTypes = [
   },
 ];
 
-// Bitrix24 App URLs
-const BITRIX24_HANDLER_URL = "https://ybqwwipwimnkonnebbys.supabase.co/functions/v1/bitrix24-install";
-const BITRIX24_INITIAL_INSTALL_URL = "https://chat.thoth24.com/bitrix24-setup";
+// Bitrix24 Marketplace App URL
+const BITRIX24_MARKETPLACE_URL = "https://www.bitrix24.com.br/apps/app/thoth_whatsapp";
 
 export default function Integrations() {
   const [integrations, setIntegrations] = useState<Integration[]>([]);
@@ -178,9 +177,7 @@ export default function Integrations() {
   const [syncingContacts, setSyncingContacts] = useState(false);
   const [syncDirection, setSyncDirection] = useState<"both" | "to_bitrix" | "from_bitrix">("both");
 
-  // Token de vinculação Bitrix24
-  const [linkingToken, setLinkingToken] = useState<string | null>(null);
-  const [generatingToken, setGeneratingToken] = useState(false);
+  // MARKETPLACE: Token linking removed - app is installed via marketplace
 
   // MARKETPLACE: OAuth credentials now come from environment, no manual config needed
 
@@ -944,66 +941,7 @@ export default function Integrations() {
     toast.success(`${label} copiado!`);
   };
 
-  const handleGenerateLinkingToken = async () => {
-    if (!workspace?.id) {
-      toast.error("Workspace não encontrado");
-      return;
-    }
-
-    setGeneratingToken(true);
-    try {
-      // Generate a random token
-      const token = crypto.randomUUID().replace(/-/g, "").substring(0, 16).toUpperCase();
-
-      // Save token to database
-      const { error } = await supabase
-        .from("workspace_tokens")
-        .insert({
-          workspace_id: workspace.id,
-          token,
-          token_type: "bitrix24",
-        });
-
-      if (error) throw error;
-
-      setLinkingToken(token);
-      toast.success("Token de vinculação gerado com sucesso!");
-    } catch (error) {
-      console.error("Error generating token:", error);
-      toast.error("Erro ao gerar token de vinculação");
-    } finally {
-      setGeneratingToken(false);
-    }
-  };
-
-  const fetchExistingToken = async () => {
-    if (!workspace?.id) return;
-
-    try {
-      const { data } = await supabase
-        .from("workspace_tokens")
-        .select("token, expires_at, is_used")
-        .eq("workspace_id", workspace.id)
-        .eq("token_type", "bitrix24")
-        .eq("is_used", false)
-        .gt("expires_at", new Date().toISOString())
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (data) {
-        setLinkingToken(data.token);
-      }
-    } catch (error) {
-      console.error("Error fetching token:", error);
-    }
-  };
-
-  useEffect(() => {
-    if (workspace) {
-      fetchExistingToken();
-    }
-  }, [workspace]);
+  // MARKETPLACE: Token generation removed - app is installed via Bitrix24 Marketplace
 
   // MARKETPLACE: OAuth is handled automatically via marketplace app installation
   // No manual OAuth configuration needed
@@ -1479,133 +1417,52 @@ export default function Integrations() {
                 ) : (
                   /* Not Connected - Setup Instructions */
                   <div className="space-y-6">
-                    {/* Quick Setup Instructions */}
-                    <div className="bg-sky-500/5 border border-sky-500/20 rounded-lg p-4">
-                      <h4 className="font-medium text-sky-600 dark:text-sky-400 mb-2">
-                        Configuração Rápida (3 passos)
-                      </h4>
-                      <ol className="text-sm text-muted-foreground space-y-2">
-                        <li className="flex gap-2">
-                          <span className="font-bold text-primary">1.</span>
-                          No Bitrix24: Aplicações → Desenvolvedores → Adicionar Aplicativo Local
-                        </li>
-                        <li className="flex gap-2">
-                          <span className="font-bold text-primary">2.</span>
-                          Configure as URLs abaixo e permissões: imopenlines, imconnector, im, crm
-                        </li>
-                        <li className="flex gap-2">
-                          <span className="font-bold text-primary">3.</span>
-                          Instale o app e cole o token gerado aqui
-                        </li>
+                    {/* Marketplace App Installation */}
+                    <Alert className="bg-primary/5 border-primary/20">
+                      <Building2 className="h-4 w-4" />
+                      <AlertTitle>App Marketplace Bitrix24</AlertTitle>
+                      <AlertDescription>
+                        O Thoth WhatsApp está disponível no Marketplace do Bitrix24. 
+                        Instale diretamente do seu portal para conectar automaticamente.
+                      </AlertDescription>
+                    </Alert>
+
+                    <div className="flex flex-col sm:flex-row gap-3">
+                      <Button asChild className="flex-1">
+                        <a 
+                          href={BITRIX24_MARKETPLACE_URL}
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                        >
+                          <ExternalLink className="h-4 w-4 mr-2" />
+                          Ir para o Marketplace
+                        </a>
+                      </Button>
+                      <Button variant="outline" asChild>
+                        <a 
+                          href="https://helpdesk.bitrix24.com.br/open/17558322/" 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                        >
+                          <ExternalLink className="h-4 w-4 mr-2" />
+                          Ver Tutorial
+                        </a>
+                      </Button>
+                    </div>
+
+                    <div className="bg-muted/50 rounded-lg p-4 text-sm space-y-2">
+                      <p className="font-medium">Como instalar:</p>
+                      <ol className="list-decimal list-inside text-muted-foreground space-y-1">
+                        <li>Clique em "Ir para o Marketplace"</li>
+                        <li>Faça login no seu portal Bitrix24</li>
+                        <li>Clique em "Instalar" no app Thoth WhatsApp</li>
+                        <li>Após a instalação, o app aparecerá aqui como "Conectado"</li>
                       </ol>
                     </div>
 
-                    {/* URLs to copy */}
-                    <div className="space-y-3">
-                      <div className="space-y-1.5">
-                        <Label className="text-xs text-muted-foreground">Handler URL</Label>
-                        <div className="flex gap-2">
-                          <Input
-                            readOnly
-                            value={BITRIX24_HANDLER_URL}
-                            className="font-mono text-xs bg-muted"
-                          />
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            onClick={() => copyToClipboard(BITRIX24_HANDLER_URL, "Handler URL")}
-                          >
-                            <Copy className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-
-                      <div className="space-y-1.5">
-                        <Label className="text-xs text-muted-foreground">Initial Install URL</Label>
-                        <div className="flex gap-2">
-                          <Input
-                            readOnly
-                            value={BITRIX24_INITIAL_INSTALL_URL}
-                            className="font-mono text-xs bg-muted"
-                          />
-                          <Button
-                            variant="outline"
-                            size="icon"
-                            onClick={() => copyToClipboard(BITRIX24_INITIAL_INSTALL_URL, "Install URL")}
-                          >
-                            <Copy className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Token Generation */}
-                    <div className="border rounded-lg p-4 space-y-3">
-                      <div className="flex items-center gap-2">
-                        <Key className="h-5 w-5 text-primary" />
-                        <span className="font-medium">Token de Vinculação</span>
-                      </div>
-                      
-                      {linkingToken ? (
-                        <div className="space-y-2">
-                          <div className="flex gap-2">
-                            <Input
-                              readOnly
-                              value={linkingToken}
-                              className="font-mono text-lg text-center tracking-widest bg-muted"
-                            />
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              onClick={() => copyToClipboard(linkingToken, "Token")}
-                            >
-                              <Copy className="h-4 w-4" />
-                            </Button>
-                          </div>
-                          <p className="text-xs text-muted-foreground">
-                            Cole este token na tela de configuração do Bitrix24
-                          </p>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={handleGenerateLinkingToken}
-                            disabled={generatingToken}
-                          >
-                            {generatingToken ? (
-                              <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                            ) : (
-                              <RefreshCw className="h-4 w-4 mr-2" />
-                            )}
-                            Gerar Novo Token
-                          </Button>
-                        </div>
-                      ) : (
-                        <Button
-                          onClick={handleGenerateLinkingToken}
-                          disabled={generatingToken}
-                          className="w-full"
-                        >
-                          {generatingToken ? (
-                            <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                          ) : (
-                            <Key className="h-4 w-4 mr-2" />
-                          )}
-                          Gerar Token
-                        </Button>
-                      )}
-                    </div>
-
-                    {/* Documentation link */}
-                    <Button variant="outline" className="w-full" asChild>
-                      <a 
-                        href="https://helpdesk.bitrix24.com.br/open/17558322/" 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                      >
-                        <ExternalLink className="h-4 w-4 mr-2" />
-                        Ver Tutorial Completo
-                      </a>
-                    </Button>
+                    <p className="text-xs text-muted-foreground text-center">
+                      A integração é configurada automaticamente após a instalação do app.
+                    </p>
                   </div>
                 )}
               </CardContent>
