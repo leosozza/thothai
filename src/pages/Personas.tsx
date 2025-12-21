@@ -25,11 +25,11 @@ import {
   Bot,
   Edit,
   Trash2,
-  Star,
   Volume2,
   Loader2,
   Sparkles,
   MessageSquare,
+  Zap,
 } from "lucide-react";
 
 interface Persona {
@@ -250,55 +250,69 @@ export default function Personas() {
     }
   };
 
-  const handleSetDefault = async (persona: Persona) => {
+  const handleTogglePersonaBot = async (persona: Persona, enabled: boolean) => {
+    if (!botStatus.integrationId) {
+      toast.error("Nenhuma integração Bitrix24 encontrada");
+      return;
+    }
+
+    setTogglingBot(true);
     try {
-      // Remove default from all
-      await supabase
-        .from("personas")
-        .update({ is_default: false })
-        .eq("workspace_id", workspace?.id);
+      if (enabled) {
+        // Set this persona as default
+        await supabase
+          .from("personas")
+          .update({ is_default: false })
+          .eq("workspace_id", workspace?.id);
 
-      // Set new default
-      const { error } = await supabase
-        .from("personas")
-        .update({ is_default: true })
-        .eq("id", persona.id);
+        await supabase
+          .from("personas")
+          .update({ is_default: true })
+          .eq("id", persona.id);
 
-      if (error) throw error;
+        // Activate bot with this persona
+        await supabase.functions.invoke("bitrix24-webhook", {
+          body: {
+            action: "update_bot_config",
+            integration_id: botStatus.integrationId,
+            bot_enabled: true,
+            bot_persona_id: persona.id,
+            bot_welcome_message: persona.welcome_message,
+          },
+        });
 
-      // Check for Bitrix24 integration and activate bot
-      if (botStatus.integrationId) {
-        try {
-          await supabase.functions.invoke("bitrix24-webhook", {
-            body: {
-              action: "update_bot_config",
-              integration_id: botStatus.integrationId,
-              bot_enabled: true,
-              bot_persona_id: persona.id,
-              bot_welcome_message: persona.welcome_message,
-            },
-          });
+        setBotStatus((prev) => ({
+          ...prev,
+          enabled: true,
+          personaId: persona.id,
+          personaName: persona.name,
+        }));
 
-          setBotStatus((prev) => ({
-            ...prev,
-            enabled: true,
-            personaId: persona.id,
-            personaName: persona.name,
-          }));
-
-          toast.success(`Bot Bitrix24 ativado com a persona "${persona.name}"`);
-        } catch (botError) {
-          console.error("Error activating bot:", botError);
-          toast.success(`${persona.name} é agora a persona padrão`);
-        }
+        toast.success(`Bot ativado com "${persona.name}"`);
       } else {
-        toast.success(`${persona.name} é agora a persona padrão`);
+        // Deactivate bot
+        await supabase.functions.invoke("bitrix24-webhook", {
+          body: {
+            action: "update_bot_config",
+            integration_id: botStatus.integrationId,
+            bot_enabled: false,
+          },
+        });
+
+        setBotStatus((prev) => ({
+          ...prev,
+          enabled: false,
+        }));
+
+        toast.success("Bot desativado");
       }
 
       fetchPersonas();
     } catch (error) {
-      console.error("Error setting default:", error);
-      toast.error("Erro ao definir padrão");
+      console.error("Error toggling persona bot:", error);
+      toast.error("Erro ao alterar status do bot");
+    } finally {
+      setTogglingBot(false);
     }
   };
 
@@ -376,77 +390,91 @@ export default function Personas() {
           </Card>
         ) : (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {personas.map((persona) => (
-              <Card key={persona.id} className="relative overflow-hidden">
-                {persona.is_default && (
-                  <div className="absolute top-0 right-0">
-                    <Badge className="rounded-none rounded-bl-lg bg-primary text-primary-foreground gap-1">
-                      <Star className="h-3 w-3" />
-                      Padrão
-                    </Badge>
-                  </div>
-                )}
-                <CardHeader>
-                  <div className="flex items-start gap-4">
-                    <Avatar className="h-14 w-14">
-                      <AvatarImage src={persona.avatar_url || ""} />
-                      <AvatarFallback className="bg-primary/10 text-primary text-lg">
-                        {persona.name.charAt(0).toUpperCase()}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1">
-                      <CardTitle className="text-lg">{persona.name}</CardTitle>
-                      <CardDescription className="line-clamp-2">
-                        {persona.description || "Sem descrição"}
-                      </CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex items-center gap-4 text-sm">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-muted-foreground">Temp:</span>
-                      <span className="font-medium">{persona.temperature}</span>
-                    </div>
-                    {persona.voice_enabled && (
-                      <Badge variant="outline" className="gap-1">
-                        <Volume2 className="h-3 w-3" />
-                        Voz
+            {personas.map((persona) => {
+              const isBotActiveWithPersona = botStatus.enabled && botStatus.personaId === persona.id;
+              
+              return (
+                <Card key={persona.id} className={`relative overflow-hidden ${isBotActiveWithPersona ? 'ring-2 ring-primary' : ''}`}>
+                  {isBotActiveWithPersona && (
+                    <div className="absolute top-0 right-0">
+                      <Badge className="rounded-none rounded-bl-lg bg-primary text-primary-foreground gap-1">
+                        <Zap className="h-3 w-3" />
+                        Bot Ativo
                       </Badge>
-                    )}
-                  </div>
+                    </div>
+                  )}
+                  <CardHeader>
+                    <div className="flex items-start gap-4">
+                      <Avatar className="h-14 w-14">
+                        <AvatarImage src={persona.avatar_url || ""} />
+                        <AvatarFallback className="bg-primary/10 text-primary text-lg">
+                          {persona.name.charAt(0).toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="flex-1">
+                        <CardTitle className="text-lg">{persona.name}</CardTitle>
+                        <CardDescription className="line-clamp-2">
+                          {persona.description || "Sem descrição"}
+                        </CardDescription>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-4 text-sm">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-muted-foreground">Temp:</span>
+                          <span className="font-medium">{persona.temperature}</span>
+                        </div>
+                        {persona.voice_enabled && (
+                          <Badge variant="outline" className="gap-1">
+                            <Volume2 className="h-3 w-3" />
+                            Voz
+                          </Badge>
+                        )}
+                      </div>
+                      
+                      {botStatus.integrationId && (
+                        <div className="flex items-center gap-2">
+                          <Label 
+                            htmlFor={`bot-switch-${persona.id}`} 
+                            className="text-xs text-muted-foreground cursor-pointer"
+                          >
+                            Ativar Bot
+                          </Label>
+                          <Switch
+                            id={`bot-switch-${persona.id}`}
+                            checked={isBotActiveWithPersona}
+                            onCheckedChange={(checked) => handleTogglePersonaBot(persona, checked)}
+                            disabled={togglingBot}
+                          />
+                        </div>
+                      )}
+                    </div>
 
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="flex-1"
-                      onClick={() => handleOpenEdit(persona)}
-                    >
-                      <Edit className="h-4 w-4 mr-1" />
-                      Editar
-                    </Button>
-                    {!persona.is_default && (
+                    <div className="flex gap-2">
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => handleSetDefault(persona)}
+                        className="flex-1"
+                        onClick={() => handleOpenEdit(persona)}
                       >
-                        <Star className="h-4 w-4" />
+                        <Edit className="h-4 w-4 mr-1" />
+                        Editar
                       </Button>
-                    )}
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      className="h-8 w-8 text-destructive hover:text-destructive"
-                      onClick={() => handleDelete(persona.id)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className="h-8 w-8 text-destructive hover:text-destructive"
+                        onClick={() => handleDelete(persona.id)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
         )}
 
