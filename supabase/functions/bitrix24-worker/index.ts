@@ -447,7 +447,8 @@ async function processOperatorMessage(
 
       if (integrationData?.config?.access_token) {
         const bitrixAccessToken = await refreshBitrixToken(integrationData, supabase);
-        const bitrixEndpoint = integrationData.config.client_endpoint || `https://${integrationData.config.domain}/rest/`;
+        // IMPORTANT: Use config.domain for REST API calls, NOT client_endpoint (which is oauth.bitrix.info)
+        const bitrixEndpoint = integrationData.config.domain ? `https://${integrationData.config.domain}/rest/` : integrationData.config.client_endpoint;
         const bitrixConnectorId = integrationData.config.connector_id || "thoth_whatsapp";
 
         await fetch(`${bitrixEndpoint}imconnector.send.status.delivery`, {
@@ -624,7 +625,8 @@ async function processPlacement(
   const webhookUrl = `${supabaseUrl}/functions/v1/bitrix24-events`;
   const config = integration.config || {};
   const accessToken = authId || config.access_token;
-  const apiUrl = domain ? `https://${domain}/rest/` : (config.client_endpoint || `https://${config.domain}/rest/`);
+  // IMPORTANT: Use config.domain for REST API calls, NOT client_endpoint (which is oauth.bitrix.info)
+  const apiUrl = domain ? `https://${domain}/rest/` : `https://${config.domain}/rest/`;
 
   // Activate connector
   if (payload.PLACEMENT === "SETTING_CONNECTOR" || lineId > 0) {
@@ -718,7 +720,8 @@ async function processAdminRebindEvents(
     throw new Error("No access token available");
   }
 
-  const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
+  // IMPORTANT: Use config.domain for REST API calls, NOT client_endpoint (which is oauth.bitrix.info)
+  const clientEndpoint = config.domain ? `https://${config.domain}/rest/` : config.client_endpoint;
   const oldWebhookUrl = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
   const newEventsUrl = `${supabaseUrl}/functions/v1/bitrix24-events`;
 
@@ -872,7 +875,8 @@ async function processAdminRebindPlacements(
   const config = integration.config;
   const domain = config.domain;
   const accessToken = config.access_token;
-  const clientEndpoint = config.client_endpoint || `https://${domain}/rest/`;
+  // IMPORTANT: Use config.domain for REST API calls, NOT client_endpoint (which is oauth.bitrix.info)
+  const clientEndpoint = config.domain ? `https://${config.domain}/rest/` : config.client_endpoint;
 
   if (!accessToken) {
     throw new Error("No access token configured");

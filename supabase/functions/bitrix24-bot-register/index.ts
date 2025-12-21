@@ -100,7 +100,8 @@ serve(async (req) => {
     }
 
     const config = integration.config;
-    const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
+    // IMPORTANT: Use config.domain for REST API calls, NOT client_endpoint (which is oauth.bitrix.info)
+    const clientEndpoint = config.domain ? `https://${config.domain}/rest/` : config.client_endpoint;
     const eventsUrl = `${supabaseUrl}/functions/v1/bitrix24-events`;
 
     switch (action) {

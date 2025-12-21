@@ -579,7 +579,8 @@ serve(async (req) => {
       logger.info("Activating connector", { connector_id: connectorId, line_id: lineId, active_status: activeStatus });
       
       const accessToken = authId || await refreshBitrixToken(integration, supabase, logger);
-      const apiUrl = domain ? `https://${domain}/rest/` : (config.client_endpoint || `https://${config.domain}/rest/`);
+      // IMPORTANT: Always use config.domain for REST API calls, NOT client_endpoint (which is oauth.bitrix.info)
+      const apiUrl = domain ? `https://${domain}/rest/` : `https://${config.domain}/rest/`;
 
       if (accessToken) {
         try {
