@@ -1147,6 +1147,78 @@ async function handleCleanConnectors(supabase: any, payload: any, supabaseUrl: s
   }
 }
 
+// Handle refresh_token action - Refresh OAuth token and return status
+async function handleRefreshToken(supabase: any, payload: any) {
+  console.log("=== REFRESH TOKEN ===");
+  const { integration_id } = payload;
+
+  if (!integration_id) {
+    return new Response(
+      JSON.stringify({ error: "Integration ID não fornecido" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const { data: integration, error: integrationError } = await supabase
+    .from("integrations")
+    .select("*")
+    .eq("id", integration_id)
+    .single();
+
+  if (integrationError || !integration) {
+    console.error("Integration not found:", integrationError);
+    return new Response(
+      JSON.stringify({ error: "Integração não encontrada" }),
+      { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  try {
+    // Attempt to refresh the token
+    const newToken = await refreshBitrixToken(integration, supabase);
+    
+    if (!newToken) {
+      return new Response(
+        JSON.stringify({ 
+          success: false, 
+          error: "Não foi possível atualizar o token de acesso",
+          hint: "Pode ser necessário reinstalar o app no Bitrix24"
+        }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Reload integration to get updated config
+    const { data: updatedIntegration } = await supabase
+      .from("integrations")
+      .select("*")
+      .eq("id", integration_id)
+      .single();
+
+    const config = updatedIntegration?.config || integration.config;
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        message: "Token atualizado com sucesso",
+        token_valid: true,
+        token_expires_at: config.token_expires_at,
+        domain: config.domain,
+      }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  } catch (error) {
+    console.error("Error refreshing token:", error);
+    return new Response(
+      JSON.stringify({ 
+        success: false, 
+        error: error instanceof Error ? error.message : "Erro ao atualizar token" 
+      }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+}
+
 // Handle check_connector_status action - Check real connector status on Bitrix24
 async function handleCheckConnectorStatus(supabase: any, payload: any) {
   console.log("=== CHECK CONNECTOR STATUS ===");
@@ -4480,6 +4552,21 @@ serve(async (req) => {
 
     // Handle diagnose connector (check and auto-fix issues)
     if (action === "diagnose_connector" || payload.action === "diagnose_connector") {
+      return await handleDiagnoseConnector(supabase, payload, supabaseUrl);
+    }
+
+    // Handle check_status action (alias for verify_integration - used by Bitrix24App iframe)
+    if (action === "check_status" || payload.action === "check_status") {
+      return await handleVerifyIntegration(supabase, payload, supabaseUrl);
+    }
+
+    // Handle refresh_token action (refresh OAuth token and return status)
+    if (action === "refresh_token" || payload.action === "refresh_token") {
+      return await handleRefreshToken(supabase, payload);
+    }
+
+    // Handle diagnose action (alias for diagnose_connector - used by Bitrix24App iframe)
+    if (action === "diagnose" || payload.action === "diagnose") {
       return await handleDiagnoseConnector(supabase, payload, supabaseUrl);
     }
 
