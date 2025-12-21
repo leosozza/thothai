@@ -75,20 +75,49 @@ export default function Bitrix24Setup() {
     try {
       // @ts-ignore - Bitrix24 JS SDK
       if (window.BX24) {
+        console.log("BX24 SDK detected, initializing...");
         // @ts-ignore
         window.BX24.init(() => {
+          console.log("BX24.init() completed");
           // @ts-ignore
           window.BX24.fitWindow();
+          
+          // CRITICAL: Call installFinish immediately after init
+          // This tells Bitrix24 the app installation is complete
+          try {
+            // @ts-ignore
+            window.BX24.installFinish();
+            installFinishCalled.current = true;
+            console.log("BX24.installFinish() called immediately after init");
+          } catch (installErr) {
+            console.log("BX24.installFinish() error:", installErr);
+          }
+          
           // @ts-ignore
           window.BX24.callMethod("app.info", {}, (result: any) => {
-            const appInfo = result.data();
-            if (appInfo?.member_id) setMemberId(appInfo.member_id);
-            if (appInfo?.DOMAIN) setDomain(appInfo.DOMAIN);
+            const appInfoData = result.data();
+            console.log("app.info result:", appInfoData);
+            if (appInfoData?.member_id) setMemberId(appInfoData.member_id);
+            if (appInfoData?.DOMAIN) setDomain(appInfoData.DOMAIN);
+            
+            // If app is not marked as INSTALLED, try installFinish again
+            if (appInfoData && !appInfoData.INSTALLED) {
+              console.log("App not marked as INSTALLED, retrying installFinish...");
+              try {
+                // @ts-ignore
+                window.BX24.installFinish();
+                console.log("BX24.installFinish() retry completed");
+              } catch (retryErr) {
+                console.log("BX24.installFinish() retry error:", retryErr);
+              }
+            }
           });
         });
+      } else {
+        console.log("BX24 SDK not available on window");
       }
     } catch (e) {
-      console.log("Bitrix24 SDK not available");
+      console.log("Bitrix24 SDK initialization error:", e);
     }
   };
 
