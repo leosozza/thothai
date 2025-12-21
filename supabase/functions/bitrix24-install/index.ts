@@ -766,9 +766,24 @@ serve(async (req) => {
         
         const integrationName = `Bitrix24 - ${actualDomain}`;
         
+        // Calculate token expiration time
+        const authExpiresSeconds = parseInt(body.AUTH_EXPIRES || "3600", 10);
+        const tokenExpiresAt = new Date(Date.now() + authExpiresSeconds * 1000).toISOString();
+        
+        // Build correct client endpoint from actual domain
+        const clientEndpoint = actualDomain.includes('bitrix24') 
+          ? `https://${actualDomain}/rest/` 
+          : body.SERVER_ENDPOINT || `https://oauth.bitrix.info/rest/`;
+        
         const configData: Record<string, any> = {
           member_id: memberId,
           domain: actualDomain,
+          // CORRECT TOKEN FIELDS - AUTH_ID is the access_token, REFRESH_ID is refresh_token
+          access_token: body.AUTH_ID,
+          refresh_token: body.REFRESH_ID,
+          token_expires_at: tokenExpiresAt,
+          client_endpoint: clientEndpoint,
+          // Legacy fields for debugging
           auth_id: body.AUTH_ID,
           refresh_id: body.REFRESH_ID,
           server_endpoint: body.SERVER_ENDPOINT,

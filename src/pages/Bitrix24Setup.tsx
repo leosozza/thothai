@@ -25,14 +25,12 @@ interface BitrixStatus {
   instance_id?: string;
   is_active?: boolean;
   instances?: Instance[];
-  requires_token?: boolean;
-  workspace_id?: string;
   has_access_token?: boolean;
   connector_active?: boolean;
   auto_setup_complete?: boolean;
 }
 
-type SetupStep = "loading" | "token" | "selecting" | "connecting" | "connected" | "error";
+type SetupStep = "loading" | "selecting" | "connecting" | "connected" | "error";
 
 export default function Bitrix24Setup() {
   const [step, setStep] = useState<SetupStep>("loading");
@@ -44,9 +42,6 @@ export default function Bitrix24Setup() {
   const [error, setError] = useState<string | null>(null);
   const [integrationId, setIntegrationId] = useState<string | null>(null);
   
-  // Token for workspace linking
-  const [linkingToken, setLinkingToken] = useState<string>("");
-  const [validatingToken, setValidatingToken] = useState(false);
   
   // Connection states
   const [connecting, setConnecting] = useState(false);
@@ -186,17 +181,18 @@ export default function Bitrix24Setup() {
         // CRITICAL: Notify Bitrix24 installation is complete when already connected
         notifyInstallFinish();
         setStep("connected");
-      } else if (data.workspace_id && data.instances?.length) {
-        // Has workspace but not fully connected
+      } else if (data.found && data.has_access_token && data.instances?.length) {
+        // Integration exists with access token - select instance
         if (data.instances.length === 1) {
-          // Auto-select single instance and connect
           setSelectedInstance(data.instances[0].id);
           setStep("selecting");
         } else {
           setStep("selecting");
         }
-      } else if (data.requires_token || !data.workspace_id) {
-        setStep("token");
+      } else if (!data.found || !data.has_access_token) {
+        // Integration not found or no access token - show error
+        setError("Integração não encontrada ou token expirado. Reinstale o app no Bitrix24.");
+        setStep("error");
       } else {
         setStep("selecting");
       }
@@ -207,55 +203,7 @@ export default function Bitrix24Setup() {
     }
   }, [memberId, domain]);
 
-  const handleValidateToken = async () => {
-    if (!linkingToken.trim()) {
-      toast.error("Digite o token de vinculação");
-      return;
-    }
-
-    try {
-      setValidatingToken(true);
-
-      const response = await fetch(`${SUPABASE_URL}/functions/v1/bitrix24-install`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "validate_token",
-          token: linkingToken.trim().toUpperCase(),
-          member_id: memberId,
-          domain: domain,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data?.error || "Token inválido ou expirado");
-      }
-
-      if (data?.success) {
-        toast.success("Token validado! Configurando automaticamente...");
-        
-        if (data.instances) setInstances(data.instances);
-        if (data.integration_id) setIntegrationId(data.integration_id);
-        
-        // If only one instance, auto-connect
-        if (data.instances?.length === 1) {
-          setSelectedInstance(data.instances[0].id);
-          await handleAutoSetup(data.integration_id, data.instances[0].id);
-        } else if (data.instances?.length > 1) {
-          setStep("selecting");
-        } else {
-          toast.error("Nenhuma instância WhatsApp encontrada. Crie uma instância primeiro.");
-          setStep("error");
-        }
-      }
-    } catch (err: any) {
-      toast.error(err.message || "Erro ao validar token");
-    } finally {
-      setValidatingToken(false);
-    }
-  };
+  
 
   const handleAutoSetup = async (integrationIdParam?: string, instanceIdParam?: string) => {
     const effectiveIntegrationId = integrationIdParam || integrationId;
@@ -562,52 +510,7 @@ export default function Bitrix24Setup() {
     );
   }
 
-  if (step === "token") {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-4">
-        <Card className="w-full max-w-md">
-          <CardHeader className="text-center">
-            <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
-              <Zap className="h-8 w-8 text-primary" />
-            </div>
-            <CardTitle>Vincular Workspace</CardTitle>
-            <CardDescription>
-              Cole o token gerado na página de Integrações do Thoth
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="token">Token de Vinculação</Label>
-              <Input
-                id="token"
-                placeholder="XXXX-XXXX"
-                value={linkingToken}
-                onChange={(e) => setLinkingToken(e.target.value.toUpperCase())}
-                className="text-center text-lg font-mono tracking-wider"
-                maxLength={9}
-              />
-              <p className="text-xs text-muted-foreground text-center">
-                Gere o token em Integrações → Bitrix24 → Gerar Token
-              </p>
-            </div>
-            
-            <Button 
-              onClick={handleValidateToken} 
-              className="w-full"
-              disabled={validatingToken || !linkingToken.trim()}
-            >
-              {validatingToken ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <CheckCircle className="h-4 w-4 mr-2" />
-              )}
-              Validar e Conectar
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  
 
   if (step === "selecting" || step === "connecting") {
     return (
