@@ -844,26 +844,14 @@ serve(async (req) => {
       }
 
       // ✅ Register placements after successful install
+      // NOTE: REST_APP placement is NOT registered via API for local apps.
+      // The main app URL is configured in the "Handler path" field of the local app settings in Bitrix24.
       console.log("=== REGISTERING PLACEMENTS ===");
       const apiUrl = clientEndpoint || `https://${domain}/rest/`;
       const eventsUrl = `${supabaseUrl}/functions/v1/bitrix24-events`;
       
       try {
-        // 1. Bind REST_APP placement - Main app (full Thoth dashboard)
-        const restAppResult = await fetch(`${apiUrl}placement.bind`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            auth: accessToken,
-            PLACEMENT: "REST_APP",
-            HANDLER: "https://chat.thoth24.com/bitrix24-app",
-            TITLE: "Thoth WhatsApp"
-          })
-        });
-        const restAppData = await restAppResult.json();
-        console.log("REST_APP placement result:", restAppData);
-
-        // 2. Bind SETTING_CONNECTOR placement - Contact Center connector settings
+        // 1. Bind SETTING_CONNECTOR placement - Contact Center connector settings
         const settingConnectorResult = await fetch(`${apiUrl}placement.bind`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -877,7 +865,7 @@ serve(async (req) => {
         const settingConnectorData = await settingConnectorResult.json();
         console.log("SETTING_CONNECTOR placement result:", settingConnectorData);
 
-        // 3. Bind events to the public bitrix24-events endpoint
+        // 2. Bind events to the public bitrix24-events endpoint
         const events = [
           "ONIMCONNECTORMESSAGEADD",
           "ONIMCONNECTORMESSAGEUPDATE", 

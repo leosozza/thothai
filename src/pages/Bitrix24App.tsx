@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Loader2, MessageSquare, Bot, BookOpen, Settings, Phone, LayoutDashboard, Zap, AlertCircle } from "lucide-react";
+import { Loader2, MessageSquare, Bot, BookOpen, Settings, Phone, LayoutDashboard, Zap, AlertCircle, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 
-type AppView = "loading" | "token" | "dashboard" | "instances" | "training" | "personas" | "settings";
+type AppView = "loading" | "token" | "dashboard" | "instances" | "training" | "personas" | "settings" | "not-in-bitrix";
 
 interface BitrixStatus {
   found: boolean;
@@ -73,10 +73,10 @@ export default function Bitrix24App() {
     } else {
       const timer = setTimeout(() => {
         if (!memberId && !domain) {
-          setError("Identificação do Bitrix24 não encontrada. Acesse esta página a partir do Bitrix24.");
-          setView("loading");
+          // Show fallback view when not inside Bitrix24 iframe
+          setView("not-in-bitrix");
         }
-      }, 3000);
+      }, 2000);
       return () => clearTimeout(timer);
     }
   }, [memberId, domain]);
@@ -162,6 +162,64 @@ export default function Bitrix24App() {
           <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto mb-4" />
           <p className="text-muted-foreground">Carregando Thoth.ai...</p>
         </div>
+      </div>
+    );
+  }
+
+  // Fallback view when page is accessed outside Bitrix24 iframe
+  if (view === "not-in-bitrix") {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+        <Card className="w-full max-w-lg">
+          <CardHeader className="text-center">
+            <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
+              <MessageSquare className="h-8 w-8 text-primary" />
+            </div>
+            <CardTitle>Thoth.ai para Bitrix24</CardTitle>
+            <CardDescription>
+              Esta página deve ser acessada de dentro do Bitrix24
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="bg-muted/50 rounded-lg p-4 space-y-3">
+              <h4 className="font-medium">Como acessar:</h4>
+              <ol className="text-sm text-muted-foreground space-y-2 list-decimal list-inside">
+                <li>Acesse seu portal Bitrix24</li>
+                <li>Clique em <strong>"Thoth WhatsApp"</strong> no menu lateral</li>
+                <li>O dashboard completo será carregado automaticamente</li>
+              </ol>
+            </div>
+
+            <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-4">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
+                <div className="text-sm">
+                  <p className="font-medium text-amber-600">Não vê o app no menu?</p>
+                  <p className="text-muted-foreground mt-1">
+                    Verifique se o app "Thoth WhatsApp" está instalado e se o <strong>Handler path</strong> está configurado para:
+                  </p>
+                  <code className="block mt-2 bg-background px-2 py-1 rounded text-xs">
+                    https://chat.thoth24.com/bitrix24-app
+                  </code>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2 pt-2">
+              <Button asChild variant="default">
+                <a href="https://app.thoth24.com" target="_blank" rel="noopener noreferrer">
+                  <ExternalLink className="h-4 w-4 mr-2" />
+                  Acessar Thoth.ai Principal
+                </a>
+              </Button>
+              <Button asChild variant="outline">
+                <a href="/bitrix24-setup" rel="noopener noreferrer">
+                  Configurar Integração
+                </a>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     );
   }
