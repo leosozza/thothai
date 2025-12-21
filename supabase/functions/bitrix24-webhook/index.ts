@@ -2157,7 +2157,9 @@ async function handleReconfigureConnector(supabase: any, payload: any, supabaseU
 
 // Handle auto_setup action - Automatically configure all Bitrix24 integrations
 async function handleAutoSetup(supabase: any, payload: any, supabaseUrl: string) {
-  console.log("=== AUTO SETUP ===");
+  console.log("=== AUTO SETUP (FULL RECONFIGURATION) ===");
+  console.log("Timestamp:", new Date().toISOString());
+  console.log("Payload:", JSON.stringify(payload, null, 2));
   const { integration_id, instance_id } = payload;
 
   if (!integration_id) {
@@ -2527,8 +2529,107 @@ async function handleAutoSetup(supabase: any, payload: any, supabaseUrl: string)
       results.warnings.push(`Robot: ${e.message}`);
     }
 
-    // 5. Update integration config with results
-    console.log("Step 5: Updating integration config...");
+    // 5. CRITICAL: Bind events for receiving messages from operators
+    console.log("Step 5: Binding events with CLEAN webhook URL...");
+    const eventsToBind = [
+      "OnImConnectorMessageAdd",      // CRITICAL: When operator sends message to WhatsApp
+      "OnImConnectorDialogStart",     // When dialog starts
+      "OnImConnectorDialogFinish",    // When dialog finishes
+      "OnImConnectorStatusDelete",    // When connector is removed
+    ];
+
+    let eventsBound = 0;
+    for (const eventName of eventsToBind) {
+      try {
+        // First, unbind any existing handlers for this event to avoid duplicates
+        const unbindResponse = await fetch(`${clientEndpoint}event.unbind`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            auth: accessToken,
+            event: eventName,
+            handler: webhookUrl
+          })
+        });
+        console.log(`Unbind ${eventName}:`, await unbindResponse.json());
+
+        // Now bind fresh
+        const bindResponse = await fetch(`${clientEndpoint}event.bind`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            auth: accessToken,
+            event: eventName,
+            handler: webhookUrl
+          })
+        });
+        const bindResult = await bindResponse.json();
+        console.log(`Bind ${eventName}:`, bindResult);
+        
+        if (bindResult.result || bindResult.error === "HANDLER_ALREADY_BINDED") {
+          eventsBound++;
+        }
+      } catch (bindError) {
+        console.error(`Error binding ${eventName}:`, bindError);
+      }
+    }
+    console.log(`Events bound: ${eventsBound}/${eventsToBind.length}`);
+
+    // 6. Verify activation with imconnector.status for each activated line
+    console.log("Step 6: Verifying connector activation status...");
+    const verificationResults: Record<number, boolean> = {};
+    try {
+      const linesResponse = await fetch(`${clientEndpoint}imopenlines.config.list.get`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          auth: accessToken,
+          PARAMS: { select: ["ID", "LINE_NAME", "ACTIVE"] }
+        })
+      });
+      const linesResult = await linesResponse.json();
+      
+      for (const line of (linesResult.result || [])) {
+        const lineId = parseInt(line.ID);
+        try {
+          const statusResponse = await fetch(`${clientEndpoint}imconnector.status`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              auth: accessToken,
+              CONNECTOR: connectorId,
+              LINE: lineId
+            })
+          });
+          const statusResult = await statusResponse.json();
+          const isActive = statusResult.result?.active === true || statusResult.result?.ACTIVE === "Y";
+          verificationResults[lineId] = isActive;
+          console.log(`Line ${lineId} (${line.LINE_NAME}) connector active:`, isActive);
+          
+          // If not active, try to reactivate
+          if (!isActive) {
+            console.log(`Reactivating connector for line ${lineId}...`);
+            await fetch(`${clientEndpoint}imconnector.activate`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                auth: accessToken,
+                CONNECTOR: connectorId,
+                LINE: lineId,
+                ACTIVE: 1
+              })
+            });
+          }
+        } catch (e) {
+          console.error(`Error verifying line ${lineId}:`, e);
+        }
+      }
+    } catch (e) {
+      console.error("Error in verification step:", e);
+    }
+
+    // 7. Update integration config with results
+    console.log("Step 7: Updating integration config...");
     await supabase
       .from("integrations")
       .update({
@@ -2542,18 +2643,39 @@ async function handleAutoSetup(supabase: any, payload: any, supabaseUrl: string)
           auto_setup_completed: true,
           auto_setup_at: new Date().toISOString(),
           lines_activated: results.lines_activated,
+          events_url: webhookUrl,
+          events_bound: eventsBound,
+          line_verification: verificationResults,
         },
         updated_at: new Date().toISOString()
       })
       .eq("id", integration.id);
 
     console.log("Auto setup completed:", results);
+    console.log("Verification results:", verificationResults);
+
+    // Calculate overall success
+    const activeLines = Object.values(verificationResults).filter(v => v).length;
+    const hasActiveConnector = activeLines > 0;
+    const hasEvents = eventsBound > 0;
 
     return new Response(
       JSON.stringify({
-        success: true,
-        message: `Configuração automática concluída! ${results.lines_activated}/${results.lines_total} canais ativados.`,
-        results
+        success: hasActiveConnector && hasEvents,
+        message: hasActiveConnector && hasEvents
+          ? `Configuração concluída! ${results.lines_activated}/${results.lines_total} canais ativados. ${eventsBound} eventos vinculados.`
+          : `Configuração parcial. Canais ativos: ${activeLines}. Eventos: ${eventsBound}. Verifique se o evento OnImConnectorMessageAdd está configurado no Bitrix24.`,
+        results: {
+          ...results,
+          events_bound: eventsBound,
+          line_verification: verificationResults,
+        },
+        webhook_url: webhookUrl,
+        critical_info: {
+          message: "Para receber mensagens do operador, o evento OnImConnectorMessageAdd DEVE estar vinculado.",
+          events_bound: eventsBound,
+          active_lines: activeLines,
+        }
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
@@ -3149,9 +3271,13 @@ async function handleVerifyIntegration(supabase: any, payload: any, supabaseUrl:
 }
 
 serve(async (req) => {
+  const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(7)}`;
   console.log("=== BITRIX24-WEBHOOK REQUEST ===");
+  console.log("Request ID:", requestId);
+  console.log("Timestamp:", new Date().toISOString());
   console.log("Method:", req.method);
   console.log("URL:", req.url);
+  console.log("Headers:", JSON.stringify(Object.fromEntries(req.headers.entries()), null, 2));
 
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });

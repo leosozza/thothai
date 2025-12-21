@@ -21,6 +21,7 @@ import {
   Wrench,
   XCircle,
   Search,
+  RotateCcw,
 } from "lucide-react";
 
 interface Integration {
@@ -82,6 +83,7 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
   const [diagnosing, setDiagnosing] = useState(false);
   const [fixing, setFixing] = useState(false);
   const [verifying, setVerifying] = useState(false);
+  const [reconfiguring, setReconfiguring] = useState(false);
   const [diagnosis, setDiagnosis] = useState<DiagnosisResult | null>(null);
   const [verification, setVerification] = useState<VerificationResult | null>(null);
 
@@ -252,6 +254,43 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
       toast.error("Erro ao corrigir");
     } finally {
     setFixing(false);
+    }
+  };
+
+  const handleReconfigureFromZero = async () => {
+    if (!integration?.id) {
+      toast.error("Integração não encontrada");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Isso vai REMOVER TODOS os conectores WhatsApp/Thoth do Bitrix24 e reconfigurar do zero. Deseja continuar?"
+    );
+    if (!confirmed) return;
+
+    setReconfiguring(true);
+    
+    try {
+      const response = await supabase.functions.invoke("bitrix24-webhook", {
+        body: {
+          action: "reconfigure_connector",
+          integration_id: integration.id,
+        }
+      });
+
+      if (response.data?.success) {
+        toast.success("Reconfiguração completa realizada!");
+        console.log("Reconfigure result:", response.data);
+        onRefresh();
+      } else {
+        toast.error(response.data?.error || "Erro na reconfiguração");
+        console.error("Reconfigure error:", response.data);
+      }
+    } catch (error) {
+      console.error("Error reconfiguring:", error);
+      toast.error("Erro na reconfiguração");
+    } finally {
+      setReconfiguring(false);
     }
   };
 
@@ -523,19 +562,35 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
             </Button>
           </div>
 
-          <Button 
-            variant="outline" 
-            onClick={handleReconnect}
-            disabled={reconnecting}
-            className="w-full"
-          >
-            {reconnecting ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <RefreshCw className="h-4 w-4 mr-2" />
-            )}
-            Reconectar Completo
-          </Button>
+          <div className="flex gap-2">
+            <Button 
+              variant="outline" 
+              onClick={handleReconnect}
+              disabled={reconnecting}
+              className="flex-1"
+            >
+              {reconnecting ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4 mr-2" />
+              )}
+              Reconectar
+            </Button>
+
+            <Button 
+              variant="destructive"
+              onClick={handleReconfigureFromZero}
+              disabled={reconfiguring}
+              className="flex-1"
+            >
+              {reconfiguring ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <RotateCcw className="h-4 w-4 mr-2" />
+              )}
+              Do Zero
+            </Button>
+          </div>
         </CardContent>
       </Card>
     );
