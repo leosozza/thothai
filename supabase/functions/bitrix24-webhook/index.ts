@@ -3904,14 +3904,14 @@ async function handleVerifyIntegration(supabase: any, payload: any, supabaseUrl:
     // IMPORTANT: Do this FIRST before any cleanup to ensure we have a working connector
     const mainConnectorExists = verification.connectors.some(c => c.id === connectorId);
     
-    // Thoth Ibis icon - use inline SVG data URI for reliability (no external URL dependency)
-    // WhatsApp-style green circle with white phone icon
-    const THOTH_WHATSAPP_ICON_SVG = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2NCIgaGVpZ2h0PSI2NCIgdmlld0JveD0iMCAwIDY0IDY0Ij48Y2lyY2xlIGN4PSIzMiIgY3k9IjMyIiByPSIzMCIgZmlsbD0iIzI1RDM2NiIvPjxwYXRoIGZpbGw9IiNmZmYiIGQ9Ik00NC4yIDIwLjFjLTMuMi0zLjItNy41LTUtMTIuMS01LTkuNCAwLTE3LjEgNy43LTE3LjEgMTcuMSAwIDMgLjggNiAyLjMgOC42TDE1IDUwbDkuNS0yLjVjMi41IDEuNCA1LjMgMi4xIDguMSAyLjEgOS40IDAgMTcuMS03LjcgMTcuMS0xNy4xIDAtNC42LTEuOC04LjgtNS01Mi4xeiIvPjwvc3ZnPg==";
+    // Thoth Ibis icon - URL from Supabase Storage
+    const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "https://ybqwwipwimnkonnebbys.supabase.co";
+    const THOTH_WHATSAPP_ICON_URL = `${SUPABASE_URL}/storage/v1/object/public/assets/thoth-whatsapp-icon.png`;
     
     if (!mainConnectorExists && auto_fix) {
       console.log("AUTO-FIX: Main connector not registered, registering now...");
       try {
-        // Use inline SVG icon - more reliable than external URL
+        // Use URL to the ibis icon in Supabase Storage
         const registerResponse = await fetch(`${clientEndpoint}imconnector.register`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -3919,10 +3919,7 @@ async function handleVerifyIntegration(supabase: any, payload: any, supabaseUrl:
             auth: accessToken,
             ID: connectorId,
             NAME: "Thoth WhatsApp",
-            ICON: {
-              DATA_IMAGE: THOTH_WHATSAPP_ICON_SVG,
-              COLOR: "#25D366"
-            },
+            ICON: THOTH_WHATSAPP_ICON_URL,
             PLACEMENT_HANDLER: webhookUrl,
             CHAT_GROUP: "N"
           })
