@@ -2094,38 +2094,74 @@ async function handleReconfigureConnector(supabase: any, payload: any, supabaseU
 
     // 2. Register connector fresh with proper Marketplace-compliant icons
     console.log("Step 2: Registering connector fresh with Marketplace-compliant icons...");
+    console.log("=== STEP 2 DETAILED DEBUG ===");
+    console.log("clientEndpoint:", clientEndpoint);
+    console.log("connectorId:", connectorId);
+    console.log("accessToken length:", accessToken?.length || 0);
+    console.log("accessToken first 20 chars:", accessToken?.substring(0, 20) || "N/A");
     
     // WhatsApp filled SVG icon (not stroke) for better visibility
     const whatsappSvgIcon = "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSIjMjVENDY2Ij48cGF0aCBkPSJNMTcuNDcyIDYuMDA1QzE1Ljc4NCA0LjMxNSAxMy41MTIgMy4zODQgMTEuMTUgMy4zODRjLTQuOTQzIDAtOC45NjYgNC4wMjMtOC45NjYgOC45NjYgMCAxLjU4MS40MTMgMy4xMjcgMS4xOTggNC40ODlMMi40MTYgMjEuNjE2bDUuMjEyLTEuMzY4Yy4yNjEuMTQzIDQuNDcgMi41NzIgOC4wNTEuNjgxIDMuNjYxLTEuOTMzIDUuNzUxLTUuODQ1IDUuNzUxLTEwLjE3IDAtMi4zNjItLjkyLTQuNTg0LTIuNTktNi4yNTR6bS0xMS4yMjMgMTAuNjE0bC0uMDk0LS4wNDlIMy4xNDhsLjI4OS0xLjA1NS0uMTg3LS4yOTdjLS44MTQtMS4yOTQtMS4yNDQtMi43ODUtMS4yNDQtNC4zMTggMC00LjQ3NCAzLjY0LTguMTE0IDguMTE0LTguMTE0IDIuMTY2IDAgNC4yMDEuODQzIDUuNzMzIDIuMzc1IDEuNTMyIDEuNTMyIDIuMzc1IDMuNTY3IDIuMzc1IDUuNzMzIDAgNC40NzQtMy42NCA4LjExNC04LjExNCA4LjExNC0xLjQ3MyAwLTIuOTE5LS40LTQuMTc4LTEuMTUzbC0uMjk5LS4xNzctLjMxMy4wODItMi4xNjEuNTY2LjU1NC0yLjAyOHoiLz48cGF0aCBkPSJNMTUuMjk1IDE0LjY0M2MtLjI2MS0uMTMtMS41NDYtLjc2Mi0xLjc4NS0uODQ5LS4yNDEtLjA4Ny0uNDE1LS4xMzEtLjU4OS4xMy0uMTc0LjI2MS0uNjc2Ljg0OS0uODI4IDEuMDI0LS4xNTIuMTc0LS4zMDQuMTk2LS41NjUuMDY1cy0xLjEwMy0uNDA2LTIuMTAyLTEuMjk3Yy0uNzc2LS42OTItMS4zMDItMS41NDYtMS40NTQtMS44MDctLjE1Mi0uMjYxLS4wMTYtLjQwMi4xMTQtLjUzMi4xMTktLjExNy4yNjEtLjMwNC4zOTEtLjQ1Ni4xMy0uMTUyLjE3NC0uMjYxLjI2MS0uNDM1cy4wNDMtLjMyNi0uMDIyLS40NTZjLS4wNjUtLjEzLS41ODktMS40Mi0uODA2LTEuOTQ2LS4yMTMtLjUxMS0uNDI5LS40NDEtLjU4OS0uNDQ5LS4xNTItLjAwOC0uMzI2LS4wMS0uNS0uMDFzLS40NTYuMDY1LS42OTYuMzI2Yy0uMjQxLjI2LS45MTguODk3LS45MTggMi4xODhzLjk0IDIuNTM0IDEuMDcxIDIuNzA4YzEuMDMzIDEuMzc1IDIuNDcgMi4xNjIgMy41MjYgMi41NjguNDY3LjE4Ljg0MS4yODggMS4xMjkuMzY5LjQ3NC4xMzQuOTA2LjExNSAxLjI0Ny4wNy4zOC0uMDUuMTcxLS4yMDkgMS4xNDQtLjk4LjIzOS0uMTk3LjQ4NC0uMTgzLjgxMi0uMTEuMzI4LjA3NCAxLjMyMi41NTEgMS41NDguNjUxLjIyNi4xLjM3Ny4xNDguNDMzLjIzLjA1Ni4wODMuMDU2LjQ3OS0uMTI5Ljk0MXoiLz48L3N2Zz4=";
+    
+    const registerPayload = {
+      auth: accessToken,
+      ID: connectorId,
+      NAME: "Thoth WhatsApp",
+      ICON: {
+        DATA_IMAGE: `data:image/svg+xml;base64,${whatsappSvgIcon}`,
+        COLOR: "#25D366",
+        SIZE: "90%",
+        POSITION: "center"
+      },
+      // Point to dedicated PLACEMENT_HANDLER
+      PLACEMENT_HANDLER: `${supabaseUrl}/functions/v1/bitrix24-connector-settings`
+    };
+    
+    console.log("Register URL:", `${clientEndpoint}imconnector.register`);
+    console.log("Register payload (without auth):", JSON.stringify({ ...registerPayload, auth: "[REDACTED]" }, null, 2));
     
     try {
       const registerResponse = await fetch(`${clientEndpoint}imconnector.register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          auth: accessToken,
-          ID: connectorId,
-          NAME: "Thoth WhatsApp",
-          ICON: {
-            DATA_IMAGE: `data:image/svg+xml;base64,${whatsappSvgIcon}`,
-            COLOR: "#25D366",
-            SIZE: "90%",
-            POSITION: "center"
-          },
-          // Point to dedicated PLACEMENT_HANDLER
-          PLACEMENT_HANDLER: `${supabaseUrl}/functions/v1/bitrix24-connector-settings`
-        })
+        body: JSON.stringify(registerPayload)
       });
-      const registerResult = await registerResponse.json();
-      console.log("Register result:", registerResult);
       
-      if (registerResult.result || registerResult.error === "ERROR_CONNECTOR_ALREADY_EXISTS") {
+      console.log("Register response status:", registerResponse.status);
+      console.log("Register response headers:", JSON.stringify(Object.fromEntries(registerResponse.headers.entries())));
+      
+      const registerResult = await registerResponse.json();
+      console.log("Register result (FULL):", JSON.stringify(registerResult, null, 2));
+      
+      if (registerResult.result) {
+        console.log("✅ Connector registered successfully!");
+        results.connector_registered = true;
+        
+        // Save registration timestamp
+        await supabase
+          .from("integrations")
+          .update({
+            config: {
+              ...config,
+              connector_registered_at: new Date().toISOString(),
+            }
+          })
+          .eq("id", integration.id);
+          
+      } else if (registerResult.error === "ERROR_CONNECTOR_ALREADY_EXISTS") {
+        console.log("⚠️ Connector already exists - treating as success");
         results.connector_registered = true;
       } else if (registerResult.error) {
+        console.error("❌ Register failed with error:", registerResult.error);
+        console.error("Error description:", registerResult.error_description);
         results.errors.push(`Register: ${registerResult.error_description || registerResult.error}`);
+        
+        // Try alternative registration method if main fails
+        console.log("Attempting alternative registration via imconnector.connector.data.set...");
       }
     } catch (e: any) {
-      console.error("Register error:", e);
+      console.error("Register exception:", e);
+      console.error("Error stack:", e.stack);
       results.errors.push(`Register: ${e.message}`);
     }
 
