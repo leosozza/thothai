@@ -72,6 +72,60 @@ export type Database = {
           },
         ]
       }
+      bitrix_debug_logs: {
+        Row: {
+          category: string | null
+          created_at: string
+          details: Json | null
+          duration_ms: number | null
+          function_name: string
+          http_method: string | null
+          http_path: string | null
+          http_status: number | null
+          id: string
+          integration_id: string | null
+          level: string
+          message: string
+          request_id: string | null
+          timestamp: string
+          workspace_id: string | null
+        }
+        Insert: {
+          category?: string | null
+          created_at?: string
+          details?: Json | null
+          duration_ms?: number | null
+          function_name: string
+          http_method?: string | null
+          http_path?: string | null
+          http_status?: number | null
+          id?: string
+          integration_id?: string | null
+          level?: string
+          message: string
+          request_id?: string | null
+          timestamp?: string
+          workspace_id?: string | null
+        }
+        Update: {
+          category?: string | null
+          created_at?: string
+          details?: Json | null
+          duration_ms?: number | null
+          function_name?: string
+          http_method?: string | null
+          http_path?: string | null
+          http_status?: number | null
+          id?: string
+          integration_id?: string | null
+          level?: string
+          message?: string
+          request_id?: string | null
+          timestamp?: string
+          workspace_id?: string | null
+        }
+        Relationships: []
+      }
       bitrix_event_queue: {
         Row: {
           attempts: number | null

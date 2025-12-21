@@ -20,17 +20,6 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
 
-// Bitrix opens this handler inside an iframe (Contact Center → Settings).
-// IMPORTANT: Headers for Bitrix24 Contact Center iframe embedding:
-// 1. Content-Security-Policy with frame-ancestors for allowed origins
-// 2. X-Frame-Options is deprecated but some proxies still check it
-// 3. Meta CSP tags in HTML as fallback for CDN/proxy overrides
-//
-// Note on frame-ancestors wildcards:
-// - *.bitrix24.com allows all Bitrix24 cloud subdomains (e.g., company.bitrix24.com)
-// - Regional domains (.com.br, .eu, .es, .de) support Bitrix24's global presence
-// - Wildcards are intentional to support all Bitrix24 customer portals
-// - Alternative: restrict to specific domains if self-hosted or private deployment
 const cspValue = [
   "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:",
   "script-src * 'unsafe-inline' 'unsafe-eval'",
@@ -45,19 +34,155 @@ const htmlHeaders = {
   ...corsHeaders,
   "Content-Type": "text/html; charset=utf-8",
   "Content-Security-Policy": cspValue,
-  // Note: X-Frame-Options is deprecated and conflicts with CSP frame-ancestors
-  // Modern browsers prefer CSP. If needed, use ALLOW-FROM but it's not widely supported.
-  // For maximum compatibility, we rely on CSP frame-ancestors above.
 } as const;
 
-// Meta tag CSP to embed in HTML (backup if headers are overridden)
 const metaCsp = `<meta http-equiv="Content-Security-Policy" content="${cspValue}">`;
 
+// Debug logger interface
+interface DebugLogEntry {
+  function_name: string;
+  integration_id?: string;
+  workspace_id?: string;
+  level: 'debug' | 'info' | 'warn' | 'error' | 'api_call' | 'api_response';
+  category?: string;
+  message: string;
+  details?: Record<string, unknown>;
+  request_id?: string;
+  http_method?: string;
+  http_path?: string;
+  http_status?: number;
+  duration_ms?: number;
+}
+
+// Debug logger class for collecting and sending logs
+class DebugLogger {
+  private logs: DebugLogEntry[] = [];
+  private requestId: string;
+  private functionName = "bitrix24-connector-settings";
+  private supabase: any;
+  private integrationId?: string;
+  private workspaceId?: string;
+  private startTime: number;
+
+  constructor(supabase: any, requestId: string) {
+    this.supabase = supabase;
+    this.requestId = requestId;
+    this.startTime = Date.now();
+  }
+
+  setContext(integrationId?: string, workspaceId?: string) {
+    this.integrationId = integrationId;
+    this.workspaceId = workspaceId;
+  }
+
+  private addLog(level: DebugLogEntry['level'], message: string, category?: string, details?: Record<string, unknown>) {
+    const entry: DebugLogEntry = {
+      function_name: this.functionName,
+      integration_id: this.integrationId,
+      workspace_id: this.workspaceId,
+      level,
+      category,
+      message,
+      details,
+      request_id: this.requestId,
+    };
+    this.logs.push(entry);
+    
+    // Also log to console for immediate visibility
+    const prefix = `[${this.requestId}] [${level.toUpperCase()}]`;
+    console.log(`${prefix} ${message}`, details ? JSON.stringify(details).substring(0, 500) : "");
+  }
+
+  debug(message: string, details?: Record<string, unknown>) {
+    this.addLog('debug', message, undefined, details);
+  }
+
+  info(message: string, details?: Record<string, unknown>) {
+    this.addLog('info', message, undefined, details);
+  }
+
+  warn(message: string, details?: Record<string, unknown>) {
+    this.addLog('warn', message, undefined, details);
+  }
+
+  error(message: string, details?: Record<string, unknown>) {
+    this.addLog('error', message, undefined, details);
+  }
+
+  request(method: string, path: string, headers: Record<string, string>, body?: unknown) {
+    this.addLog('info', `Incoming ${method} request`, 'request', {
+      http_method: method,
+      http_path: path,
+      headers,
+      body: body ? JSON.stringify(body).substring(0, 2000) : undefined
+    });
+  }
+
+  apiCall(url: string, method: string, payload?: unknown) {
+    this.addLog('api_call', `API Call: ${method} ${url}`, 'bitrix_api', {
+      url,
+      method,
+      payload: payload ? JSON.stringify(payload).substring(0, 1000) : undefined
+    });
+  }
+
+  apiResponse(url: string, status: number, response?: unknown) {
+    this.addLog('api_response', `API Response: ${status} from ${url}`, 'bitrix_api', {
+      url,
+      status,
+      response: response ? JSON.stringify(response).substring(0, 1000) : undefined
+    });
+  }
+
+  response(status: number, message: string, headers?: Record<string, string>) {
+    const duration = Date.now() - this.startTime;
+    this.addLog('info', `Response: ${status} - ${message}`, 'response', {
+      http_status: status,
+      duration_ms: duration,
+      headers
+    });
+  }
+
+  // Flush all logs to database
+  async flush(): Promise<void> {
+    if (this.logs.length === 0) return;
+    
+    try {
+      const duration = Date.now() - this.startTime;
+      
+      // Add duration to all logs
+      const logsWithDuration = this.logs.map((log, index) => ({
+        ...log,
+        duration_ms: index === this.logs.length - 1 ? duration : undefined
+      }));
+
+      // Insert logs directly using service role
+      const { error } = await this.supabase
+        .from("bitrix_debug_logs")
+        .insert(logsWithDuration);
+
+      if (error) {
+        console.error("Failed to flush debug logs:", error);
+      }
+    } catch (err) {
+      console.error("Error flushing debug logs:", err);
+    }
+  }
+}
+
+// Generate unique request ID
+function generateRequestId(): string {
+  return `req_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+}
+
 // Helper to refresh Bitrix24 OAuth token
-async function refreshBitrixToken(integration: any, supabase: any): Promise<string | null> {
+async function refreshBitrixToken(integration: any, supabase: any, logger?: DebugLogger): Promise<string | null> {
   const config = integration.config;
   
-  if (!config.access_token) return null;
+  if (!config.access_token) {
+    logger?.warn("No access token configured");
+    return null;
+  }
 
   if (config.token_expires_at) {
     const expiresAt = new Date(config.token_expires_at);
@@ -65,17 +190,23 @@ async function refreshBitrixToken(integration: any, supabase: any): Promise<stri
     const bufferMs = 5 * 60 * 1000;
     
     if (expiresAt.getTime() - now.getTime() > bufferMs) {
+      logger?.debug("Token still valid", { expires_at: config.token_expires_at });
       return config.access_token;
     }
   }
 
-  if (!config.refresh_token) return config.access_token;
+  if (!config.refresh_token) {
+    logger?.warn("No refresh token available");
+    return config.access_token;
+  }
 
   const refreshUrl = `https://oauth.bitrix.info/oauth/token/?grant_type=refresh_token&client_id=${config.client_id || ""}&client_secret=${config.client_secret || ""}&refresh_token=${config.refresh_token}`;
   
   try {
+    logger?.apiCall(refreshUrl, "GET");
     const response = await fetch(refreshUrl);
     const data = await response.json();
+    logger?.apiResponse(refreshUrl, response.status, data);
 
     if (data.access_token) {
       const newExpiresAt = new Date(Date.now() + (data.expires_in || 3600) * 1000).toISOString();
@@ -93,48 +224,48 @@ async function refreshBitrixToken(integration: any, supabase: any): Promise<stri
         })
         .eq("id", integration.id);
 
+      logger?.info("Token refreshed successfully", { new_expires_at: newExpiresAt });
       return data.access_token;
     }
   } catch (error) {
-    console.error("Error refreshing token:", error);
+    logger?.error("Error refreshing token", { error: error instanceof Error ? error.message : "Unknown error" });
   }
 
   return config.access_token;
 }
 
 // Helper to create HTML response with logging
-function createHtmlResponse(html: string, status = 200): Response {
+function createHtmlResponse(html: string, status = 200, logger?: DebugLogger): Response {
   const response = new Response(html, { status, headers: htmlHeaders });
-  console.log("=== RESPONSE HEADERS ===");
-  for (const [key, value] of response.headers.entries()) {
-    console.log(`  ${key}: ${value}`);
-  }
+  logger?.response(status, "HTML response sent", Object.fromEntries(response.headers.entries()));
   return response;
 }
 
 serve(async (req) => {
-  console.log("=== BITRIX24-CONNECTOR-SETTINGS ===");
-  console.log("Method:", req.method);
-  console.log("URL:", req.url);
-  console.log("Timestamp:", new Date().toISOString());
+  const requestId = generateRequestId();
+  const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
+  const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const supabase = createClient(supabaseUrl, supabaseServiceKey);
   
-  // Log request headers for debugging iframe issues
-  console.log("=== REQUEST HEADERS ===");
-  const relevantHeaders = ["referer", "origin", "user-agent", "content-type"];
-  for (const header of relevantHeaders) {
-    const value = req.headers.get(header);
-    if (value) console.log(`  ${header}: ${value}`);
-  }
+  // Initialize debug logger
+  const logger = new DebugLogger(supabase, requestId);
+  
+  // Collect request headers
+  const relevantHeaders: Record<string, string> = {};
+  ["referer", "origin", "user-agent", "content-type", "x-forwarded-for"].forEach(h => {
+    const v = req.headers.get(h);
+    if (v) relevantHeaders[h] = v;
+  });
+  
+  logger.request(req.method, new URL(req.url).pathname, relevantHeaders);
   
   if (req.method === "OPTIONS") {
+    logger.response(200, "CORS preflight");
+    await logger.flush();
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-    const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
     // Parse body (form or JSON)
     let body: Record<string, any> = {};
     const contentType = req.headers.get("content-type") || "";
@@ -154,7 +285,12 @@ serve(async (req) => {
       }
     }
 
-    console.log("Request body:", JSON.stringify(body, null, 2));
+    logger.info("Request body parsed", { 
+      keys: Object.keys(body),
+      has_placement: !!body.PLACEMENT,
+      has_auth: !!body.AUTH_ID || !!body.auth,
+      content_type: contentType
+    });
 
     // Extract auth data from Bitrix24 PLACEMENT call
     const authId = body.AUTH_ID || body.auth?.access_token;
@@ -162,12 +298,13 @@ serve(async (req) => {
     const memberId = body.auth?.member_id || body.member_id;
     const placement = body.PLACEMENT;
 
-    console.log("=== PARSED PARAMETERS ===");
-    console.log("  Auth ID present:", !!authId);
-    console.log("  Domain:", domain);
-    console.log("  Member ID:", memberId);
-    console.log("  Placement:", placement);
-    console.log("  Request Type:", req.method);
+    logger.info("Parsed Bitrix24 parameters", {
+      auth_id_present: !!authId,
+      domain,
+      member_id: memberId,
+      placement,
+      request_method: req.method
+    });
 
     // Parse PLACEMENT_OPTIONS
     let options: { LINE?: number; ACTIVE_STATUS?: number; CONNECTOR?: string } = {};
