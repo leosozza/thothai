@@ -34,7 +34,7 @@ verify_jwt = true
 verify_jwt = false
 
 [functions.bitrix24-webhook]
-verify_jwt = true
+verify_jwt = false
 
 [functions.bitrix24-send]
 verify_jwt = false
