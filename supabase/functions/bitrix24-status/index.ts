@@ -133,7 +133,8 @@ serve(async (req) => {
       );
     }
     
-    const apiEndpoint = config.client_endpoint as string;
+    // IMPORTANT: Use config.domain for REST API calls, NOT client_endpoint (which is oauth.bitrix.info)
+    const apiEndpoint = config.domain ? `https://${config.domain}/rest/` : config.client_endpoint as string;
     const connectorId = config.connector_id || "thoth_whatsapp";
     const lineId = config.line_id || "1";
 

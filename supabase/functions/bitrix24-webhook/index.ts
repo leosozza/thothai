@@ -130,7 +130,8 @@ async function sendBotMessage(integration: any, supabase: any, dialogId: string,
     return false;
   }
 
-  const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
+  // IMPORTANT: Use config.domain for REST API calls, NOT client_endpoint (which is oauth.bitrix.info)
+  const clientEndpoint = config.domain ? `https://${config.domain}/rest/` : config.client_endpoint;
   
   try {
     const response = await fetch(`${clientEndpoint}imbot.message.add`, {
@@ -177,7 +178,8 @@ async function activateConnectorViaAPI(
   }
   
   // Determine API endpoint
-  const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
+  // IMPORTANT: Use config.domain for REST API calls, NOT client_endpoint (which is oauth.bitrix.info)
+  const clientEndpoint = config.domain ? `https://${config.domain}/rest/` : config.client_endpoint;
   
   console.log("Using endpoint:", clientEndpoint);
   console.log("Connector ID:", connectorId);
@@ -344,7 +346,8 @@ async function handlePlacement(supabase: any, payload: any, supabaseUrl: string)
   // Determine API endpoint and access token
   // IMPORTANT: Use AUTH_ID from Bitrix24 if available (more reliable for PLACEMENT calls)
   const accessToken = authId || await refreshBitrixToken(integration, supabase);
-  const apiUrl = domain ? `https://${domain}/rest/` : (config.client_endpoint || `https://${config.domain}/rest/`);
+  // IMPORTANT: Use config.domain for REST API calls, NOT client_endpoint (which is oauth.bitrix.info)
+  const apiUrl = domain ? `https://${domain}/rest/` : `https://${config.domain}/rest/`;
 
   console.log("Using API URL:", apiUrl);
   console.log("Access token available:", !!accessToken);
@@ -477,7 +480,8 @@ async function handleCheckAppInstalled(supabase: any, payload: any) {
     );
   }
 
-  const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
+  // IMPORTANT: Use config.domain for REST API calls, NOT client_endpoint (which is oauth.bitrix.info)
+  const clientEndpoint = config.domain ? `https://${config.domain}/rest/` : config.client_endpoint;
   
   try {
     // Call app.info to check if app is installed
@@ -569,7 +573,8 @@ async function handleForceReinstallEvents(supabase: any, payload: any, supabaseU
     );
   }
 
-  const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
+  // IMPORTANT: Use config.domain for REST API calls, NOT client_endpoint (which is oauth.bitrix.info)
+  const clientEndpoint = config.domain ? `https://${config.domain}/rest/` : config.client_endpoint;
   const connectorId = config.connector_id || "thoth_whatsapp";
   const lineId = config.line_id || config.activated_line_id || 2;
   const eventsUrl = `${supabaseUrl}/functions/v1/bitrix24-events`;
@@ -791,7 +796,8 @@ async function handleCompleteSetup(supabase: any, payload: any, supabaseUrl: str
 
   // Verify activation succeeded by checking status
   const config = integration.config || {};
-  const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
+  // IMPORTANT: Use config.domain for REST API calls, NOT client_endpoint (which is oauth.bitrix.info)
+  const clientEndpoint = config.domain ? `https://${config.domain}/rest/` : config.client_endpoint;
   const connectorId = config.connector_id || "thoth_whatsapp";
   const accessToken = await refreshBitrixToken(integration, supabase);
 
@@ -1018,7 +1024,8 @@ async function handleDiagnoseConnector(supabase: any, payload: any, supabaseUrl:
   }
 
   const config = integration.config;
-  const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
+  // IMPORTANT: Use config.domain for REST API calls, NOT client_endpoint (which is oauth.bitrix.info)
+  const clientEndpoint = config.domain ? `https://${config.domain}/rest/` : config.client_endpoint;
   const connectorId = config.connector_id || "thoth_whatsapp";
   const targetLineId = line_id || config.line_id || config.activated_line_id || 2;
   // CRITICAL: Use bitrix24-events (public, no JWT) for event callbacks
@@ -1290,7 +1297,8 @@ async function handleCleanConnectors(supabase: any, payload: any, supabaseUrl: s
   }
 
   const config = integration.config;
-  const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
+  // IMPORTANT: Use config.domain for REST API calls, NOT client_endpoint (which is oauth.bitrix.info)
+  const clientEndpoint = config.domain ? `https://${config.domain}/rest/` : config.client_endpoint;
   // Note: This is for cleanup, we check for both old webhook and new events URLs
   const eventsUrl = `${supabaseUrl}/functions/v1/bitrix24-events`;
 
@@ -1570,7 +1578,8 @@ async function handleCheckConnectorStatus(supabase: any, payload: any) {
   }
 
   const config = integration.config;
-  const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
+  // IMPORTANT: Use config.domain for REST API calls, NOT client_endpoint (which is oauth.bitrix.info)
+  const clientEndpoint = config.domain ? `https://${config.domain}/rest/` : config.client_endpoint;
   const connectorId = config.connector_id || "thoth_whatsapp";
   const targetLineId = line_id || config.line_id || config.activated_line_id || 2;
 
@@ -1720,7 +1729,8 @@ async function handleListChannels(supabase: any, payload: any) {
   }
 
   const config = integration.config;
-  const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
+  // IMPORTANT: Use config.domain for REST API calls, NOT client_endpoint (which is oauth.bitrix.info)
+  const clientEndpoint = config.domain ? `https://${config.domain}/rest/` : config.client_endpoint;
   const connectorId = config.connector_id || "thoth_whatsapp";
 
   try {
@@ -1908,7 +1918,8 @@ async function handleCreateChannel(supabase: any, payload: any) {
   }
 
   const config = integration.config;
-  const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
+  // IMPORTANT: Use config.domain for REST API calls, NOT client_endpoint (which is oauth.bitrix.info)
+  const clientEndpoint = config.domain ? `https://${config.domain}/rest/` : config.client_endpoint;
 
   try {
     // Call imopenlines.config.add to create a new channel
@@ -1998,7 +2009,8 @@ async function handleRegisterSmsProvider(supabase: any, payload: any, supabaseUr
   }
 
   const config = integration.config;
-  const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
+  // IMPORTANT: Use config.domain for REST API calls, NOT client_endpoint (which is oauth.bitrix.info)
+  const clientEndpoint = config.domain ? `https://${config.domain}/rest/` : config.client_endpoint;
   const smsProviderId = "thoth_whatsapp_sms";
   const name = provider_name || "Thoth WhatsApp";
   const webhookUrl = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
@@ -2163,7 +2175,8 @@ async function handleRegisterRobot(supabase: any, payload: any, supabaseUrl: str
   }
 
   const config = integration.config;
-  const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
+  // IMPORTANT: Use config.domain for REST API calls, NOT client_endpoint (which is oauth.bitrix.info)
+  const clientEndpoint = config.domain ? `https://${config.domain}/rest/` : config.client_endpoint;
   const robotCode = "thoth_whatsapp_robot";
   const name = robot_name || "Thoth WhatsApp - Enviar Mensagem";
   const webhookUrl = `${supabaseUrl}/functions/v1/bitrix24-webhook`;

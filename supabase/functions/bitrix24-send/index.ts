@@ -243,15 +243,16 @@ serve(async (req) => {
       );
     }
     
-    const clientEndpoint = config.client_endpoint as string;
-    if (!clientEndpoint) {
+    // IMPORTANT: Use config.domain for REST API calls, NOT client_endpoint (which is oauth.bitrix.info)
+    const bitrixDomain = config.domain as string;
+    if (!bitrixDomain) {
       return new Response(
-        JSON.stringify({ error: "Invalid Bitrix24 configuration - no client endpoint" }),
+        JSON.stringify({ error: "Invalid Bitrix24 configuration - no domain configured" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    const apiUrl = clientEndpoint.endsWith("/") ? clientEndpoint : `${clientEndpoint}/`;
+    const apiUrl = `https://${bitrixDomain}/rest/`;
 
     // Fetch line_id from bitrix_channel_mappings based on instance
     let lineId = "1";
