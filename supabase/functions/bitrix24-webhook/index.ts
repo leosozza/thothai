@@ -4147,6 +4147,182 @@ async function handleRebindEventsToNewUrl(supabase: any, payload: any, supabaseU
   }
 }
 
+/**
+ * Rebind placements to correct URLs
+ * REST_APP -> https://chat.thoth24.com/bitrix24-app (main app)
+ * SETTING_CONNECTOR -> bitrix24-connector-settings (contact center)
+ */
+async function handleRebindPlacements(supabase: any, payload: any, supabaseUrl: string) {
+  console.log("=== REBIND PLACEMENTS ===");
+  console.log("Payload:", JSON.stringify(payload, null, 2));
+
+  const { integration_id } = payload;
+
+  if (!integration_id) {
+    return new Response(
+      JSON.stringify({ error: "Integration ID não fornecido" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const { data: integration, error: integrationError } = await supabase
+    .from("integrations")
+    .select("*")
+    .eq("id", integration_id)
+    .single();
+
+  if (integrationError || !integration) {
+    console.error("Integration not found:", integrationError);
+    return new Response(
+      JSON.stringify({ error: "Integração não encontrada" }),
+      { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const accessToken = await refreshBitrixToken(integration, supabase);
+  if (!accessToken) {
+    return new Response(
+      JSON.stringify({ error: "Token de acesso não disponível" }),
+      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const config = integration.config;
+  const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
+  
+  const results = {
+    placements_unbound: [] as any[],
+    placements_bound: [] as any[],
+    errors: [] as string[],
+  };
+
+  try {
+    // 1. Get current placements
+    console.log("Step 1: Fetching current placements...");
+    const placementsResponse = await fetch(`${clientEndpoint}placement.get`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ auth: accessToken })
+    });
+    const placementsResult = await placementsResponse.json();
+    console.log("Current placements:", JSON.stringify(placementsResult, null, 2));
+
+    // 2. Unbind old placements that point to wrong URLs
+    const currentPlacements = placementsResult.result || [];
+    for (const placement of currentPlacements) {
+      // Check if this is our placement with wrong URL
+      if (placement.placement === "REST_APP" && placement.handler && !placement.handler.includes("/bitrix24-app")) {
+        console.log("Unbinding old REST_APP placement:", placement.handler);
+        try {
+          const unbindResponse = await fetch(`${clientEndpoint}placement.unbind`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              auth: accessToken,
+              PLACEMENT: "REST_APP",
+              HANDLER: placement.handler
+            })
+          });
+          const unbindResult = await unbindResponse.json();
+          results.placements_unbound.push({
+            placement: "REST_APP",
+            handler: placement.handler,
+            result: unbindResult
+          });
+        } catch (e) {
+          console.error("Error unbinding REST_APP:", e);
+        }
+      }
+    }
+
+    // 3. Bind REST_APP to correct URL (main app)
+    console.log("Step 3: Binding REST_APP to correct URL...");
+    try {
+      const restAppResponse = await fetch(`${clientEndpoint}placement.bind`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          auth: accessToken,
+          PLACEMENT: "REST_APP",
+          HANDLER: "https://chat.thoth24.com/bitrix24-app",
+          TITLE: "Thoth WhatsApp"
+        })
+      });
+      const restAppResult = await restAppResponse.json();
+      console.log("REST_APP bind result:", JSON.stringify(restAppResult));
+      results.placements_bound.push({
+        placement: "REST_APP",
+        handler: "https://chat.thoth24.com/bitrix24-app",
+        success: !restAppResult.error || restAppResult.error === "HANDLER_ALREADY_BINDED",
+        result: restAppResult
+      });
+    } catch (e) {
+      console.error("Error binding REST_APP:", e);
+      results.errors.push(`Error binding REST_APP: ${e}`);
+    }
+
+    // 4. Bind SETTING_CONNECTOR to contact center settings
+    console.log("Step 4: Binding SETTING_CONNECTOR...");
+    try {
+      const settingConnectorResponse = await fetch(`${clientEndpoint}placement.bind`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          auth: accessToken,
+          PLACEMENT: "SETTING_CONNECTOR",
+          HANDLER: `${supabaseUrl}/functions/v1/bitrix24-connector-settings`,
+          TITLE: "Thoth WhatsApp"
+        })
+      });
+      const settingConnectorResult = await settingConnectorResponse.json();
+      console.log("SETTING_CONNECTOR bind result:", JSON.stringify(settingConnectorResult));
+      results.placements_bound.push({
+        placement: "SETTING_CONNECTOR",
+        handler: `${supabaseUrl}/functions/v1/bitrix24-connector-settings`,
+        success: !settingConnectorResult.error || settingConnectorResult.error === "HANDLER_ALREADY_BINDED",
+        result: settingConnectorResult
+      });
+    } catch (e) {
+      console.error("Error binding SETTING_CONNECTOR:", e);
+      results.errors.push(`Error binding SETTING_CONNECTOR: ${e}`);
+    }
+
+    // 5. Update integration config
+    await supabase
+      .from("integrations")
+      .update({
+        config: {
+          ...config,
+          placements_rebound_at: new Date().toISOString(),
+          rest_app_url: "https://chat.thoth24.com/bitrix24-app",
+          setting_connector_url: `${supabaseUrl}/functions/v1/bitrix24-connector-settings`,
+        },
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", integration.id);
+
+    console.log("=== PLACEMENTS REBIND COMPLETE ===");
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        message: "Placements atualizados com sucesso",
+        results
+      }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  } catch (error) {
+    console.error("Error rebinding placements:", error);
+    return new Response(
+      JSON.stringify({ 
+        error: error instanceof Error ? error.message : "Erro ao atualizar placements",
+        results
+      }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+}
+
 serve(async (req) => {
   const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(7)}`;
   console.log("=== BITRIX24-WEBHOOK REQUEST ===");
@@ -4325,6 +4501,11 @@ serve(async (req) => {
       return await handleRebindEventsToNewUrl(supabase, payload, supabaseUrl);
     }
 
+    // Handle rebind_placements action - update REST_APP and SETTING_CONNECTOR placements
+    if (action === "rebind_placements" || payload.action === "rebind_placements") {
+      return await handleRebindPlacements(supabase, payload, supabaseUrl);
+    }
+
     // Check if this is a robot execution call (bizproc.robot handler)
     if (payload.event_token || payload.EVENT_TOKEN || 
         (payload.properties && (payload.properties.phone || payload.properties.message)) ||
@@ -4429,7 +4610,7 @@ serve(async (req) => {
           "list_channels", "diagnose", "auto_setup", "cleanup", "reconfigure_connector",
           "list_bot_events", "get_bound_events", "cleanup_duplicate_events", "register_robot",
           "get_connector_lines", "activate_line", "sync_contacts", "complete_setup",
-          "rebind_events_to_new_url"
+          "rebind_events_to_new_url", "rebind_placements"
         ]
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
