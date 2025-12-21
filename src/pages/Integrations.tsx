@@ -156,7 +156,7 @@ const integrationTypes = [
 ];
 
 // Bitrix24 Marketplace App URL
-const BITRIX24_MARKETPLACE_URL = "https://www.bitrix24.com.br/apps/app/thoth_whatsapp";
+const BITRIX24_MARKETPLACE_URL = "https://www.bitrix24.com/register/reg.php?addmodule=thoth24_solution.thoth_ai_messeger";
 
 export default function Integrations() {
   const [integrations, setIntegrations] = useState<Integration[]>([]);
