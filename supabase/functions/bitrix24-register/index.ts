@@ -57,6 +57,8 @@ async function refreshBitrixToken(integration: any, supabase: any): Promise<stri
 serve(async (req) => {
   console.log("=== BITRIX24-REGISTER REQUEST ===");
   console.log("Method:", req.method);
+  console.log("Timestamp:", new Date().toISOString());
+  console.log("URL:", req.url);
   
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -64,7 +66,10 @@ serve(async (req) => {
 
   try {
     const body = await req.json();
+    console.log("=== REQUEST BODY ===");
     console.log("Request body:", JSON.stringify(body));
+    console.log("Action:", body.action);
+    console.log("Request type:", req.method);
     
     const { action, webhook_url, connector_id, instance_id, workspace_id, integration_id, member_id, domain } = body;
 
@@ -593,6 +598,8 @@ serve(async (req) => {
     // This ensures "Setup concluído" in Bitrix24 Contact Center
     // IMPORTANT: Use LINE 2 as that's where the "Thoth whatsapp" channel is configured
     console.log("=== ACTIVATING CONNECTOR IMMEDIATELY ===");
+    console.log("Using connector ID:", finalConnectorId);
+    console.log("Target LINE:", defaultLineId);
     
     // CRITICAL: Use bitrix24-events (PUBLIC) for receiving Bitrix24 events
     // Bitrix24 documentation states event handlers must use clean URLs
@@ -602,7 +609,10 @@ serve(async (req) => {
     
     // Call imconnector.activate
     const activateUrl = `${bitrixApiUrl}imconnector.activate?auth=${accessToken}`;
-    console.log("Calling imconnector.activate with LINE:", defaultLineId);
+    console.log("Calling imconnector.activate...");
+    console.log("  CONNECTOR:", finalConnectorId);
+    console.log("  LINE:", defaultLineId);
+    console.log("  ACTIVE:", 1);
     
     const activateResponse = await fetch(activateUrl, {
       method: "POST",
@@ -637,6 +647,41 @@ serve(async (req) => {
     const dataSetResult = await dataSetResponse.json();
     console.log("imconnector.connector.data.set result:", JSON.stringify(dataSetResult));
 
+    // 3a. Verify activation via imopenlines.config.list.get
+    console.log("=== VERIFYING ACTIVATION STATUS ===");
+    const configListUrl = `${bitrixApiUrl}imopenlines.config.list.get?auth=${accessToken}`;
+    
+    let connectorActive = false;
+    try {
+      const configListResponse = await fetch(configListUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({})
+      });
+      const configListResult = await configListResponse.json();
+      console.log("imopenlines.config.list.get result:", JSON.stringify(configListResult));
+
+      // Find our line in the results
+      if (configListResult.result && Array.isArray(configListResult.result)) {
+        const ourLine = configListResult.result.find((line: any) => 
+          String(line.ID) === String(defaultLineId)
+        );
+        
+        if (ourLine) {
+          // Check both ACTIVE field and connector_active field
+          connectorActive = ourLine.ACTIVE === "Y" || ourLine.connector_active === true;
+          console.log(`Line ${defaultLineId} verification:`);
+          console.log(`  ACTIVE field: ${ourLine.ACTIVE}`);
+          console.log(`  connector_active field: ${ourLine.connector_active}`);
+          console.log(`  Final status: ${connectorActive ? "ACTIVE" : "INACTIVE"}`);
+        } else {
+          console.log(`Line ${defaultLineId} not found in config list - may need manual activation`);
+        }
+      }
+    } catch (verifyError) {
+      console.error("Error verifying connector status:", verifyError);
+    }
+
     // 4. Bind events to receive messages from Bitrix24 operators
     // CRITICAL: Use CLEAN URL without query parameters
     console.log("Binding events with CLEAN webhook URL:", cleanWebhookUrl);
@@ -664,15 +709,18 @@ serve(async (req) => {
     }
 
     // 5. Update integration in database with registration details
-    const activated = !activateResult.error;
+    const activated = !activateResult.error && connectorActive;
     const configUpdate = {
       connector_id: finalConnectorId,
       instance_id: instance_id || null,
       registered: true,
       activated: activated,
       activated_line_id: activated ? defaultLineId : null,
+      connector_active: connectorActive,
       events_url: cleanWebhookUrl,
       line_id: String(defaultLineId),
+      activation_verified: true,
+      last_activation_check: new Date().toISOString(),
     };
 
     if (integration_id || integration?.id) {
@@ -710,9 +758,11 @@ serve(async (req) => {
         events_url: cleanWebhookUrl,
         mode: "oauth",
         activated: activated,
+        connector_active: connectorActive,
         line_id: defaultLineId,
         activate_result: activateResult,
         data_set_result: dataSetResult,
+        status_verification: connectorActive ? "VERIFIED_ACTIVE" : "PENDING_MANUAL_ACTIVATION",
         next_steps: activated 
           ? "O conector está ativo na LINE 2! Teste enviando uma mensagem pelo WhatsApp."
           : "Vá em Contact Center → Thoth WhatsApp → Continuar para finalizar a configuração",

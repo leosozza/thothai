@@ -257,6 +257,10 @@ serve(async (req) => {
         const apiUrl = (config.client_endpoint as string) || `https://${config.domain}/rest/`;
         const connectorId = String(config.connector_id || "thoth_whatsapp");
 
+        console.log("=== CHECK_CONNECTOR DIAGNOSTIC ===");
+        console.log("API URL:", apiUrl);
+        console.log("Connector ID:", connectorId);
+
         // Check imconnector.list
         const listResponse = await fetch(`${apiUrl}imconnector.list`, {
           method: "POST",
@@ -288,7 +292,8 @@ serve(async (req) => {
           activationStatus = statusResult.result;
         }
 
-        // Also check imopenlines.config.list.get to see open lines
+        // Check imopenlines.config.list.get to see open lines and verify connector_active
+        console.log("=== CHECKING IMOPENLINES CONFIG ===");
         const openLinesResponse = await fetch(`${apiUrl}imopenlines.config.list.get`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -297,7 +302,24 @@ serve(async (req) => {
         const openLinesResult = await openLinesResponse.json();
         console.log("imopenlines.config.list.get:", JSON.stringify(openLinesResult));
 
-        const isActive = activationStatus?.STATUS === true || activationStatus?.ACTIVE === true;
+        // Find our line and check both ACTIVE and connector_active fields
+        let ourLineConfig = null;
+        let connectorActive = false;
+        if (openLinesResult.result && Array.isArray(openLinesResult.result)) {
+          ourLineConfig = openLinesResult.result.find((line: any) => 
+            String(line.ID) === String(lineId)
+          );
+          
+          if (ourLineConfig) {
+            connectorActive = ourLineConfig.ACTIVE === "Y" || ourLineConfig.connector_active === true;
+            console.log(`Line ${lineId} found:`);
+            console.log(`  ACTIVE: ${ourLineConfig.ACTIVE}`);
+            console.log(`  connector_active: ${ourLineConfig.connector_active}`);
+            console.log(`  Computed status: ${connectorActive ? "ACTIVE" : "INACTIVE"}`);
+          }
+        }
+
+        const isActive = activationStatus?.STATUS === true || activationStatus?.ACTIVE === true || connectorActive;
 
         return new Response(
           JSON.stringify({ 
@@ -307,11 +329,21 @@ serve(async (req) => {
             connector_details: connectorDetails,
             activation_status: activationStatus,
             line_id_checked: lineId,
+            line_config: ourLineConfig,
+            connector_active: connectorActive,
             open_lines: openLinesResult.result || [],
             all_connectors: Object.keys(listResult.result || {}),
+            status_summary: {
+              registered: connectorExists,
+              active_via_status: activationStatus?.STATUS === true || activationStatus?.ACTIVE === true,
+              active_via_config: connectorActive,
+              overall_active: isActive
+            },
             diagnosis: connectorExists 
-              ? (isActive ? "Conector registrado e ATIVO na linha " + lineId : "Conector registrado mas NÃO ATIVO na linha " + lineId + " - verifique Open Lines no Bitrix24")
-              : "Conector NÃO registrado - registre novamente"
+              ? (isActive 
+                  ? `✓ Conector registrado e ATIVO na linha ${lineId}` 
+                  : `⚠ Conector registrado mas NÃO ATIVO na linha ${lineId}. ACTIVE="${ourLineConfig?.ACTIVE}", connector_active=${ourLineConfig?.connector_active}. Verifique Open Lines no Bitrix24`)
+              : "✗ Conector NÃO registrado - registre novamente"
           }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
