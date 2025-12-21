@@ -590,6 +590,39 @@ serve(async (req) => {
 
       if (accessToken) {
         try {
+          // === CHECK IF CONNECTOR IS REGISTERED, IF NOT REGISTER IT ===
+          if (!config.registered) {
+            logger.info("Connector not registered, registering now...");
+            
+            const iconUrl = `${supabaseUrl}/storage/v1/object/public/assets/thoth-whatsapp-icon.png`;
+            const registerResult = await fetch(`${apiUrl}imconnector.register?auth=${accessToken}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                ID: connectorId,
+                NAME: "Thoth WhatsApp",
+                ICON: { DATA_IMAGE: iconUrl },
+                PLACEMENT_HANDLER: `${supabaseUrl}/functions/v1/bitrix24-connector-settings`,
+              }),
+            });
+            const registerData = await registerResult.json();
+            logger.apiResponse(`${apiUrl}imconnector.register`, registerResult.status, registerData);
+            
+            const registered = registerData.result === true || registerData.error === "CONNECTOR_ALREADY_EXISTS";
+            if (registered) {
+              // Update config with registered status
+              await supabase
+                .from("integrations")
+                .update({
+                  config: { ...config, registered: true, registered_at: new Date().toISOString() },
+                  updated_at: new Date().toISOString()
+                })
+                .eq("id", integration.id);
+              config.registered = true;
+              logger.info("Connector registered successfully");
+            }
+          }
+
           // 1. Activate connector using imconnector.activate
           const activateUrl = `${apiUrl}imconnector.activate`;
           const activatePayload = { auth: accessToken, CONNECTOR: connectorId, LINE: lineId, ACTIVE: activeStatus };
