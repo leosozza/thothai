@@ -3569,6 +3569,306 @@ async function handleVerifyIntegration(supabase: any, payload: any, supabaseUrl:
   }
 }
 
+// Handle get_bound_events action - List all events bound to our webhook
+async function handleGetBoundEvents(supabase: any, payload: any) {
+  console.log("=== GET BOUND EVENTS ===");
+  const { integration_id } = payload;
+
+  if (!integration_id) {
+    return new Response(
+      JSON.stringify({ error: "Integration ID é obrigatório" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const { data: integration, error: integrationError } = await supabase
+    .from("integrations")
+    .select("*")
+    .eq("id", integration_id)
+    .single();
+
+  if (integrationError || !integration) {
+    console.error("Integration not found:", integrationError);
+    return new Response(
+      JSON.stringify({ error: "Integração não encontrada" }),
+      { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const accessToken = await refreshBitrixToken(integration, supabase);
+  if (!accessToken) {
+    return new Response(
+      JSON.stringify({ error: "Token de acesso não disponível" }),
+      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const config = integration.config;
+  const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
+
+  try {
+    console.log("Fetching events from Bitrix24...");
+    const eventsResponse = await fetch(`${clientEndpoint}event.get`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ auth: accessToken })
+    });
+    const eventsResult = await eventsResponse.json();
+    console.log("Events result:", JSON.stringify(eventsResult, null, 2));
+
+    if (eventsResult.error) {
+      return new Response(
+        JSON.stringify({ error: eventsResult.error_description || eventsResult.error }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Filter our events (those pointing to bitrix24-webhook)
+    const ourEvents = (eventsResult.result || []).filter((e: any) => 
+      (e.handler || e.HANDLER || "").includes("bitrix24-webhook")
+    );
+
+    // Group by event type to identify duplicates
+    const eventsByType: Record<string, any[]> = {};
+    for (const e of ourEvents) {
+      const eventName = (e.event || e.EVENT).toUpperCase();
+      if (!eventsByType[eventName]) {
+        eventsByType[eventName] = [];
+      }
+      eventsByType[eventName].push({
+        event: e.event || e.EVENT,
+        handler: e.handler || e.HANDLER,
+        auth_type: e.auth_type || e.AUTH_TYPE,
+        offline: e.offline || e.OFFLINE
+      });
+    }
+
+    // Identify duplicates (events with same type but different handlers)
+    const duplicates: any[] = [];
+    for (const [eventName, handlers] of Object.entries(eventsByType)) {
+      if (handlers.length > 1) {
+        duplicates.push({
+          event: eventName,
+          count: handlers.length,
+          handlers: handlers.map((h: any) => h.handler)
+        });
+      }
+    }
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        events: ourEvents,
+        events_by_type: eventsByType,
+        duplicates,
+        total_events: ourEvents.length,
+        duplicate_count: duplicates.reduce((sum, d) => sum + d.count - 1, 0)
+      }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  } catch (error) {
+    console.error("Error fetching events:", error);
+    return new Response(
+      JSON.stringify({ error: error instanceof Error ? error.message : "Erro ao buscar eventos" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+}
+
+// Handle cleanup_duplicate_events action - Remove duplicate events keeping only those with proper params
+async function handleCleanupDuplicateEvents(supabase: any, payload: any, supabaseUrl: string) {
+  console.log("=== CLEANUP DUPLICATE EVENTS ===");
+  const { integration_id, dry_run = false } = payload;
+
+  if (!integration_id) {
+    return new Response(
+      JSON.stringify({ error: "Integration ID é obrigatório" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const { data: integration, error: integrationError } = await supabase
+    .from("integrations")
+    .select("*")
+    .eq("id", integration_id)
+    .single();
+
+  if (integrationError || !integration) {
+    console.error("Integration not found:", integrationError);
+    return new Response(
+      JSON.stringify({ error: "Integração não encontrada" }),
+      { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const accessToken = await refreshBitrixToken(integration, supabase);
+  if (!accessToken) {
+    return new Response(
+      JSON.stringify({ error: "Token de acesso não disponível" }),
+      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const config = integration.config;
+  const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
+  const webhookUrl = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
+
+  try {
+    // Get all events
+    console.log("Fetching events from Bitrix24...");
+    const eventsResponse = await fetch(`${clientEndpoint}event.get`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ auth: accessToken })
+    });
+    const eventsResult = await eventsResponse.json();
+
+    if (eventsResult.error) {
+      return new Response(
+        JSON.stringify({ error: eventsResult.error_description || eventsResult.error }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Filter our events
+    const ourEvents = (eventsResult.result || []).filter((e: any) => 
+      (e.handler || e.HANDLER || "").includes("bitrix24-webhook")
+    );
+
+    console.log("Found events:", ourEvents.length);
+
+    // Identify events to remove:
+    // 1. Events without workspace_id/connector_id query params (old/broken)
+    // 2. Duplicate events (keep one with proper params)
+    const eventsToRemove: any[] = [];
+    const eventsToKeep: any[] = [];
+    const seenEvents: Set<string> = new Set();
+
+    // Sort events: prefer those with query params (longer URLs)
+    const sortedEvents = [...ourEvents].sort((a, b) => {
+      const urlA = a.handler || a.HANDLER || "";
+      const urlB = b.handler || b.HANDLER || "";
+      return urlB.length - urlA.length; // Longer URLs first (with params)
+    });
+
+    for (const event of sortedEvents) {
+      const eventName = (event.event || event.EVENT).toUpperCase();
+      const handler = event.handler || event.HANDLER || "";
+      
+      // Check if handler has proper query params
+      const hasWorkspaceId = handler.includes("workspace_id=");
+      const hasConnectorId = handler.includes("connector_id=");
+      const hasProperParams = hasWorkspaceId || hasConnectorId;
+
+      // For connector events, we prefer handlers with params
+      // For bot events, we keep the simple handler
+      const isConnectorEvent = eventName.includes("IMCONNECTOR");
+      
+      if (seenEvents.has(eventName)) {
+        // This is a duplicate - remove it
+        eventsToRemove.push({
+          event: eventName,
+          handler: handler,
+          reason: "duplicate"
+        });
+      } else if (isConnectorEvent && !hasProperParams) {
+        // Connector event without proper params - check if there's one with params
+        const betterEvent = sortedEvents.find(e => 
+          (e.event || e.EVENT).toUpperCase() === eventName &&
+          ((e.handler || e.HANDLER || "").includes("workspace_id=") ||
+           (e.handler || e.HANDLER || "").includes("connector_id="))
+        );
+        
+        if (betterEvent) {
+          // There's a better version - remove this one
+          eventsToRemove.push({
+            event: eventName,
+            handler: handler,
+            reason: "missing_params"
+          });
+        } else {
+          // No better version exists - keep this one
+          seenEvents.add(eventName);
+          eventsToKeep.push({ event: eventName, handler });
+        }
+      } else {
+        // Keep this event
+        seenEvents.add(eventName);
+        eventsToKeep.push({ event: eventName, handler });
+      }
+    }
+
+    console.log("Events to remove:", eventsToRemove.length);
+    console.log("Events to keep:", eventsToKeep.length);
+
+    if (dry_run) {
+      return new Response(
+        JSON.stringify({
+          success: true,
+          dry_run: true,
+          events_to_remove: eventsToRemove,
+          events_to_keep: eventsToKeep,
+          summary: `${eventsToRemove.length} eventos seriam removidos, ${eventsToKeep.length} seriam mantidos`
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Actually remove the events
+    const removeResults: any[] = [];
+    for (const event of eventsToRemove) {
+      try {
+        console.log(`Removing event: ${event.event} -> ${event.handler}`);
+        const unbindResponse = await fetch(`${clientEndpoint}event.unbind`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            auth: accessToken,
+            event: event.event,
+            handler: event.handler
+          })
+        });
+        const unbindResult = await unbindResponse.json();
+        removeResults.push({
+          event: event.event,
+          handler: event.handler,
+          success: !unbindResult.error,
+          result: unbindResult.result,
+          error: unbindResult.error
+        });
+      } catch (e) {
+        console.error(`Failed to remove event ${event.event}:`, e);
+        removeResults.push({
+          event: event.event,
+          handler: event.handler,
+          success: false,
+          error: e instanceof Error ? e.message : "Unknown error"
+        });
+      }
+    }
+
+    const successCount = removeResults.filter(r => r.success).length;
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        removed: successCount,
+        failed: removeResults.length - successCount,
+        results: removeResults,
+        events_kept: eventsToKeep,
+        summary: `${successCount} de ${eventsToRemove.length} eventos removidos com sucesso`
+      }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  } catch (error) {
+    console.error("Error cleaning up events:", error);
+    return new Response(
+      JSON.stringify({ error: error instanceof Error ? error.message : "Erro ao limpar eventos" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+}
+
 serve(async (req) => {
   const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(7)}`;
   console.log("=== BITRIX24-WEBHOOK REQUEST ===");
@@ -3730,6 +4030,16 @@ serve(async (req) => {
 
     if (action === "unregister_robot" || payload.action === "unregister_robot") {
       return await handleUnregisterRobot(supabase, payload);
+    }
+
+    // Handle get_bound_events action - list all bound events
+    if (action === "get_bound_events" || payload.action === "get_bound_events") {
+      return await handleGetBoundEvents(supabase, payload);
+    }
+
+    // Handle cleanup_duplicate_events action - remove duplicate events
+    if (action === "cleanup_duplicate_events" || payload.action === "cleanup_duplicate_events") {
+      return await handleCleanupDuplicateEvents(supabase, payload, supabaseUrl);
     }
 
     // Check if this is a robot execution call (bizproc.robot handler)
