@@ -190,7 +190,11 @@ serve(async (req) => {
 function triggerWorker(supabaseUrl: string, supabaseServiceKey: string, eventId?: string) {
   const workerUrl = `${supabaseUrl}/functions/v1/bitrix24-worker`;
   
-  // Use EdgeRuntime.waitUntil for true async processing without blocking response
+  console.log("=== TRIGGERING WORKER ===");
+  console.log("Worker URL:", workerUrl);
+  console.log("Event ID:", eventId);
+  console.log("Service key available:", !!supabaseServiceKey);
+  
   const workerPromise = fetch(workerUrl, {
     method: "POST",
     headers: {
@@ -199,21 +203,31 @@ function triggerWorker(supabaseUrl: string, supabaseServiceKey: string, eventId?
     },
     body: JSON.stringify({ 
       event_id: eventId,
-      triggered_at: new Date().toISOString()
+      triggered_at: new Date().toISOString(),
+      source: "bitrix24-events"
     })
-  }).then(res => {
-    console.log("Worker triggered, status:", res.status);
+  }).then(async (res) => {
+    const responseText = await res.text();
+    console.log("Worker response status:", res.status);
+    console.log("Worker response body:", responseText.substring(0, 500));
+    return res;
   }).catch(err => {
-    console.error("Error triggering worker:", err);
+    console.error("Error triggering worker:", err.message || err);
   });
 
-  // Use EdgeRuntime.waitUntil if available (Deno Deploy)
+  // Use EdgeRuntime.waitUntil if available (Deno Deploy / Supabase Edge)
+  // This ensures the promise runs to completion even after response is sent
   if (typeof EdgeRuntime !== "undefined" && EdgeRuntime.waitUntil) {
+    console.log("Using EdgeRuntime.waitUntil for background processing");
     EdgeRuntime.waitUntil(workerPromise);
+  } else {
+    console.log("EdgeRuntime.waitUntil not available, worker will run inline");
+    // Fallback: don't await, just let it run
+    // The promise will continue executing after response is sent
   }
 }
 
-// Declare EdgeRuntime for TypeScript
+// Declare EdgeRuntime for TypeScript (Supabase Edge Functions)
 declare const EdgeRuntime: {
   waitUntil?: (promise: Promise<any>) => void;
 } | undefined;
