@@ -3850,6 +3850,297 @@ async function handleCleanupDuplicateEvents(supabase: any, payload: any, supabas
   }
 }
 
+/**
+ * Handle rebind_events_to_new_url action
+ * Migrates all Bitrix24 event bindings from old webhook URL to new bitrix24-events URL
+ */
+async function handleRebindEventsToNewUrl(supabase: any, payload: any, supabaseUrl: string) {
+  console.log("=== REBIND EVENTS TO NEW URL ===");
+  console.log("Payload:", JSON.stringify(payload, null, 2));
+
+  const { integration_id } = payload;
+
+  if (!integration_id) {
+    return new Response(
+      JSON.stringify({ error: "Integration ID não fornecido" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const { data: integration, error: integrationError } = await supabase
+    .from("integrations")
+    .select("*")
+    .eq("id", integration_id)
+    .single();
+
+  if (integrationError || !integration) {
+    console.error("Integration not found:", integrationError);
+    return new Response(
+      JSON.stringify({ error: "Integração não encontrada" }),
+      { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const accessToken = await refreshBitrixToken(integration, supabase);
+  if (!accessToken) {
+    return new Response(
+      JSON.stringify({ error: "Token de acesso não disponível" }),
+      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const config = integration.config;
+  const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
+  
+  // Old URL (webhook) and new URL (events - public endpoint)
+  const oldWebhookUrl = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
+  const newEventsUrl = `${supabaseUrl}/functions/v1/bitrix24-events`;
+
+  console.log("Old webhook URL:", oldWebhookUrl);
+  console.log("New events URL:", newEventsUrl);
+  console.log("Client endpoint:", clientEndpoint);
+
+  const results = {
+    events_unbound: [] as any[],
+    events_bound: [] as any[],
+    errors: [] as string[],
+  };
+
+  try {
+    // 1. Get all current event bindings
+    console.log("Step 1: Fetching current event bindings...");
+    const eventsResponse = await fetch(`${clientEndpoint}event.get`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ auth: accessToken })
+    });
+    const eventsResult = await eventsResponse.json();
+    console.log("Current events:", JSON.stringify(eventsResult, null, 2));
+
+    const currentEvents = eventsResult.result || [];
+    
+    // 2. Find events bound to old webhook URL
+    const eventsToMigrate = currentEvents.filter((e: any) => 
+      e.handler && (
+        e.handler.includes("/bitrix24-webhook") || 
+        e.handler.includes("bitrix24-webhook")
+      )
+    );
+
+    console.log(`Found ${eventsToMigrate.length} events to migrate`);
+
+    // 3. Events that should be migrated to new endpoint
+    const eventNamesToMigrate = [
+      "ONIMCONNECTORMESSAGEADD",
+      "OnImConnectorMessageAdd",
+      "ONIMCONNECTORMESSAGERECEIVE",
+      "OnImConnectorMessageReceive",
+      "ONIMBOTMESSAGEADD",
+      "OnImBotMessageAdd",
+      "ONIMBOTJOINOPEN",
+      "OnImBotJoinOpen",
+      "ONIMCONNECTORDIALOGSTART",
+      "OnImConnectorDialogStart",
+      "ONIMCONNECTORDIALOGFINISH",
+      "OnImConnectorDialogFinish",
+      "ONIMCONNECTORSTATUSDELETE",
+      "OnImConnectorStatusDelete",
+      "ONAPPTEST",
+      "OnAppTest",
+    ];
+
+    // 4. Unbind old events and bind to new URL
+    for (const event of eventsToMigrate) {
+      const eventName = event.event;
+      const oldHandler = event.handler;
+
+      // Check if this event should be migrated
+      const shouldMigrate = eventNamesToMigrate.some(e => 
+        e.toLowerCase() === eventName.toLowerCase()
+      );
+
+      if (!shouldMigrate) {
+        console.log(`Skipping event ${eventName} - not in migration list`);
+        continue;
+      }
+
+      console.log(`Migrating event: ${eventName}`);
+
+      // Unbind from old URL
+      try {
+        console.log(`Unbinding ${eventName} from ${oldHandler}...`);
+        const unbindResponse = await fetch(`${clientEndpoint}event.unbind`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            auth: accessToken,
+            event: eventName,
+            handler: oldHandler
+          })
+        });
+        const unbindResult = await unbindResponse.json();
+        console.log(`Unbind result:`, JSON.stringify(unbindResult));
+        
+        results.events_unbound.push({
+          event: eventName,
+          old_handler: oldHandler,
+          success: !unbindResult.error,
+          result: unbindResult.result
+        });
+      } catch (e) {
+        console.error(`Failed to unbind ${eventName}:`, e);
+        results.errors.push(`Failed to unbind ${eventName}: ${e}`);
+      }
+
+      // Bind to new URL
+      try {
+        console.log(`Binding ${eventName} to ${newEventsUrl}...`);
+        const bindResponse = await fetch(`${clientEndpoint}event.bind`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            auth: accessToken,
+            event: eventName,
+            handler: newEventsUrl
+          })
+        });
+        const bindResult = await bindResponse.json();
+        console.log(`Bind result:`, JSON.stringify(bindResult));
+        
+        results.events_bound.push({
+          event: eventName,
+          new_handler: newEventsUrl,
+          success: !bindResult.error || bindResult.error === "HANDLER_ALREADY_BINDED",
+          result: bindResult.result,
+          error: bindResult.error
+        });
+      } catch (e) {
+        console.error(`Failed to bind ${eventName}:`, e);
+        results.errors.push(`Failed to bind ${eventName}: ${e}`);
+      }
+    }
+
+    // 5. Also bind any missing events directly to new URL
+    console.log("Step 5: Ensuring all required events are bound to new URL...");
+    const requiredEvents = [
+      "OnImConnectorMessageAdd",
+      "OnImConnectorDialogStart",
+      "OnImConnectorDialogFinish",
+      "OnImConnectorStatusDelete",
+    ];
+
+    for (const eventName of requiredEvents) {
+      // Check if already bound to new URL
+      const alreadyBound = results.events_bound.some(e => 
+        e.event.toLowerCase() === eventName.toLowerCase() && e.success
+      );
+
+      if (!alreadyBound) {
+        try {
+          console.log(`Binding missing event ${eventName} to ${newEventsUrl}...`);
+          const bindResponse = await fetch(`${clientEndpoint}event.bind`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              auth: accessToken,
+              event: eventName,
+              handler: newEventsUrl
+            })
+          });
+          const bindResult = await bindResponse.json();
+          
+          if (!bindResult.error || bindResult.error === "HANDLER_ALREADY_BINDED") {
+            results.events_bound.push({
+              event: eventName,
+              new_handler: newEventsUrl,
+              success: true,
+              was_missing: true
+            });
+          }
+        } catch (e) {
+          console.error(`Failed to bind missing ${eventName}:`, e);
+        }
+      }
+    }
+
+    // 6. Update connector data to use new URL
+    console.log("Step 6: Updating connector data with new URL...");
+    const connectorId = config.connector_id || "thoth_whatsapp";
+    const lineId = config.line_id || config.activated_line_id || 2;
+
+    try {
+      const dataSetResponse = await fetch(`${clientEndpoint}imconnector.connector.data.set`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          auth: accessToken,
+          CONNECTOR: connectorId,
+          LINE: lineId,
+          DATA: {
+            id: `${connectorId}_line_${lineId}`,
+            url: newEventsUrl,
+            url_im: newEventsUrl,
+            name: "Thoth WhatsApp"
+          }
+        })
+      });
+      const dataSetResult = await dataSetResponse.json();
+      console.log("Connector data set result:", JSON.stringify(dataSetResult));
+    } catch (e) {
+      console.error("Failed to update connector data:", e);
+      results.errors.push(`Failed to update connector data: ${e}`);
+    }
+
+    // 7. Update integration config with new URL
+    await supabase
+      .from("integrations")
+      .update({
+        config: {
+          ...config,
+          events_url: newEventsUrl,
+          events_migrated_at: new Date().toISOString(),
+          old_webhook_url: oldWebhookUrl,
+        },
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", integration.id);
+
+    // Summary
+    const successfulUnbinds = results.events_unbound.filter(e => e.success).length;
+    const successfulBinds = results.events_bound.filter(e => e.success).length;
+
+    console.log("=== MIGRATION COMPLETE ===");
+    console.log(`Unbound: ${successfulUnbinds}/${results.events_unbound.length}`);
+    console.log(`Bound: ${successfulBinds}/${results.events_bound.length}`);
+    console.log(`Errors: ${results.errors.length}`);
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        message: `Migração concluída: ${successfulUnbinds} eventos removidos, ${successfulBinds} eventos vinculados`,
+        old_url: oldWebhookUrl,
+        new_url: newEventsUrl,
+        results,
+        summary: {
+          events_unbound: successfulUnbinds,
+          events_bound: successfulBinds,
+          errors: results.errors.length
+        }
+      }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  } catch (error) {
+    console.error("Error rebinding events:", error);
+    return new Response(
+      JSON.stringify({ 
+        error: error instanceof Error ? error.message : "Erro ao migrar eventos",
+        results
+      }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+}
+
 serve(async (req) => {
   const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(7)}`;
   console.log("=== BITRIX24-WEBHOOK REQUEST ===");
@@ -4023,6 +4314,11 @@ serve(async (req) => {
       return await handleCleanupDuplicateEvents(supabase, payload, supabaseUrl);
     }
 
+    // Handle rebind_events_to_new_url action - migrate events to bitrix24-events endpoint
+    if (action === "rebind_events_to_new_url" || payload.action === "rebind_events_to_new_url") {
+      return await handleRebindEventsToNewUrl(supabase, payload, supabaseUrl);
+    }
+
     // Check if this is a robot execution call (bizproc.robot handler)
     if (payload.event_token || payload.EVENT_TOKEN || 
         (payload.properties && (payload.properties.phone || payload.properties.message)) ||
@@ -4126,7 +4422,8 @@ serve(async (req) => {
         available_actions: [
           "list_channels", "diagnose", "auto_setup", "cleanup", "reconfigure_connector",
           "list_bot_events", "get_bound_events", "cleanup_duplicate_events", "register_robot",
-          "get_connector_lines", "activate_line", "sync_contacts", "complete_setup"
+          "get_connector_lines", "activate_line", "sync_contacts", "complete_setup",
+          "rebind_events_to_new_url"
         ]
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
