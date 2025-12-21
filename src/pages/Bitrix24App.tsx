@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Loader2, MessageSquare, Bot, BookOpen, Settings, Phone, LayoutDashboard, Zap, AlertCircle, ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import type { BX24Result, BX24AppInfo } from "@/types/bitrix24";
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 
@@ -47,14 +48,14 @@ export default function Bitrix24App() {
 
   const initBitrix24SDK = () => {
     try {
-      // @ts-ignore - Bitrix24 JS SDK
+      // @ts-expect-error - Bitrix24 JS SDK types are defined but window.BX24 may not be loaded yet
       if (window.BX24) {
-        // @ts-ignore
+        // @ts-expect-error - window.BX24 is checked above
         window.BX24.init(() => {
-          // @ts-ignore
+          // @ts-expect-error - window.BX24 is checked above
           window.BX24.fitWindow();
-          // @ts-ignore
-          window.BX24.callMethod("app.info", {}, (result: any) => {
+          // @ts-expect-error - window.BX24 is checked above
+          window.BX24.callMethod<BX24AppInfo>("app.info", {}, (result: BX24Result<BX24AppInfo>) => {
             const appInfo = result.data();
             if (appInfo?.member_id) setMemberId(appInfo.member_id);
             if (appInfo?.DOMAIN) setDomain(appInfo.DOMAIN);
@@ -66,22 +67,8 @@ export default function Bitrix24App() {
     }
   };
 
-  // Load data when memberId is available
-  useEffect(() => {
-    if (memberId) {
-      loadData();
-    } else {
-      const timer = setTimeout(() => {
-        if (!memberId && !domain) {
-          // Show fallback view when not inside Bitrix24 iframe
-          setView("not-in-bitrix");
-        }
-      }, 2000);
-      return () => clearTimeout(timer);
-    }
-  }, [memberId, domain]);
-
-  const loadData = async () => {
+  // Load data when memberId is available - useCallback to fix deps warning
+  const loadData = useCallback(async () => {
     try {
       setView("loading");
       
@@ -107,7 +94,23 @@ export default function Bitrix24App() {
       setError("Erro ao carregar dados");
       setView("token");
     }
-  };
+  }, [memberId]);
+
+  useEffect(() => {
+    if (memberId) {
+      loadData();
+    } else {
+      const timer = setTimeout(() => {
+        if (!memberId && !domain) {
+          // Show fallback view when not inside Bitrix24 iframe
+          setView("not-in-bitrix");
+        }
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [memberId, domain, loadData]);
+
+
 
   const handleValidateToken = async () => {
     if (!linkingToken.trim()) {
@@ -139,8 +142,9 @@ export default function Bitrix24App() {
         toast.success("Workspace vinculado com sucesso!");
         await loadData();
       }
-    } catch (err: any) {
-      toast.error(err.message || "Erro ao validar token");
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Erro ao validar token";
+      toast.error(errorMessage);
     } finally {
       setValidatingToken(false);
     }
