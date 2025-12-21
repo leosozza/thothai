@@ -3602,18 +3602,29 @@ async function handleVerifyIntegration(supabase: any, payload: any, supabaseUrl:
 
       // Use same logic as list_channels - Bitrix24 returns: STATUS (active), CONFIGURED (registered), ERROR
       const result = statusResult.result || {};
+      const isActive = result.STATUS === true || result.active === true || result.ACTIVE === "Y";
+      const isRegistered = result.CONFIGURED === true || result.register === true || result.REGISTER === "Y";
+      // Connection is OK if no error - ERROR field indicates connection problems
+      const hasConnection = result.ERROR === false;
+      
       verification.lines.push({
         id: lineId,
         name: line.LINE_NAME,
         active: line.ACTIVE === "Y",
-        connector_active: result.STATUS === true || result.active === true || result.ACTIVE === "Y",
-        connector_registered: result.CONFIGURED === true || result.register === true || result.REGISTER === "Y",
-        connector_connection: !result.ERROR && (result.CONNECTION === true || result.connection === true),
+        connector_active: isActive,
+        connector_registered: isRegistered,
+        connector_connection: hasConnection,
       });
     }
 
-    // Check if any line has inactive connector
-    const inactiveLines = verification.lines.filter(l => l.active && !l.connector_active);
+    // Check for CRITICAL issues (affect healthy status)
+    const unregisteredLines = verification.lines.filter(l => l.active && !l.connector_registered);
+    if (unregisteredLines.length > 0) {
+      verification.issues.push(`Conector não registrado em ${unregisteredLines.length} linha(s)`);
+      verification.recommendations.push("Execute 'Reconfigurar do Zero' para registrar o conector");
+    }
+    
+    const inactiveLines = verification.lines.filter(l => l.active && l.connector_registered && !l.connector_active);
     if (inactiveLines.length > 0) {
       verification.issues.push(`Conector inativo em ${inactiveLines.length} linha(s)`);
       verification.recommendations.push("Execute 'Corrigir Automaticamente' para ativar o conector");
@@ -3683,19 +3694,40 @@ async function handleVerifyIntegration(supabase: any, payload: any, supabaseUrl:
       is_active: m.is_active
     }));
 
-    // Final assessment
-    const healthy = verification.issues.length === 0;
+    // Separate critical issues from warnings
+    // Critical issues: token invalid, connector not registered, connector inactive, missing message event
+    // Warnings: duplicate connectors, duplicate events (these don't break functionality)
+    const criticalIssues = verification.issues.filter(issue => 
+      !issue.includes("duplicado") && !issue.includes("duplicate")
+    );
+    
+    const warnings = verification.issues.filter(issue => 
+      issue.includes("duplicado") || issue.includes("duplicate")
+    );
 
-    console.log("Verification complete:", verification);
+    // Final assessment - healthy if no CRITICAL issues
+    const healthy = criticalIssues.length === 0;
+
+    console.log("Verification complete:", { 
+      ...verification, 
+      criticalIssues, 
+      warnings, 
+      healthy 
+    });
 
     return new Response(
       JSON.stringify({
         success: true,
         healthy,
-        verification,
+        verification: {
+          ...verification,
+          warnings, // Add warnings as separate field
+        },
         summary: healthy 
-          ? "Integração funcionando corretamente"
-          : `${verification.issues.length} problema(s) encontrado(s)`
+          ? (warnings.length > 0 
+              ? `Funcionando com ${warnings.length} aviso(s)` 
+              : "Integração funcionando corretamente")
+          : `${criticalIssues.length} problema(s) crítico(s) encontrado(s)`
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
