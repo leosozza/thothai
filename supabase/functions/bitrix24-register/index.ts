@@ -456,20 +456,97 @@ serve(async (req) => {
       );
     }
 
-    // 0. First, try to UNREGISTER any existing connector to avoid duplicates
-    console.log("Attempting to unregister existing connector first...");
-    const unregisterUrl = `${bitrixApiUrl}imconnector.unregister?auth=${accessToken}`;
+    // 0. AUTOMATIC CLEANUP: Remove ALL existing Thoth/WhatsApp connectors to avoid duplicates
+    console.log("=== AUTOMATIC CONNECTOR CLEANUP ===");
+    
+    // List all existing connectors
+    const listUrl = `${bitrixApiUrl}imconnector.list?auth=${accessToken}`;
     try {
-      const unregisterResponse = await fetch(unregisterUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ID: finalConnectorId }),
-      });
-      const unregisterResult = await unregisterResponse.json();
-      console.log("imconnector.unregister result:", JSON.stringify(unregisterResult));
+      const listResponse = await fetch(listUrl);
+      const listResult = await listResponse.json();
+      console.log("imconnector.list result:", JSON.stringify(listResult));
+      
+      if (listResult.result) {
+        // Find all connectors with "thoth" or "whatsapp" in the name
+        const connectorsToRemove = Object.keys(listResult.result).filter(id => {
+          const idLower = id.toLowerCase();
+          return idLower.includes("thoth") || idLower.includes("whatsapp");
+        });
+        
+        console.log("Connectors to remove:", connectorsToRemove);
+        
+        // Remove each one before registering the new one
+        for (const connectorIdToRemove of connectorsToRemove) {
+          console.log(`Cleaning up connector: ${connectorIdToRemove}`);
+          
+          // First deactivate on all lines (0-10)
+          for (let line = 0; line <= 10; line++) {
+            try {
+              await fetch(`${bitrixApiUrl}imconnector.deactivate?auth=${accessToken}`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ CONNECTOR: connectorIdToRemove, LINE: line })
+              });
+            } catch (e) {
+              // Ignore deactivation errors
+            }
+          }
+          
+          // Then unregister
+          try {
+            const unregisterResponse = await fetch(`${bitrixApiUrl}imconnector.unregister?auth=${accessToken}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ ID: connectorIdToRemove }),
+            });
+            const unregisterResult = await unregisterResponse.json();
+            console.log(`Unregistered ${connectorIdToRemove}:`, JSON.stringify(unregisterResult));
+          } catch (e) {
+            console.log(`Failed to unregister ${connectorIdToRemove}:`, e);
+          }
+        }
+      }
     } catch (e) {
-      console.log("Unregister failed (connector may not exist):", e);
+      console.log("Error listing connectors for cleanup:", e);
     }
+    
+    // Also clean up duplicate events before binding new ones
+    console.log("=== CLEANING DUPLICATE EVENTS ===");
+    const cleanWebhookUrlForCleanup = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
+    
+    try {
+      const eventsListUrl = `${bitrixApiUrl}event.get?auth=${accessToken}`;
+      const eventsResponse = await fetch(eventsListUrl);
+      const eventsResult = await eventsResponse.json();
+      
+      if (eventsResult.result) {
+        const eventsToUnbind = eventsResult.result.filter((event: any) => 
+          event.handler?.includes("bitrix24-webhook")
+        );
+        
+        console.log(`Found ${eventsToUnbind.length} Thoth events to clean up`);
+        
+        for (const event of eventsToUnbind) {
+          try {
+            await fetch(`${bitrixApiUrl}event.unbind?auth=${accessToken}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                event: event.event,
+                handler: event.handler
+              })
+            });
+            console.log(`Unbound event: ${event.event}`);
+          } catch (e) {
+            // Ignore unbind errors
+          }
+        }
+      }
+    } catch (e) {
+      console.log("Error cleaning up events:", e);
+    }
+    
+    console.log("=== CLEANUP COMPLETE, REGISTERING NEW CONNECTOR ===");
 
     // 1. Register connector in Bitrix24 (this makes it appear in Contact Center)
     // CRITICAL: Use proper icon format with COLOR, SIZE, POSITION for Marketplace compliance
