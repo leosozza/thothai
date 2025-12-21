@@ -1027,10 +1027,22 @@ serve(async (req) => {
 
           // 2. Bind events to the public bitrix24-events endpoint
           const events = [
-            "ONIMCONNECTORMESSAGEADD",
-            "ONIMCONNECTORMESSAGEUPDATE", 
-            "ONIMCONNECTORSTATUSDELETE",
-            "ONIMCONNECTORLINEDELETE"
+            // Message events (essential)
+            "ONIMCONNECTORMESSAGEADD",       // Operator sends message
+            "ONIMCONNECTORMESSAGERECEIVE",   // Client receives message from operator
+            "ONIMCONNECTORMESSAGEUPDATE",    // Message updated
+            "ONIMCONNECTORMESSAGEDELETE",    // Message deleted
+            
+            // Dialog events
+            "ONIMCONNECTORDIALOGSTART",      // Dialog started
+            "ONIMCONNECTORDIALOGFINISH",     // Dialog finished
+            
+            // Status events
+            "ONIMCONNECTORSTATUSDELETE",     // Status deleted
+            "ONIMCONNECTORLINEDELETE",       // Line deleted
+            
+            // App events
+            "ONAPPUPDATE"                    // App updated
           ];
 
           for (const eventName of events) {
