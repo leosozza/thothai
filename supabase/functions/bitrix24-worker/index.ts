@@ -224,6 +224,10 @@ async function processEvent(
         await processAdminRebindEvents(payload, supabase, supabaseUrl, supabaseServiceKey);
         break;
 
+      case "ADMIN_REBIND_PLACEMENTS":
+        await processAdminRebindPlacements(payload, supabase, supabaseUrl);
+        break;
+
       default:
         console.log(`Unknown event type: ${event.event_type}`);
     }
@@ -836,4 +840,151 @@ async function processAdminRebindEvents(
 
   console.log("=== REBIND COMPLETE ===");
   console.log(`Unbound: ${results.unbound}, Bound: ${results.bound}, Errors: ${results.errors.length}`);
+}
+
+/**
+ * Process ADMIN_REBIND_PLACEMENTS - Update placements to use new bitrix24-app page
+ */
+async function processAdminRebindPlacements(
+  payload: any,
+  supabase: any,
+  supabaseUrl: string
+) {
+  console.log("=== PROCESSING ADMIN REBIND PLACEMENTS ===");
+  
+  const integrationId = payload.integration_id;
+  
+  if (!integrationId) {
+    throw new Error("Missing integration_id in payload");
+  }
+
+  // 1. Get integration
+  const { data: integration, error: intError } = await supabase
+    .from("integrations")
+    .select("*")
+    .eq("id", integrationId)
+    .single();
+
+  if (intError || !integration) {
+    throw new Error(`Integration not found: ${integrationId}`);
+  }
+
+  const config = integration.config;
+  const domain = config.domain;
+  const accessToken = config.access_token;
+  const clientEndpoint = config.client_endpoint || `https://${domain}/rest/`;
+
+  if (!accessToken) {
+    throw new Error("No access token configured");
+  }
+
+  console.log("Rebinding placements for:", domain);
+
+  const results = {
+    unbound: 0,
+    bound: 0,
+    errors: [] as string[]
+  };
+
+  // New app URL
+  const newAppUrl = "https://chat.thoth24.com/bitrix24-app";
+
+  // 2. Unbind old REST_APP placement
+  try {
+    await fetch(`${clientEndpoint}placement.unbind`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        auth: accessToken,
+        PLACEMENT: "REST_APP"
+      })
+    });
+    results.unbound++;
+    console.log("Unbound: REST_APP");
+  } catch (e) {
+    results.errors.push(`Unbind REST_APP: ${e}`);
+  }
+
+  // 3. Bind new REST_APP placement
+  try {
+    const bindResponse = await fetch(`${clientEndpoint}placement.bind`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        auth: accessToken,
+        PLACEMENT: "REST_APP",
+        HANDLER: newAppUrl,
+        TITLE: "Thoth WhatsApp"
+      })
+    });
+    const bindResult = await bindResponse.json();
+    console.log("Bind REST_APP result:", bindResult);
+    
+    if (!bindResult.error || bindResult.error === "HANDLER_ALREADY_BINDED") {
+      results.bound++;
+      console.log("Bound: REST_APP to", newAppUrl);
+    } else {
+      results.errors.push(`Bind REST_APP: ${bindResult.error}`);
+    }
+  } catch (e) {
+    results.errors.push(`Bind REST_APP: ${e}`);
+  }
+
+  // 4. Re-bind SETTING_CONNECTOR to ensure it's correct
+  try {
+    await fetch(`${clientEndpoint}placement.unbind`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        auth: accessToken,
+        PLACEMENT: "SETTING_CONNECTOR"
+      })
+    });
+    console.log("Unbound: SETTING_CONNECTOR");
+  } catch (e) {
+    console.log("Unbind SETTING_CONNECTOR error (may not exist):", e);
+  }
+
+  const connectorSettingsUrl = `${supabaseUrl}/functions/v1/bitrix24-connector-settings`;
+  try {
+    const bindResponse = await fetch(`${clientEndpoint}placement.bind`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        auth: accessToken,
+        PLACEMENT: "SETTING_CONNECTOR",
+        HANDLER: connectorSettingsUrl,
+        TITLE: "Thoth WhatsApp Settings"
+      })
+    });
+    const bindResult = await bindResponse.json();
+    console.log("Bind SETTING_CONNECTOR result:", bindResult);
+    
+    if (!bindResult.error || bindResult.error === "HANDLER_ALREADY_BINDED") {
+      results.bound++;
+      console.log("Bound: SETTING_CONNECTOR to", connectorSettingsUrl);
+    }
+  } catch (e) {
+    results.errors.push(`Bind SETTING_CONNECTOR: ${e}`);
+  }
+
+  // 5. Update integration config
+  await supabase
+    .from("integrations")
+    .update({
+      config: {
+        ...config,
+        app_url: newAppUrl,
+        placements_migrated_at: new Date().toISOString()
+      },
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", integration.id);
+
+  console.log("=== REBIND PLACEMENTS COMPLETE ===");
+  console.log(`Unbound: ${results.unbound}, Bound: ${results.bound}, Errors: ${results.errors.length}`);
+  
+  if (results.errors.length > 0) {
+    console.log("Errors:", results.errors);
+  }
 }
