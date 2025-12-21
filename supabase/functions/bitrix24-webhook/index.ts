@@ -437,6 +437,322 @@ async function handlePlacement(supabase: any, payload: any, supabaseUrl: string)
   });
 }
 
+// Handle check_app_installed - verify if app is marked as INSTALLED in Bitrix24
+async function handleCheckAppInstalled(supabase: any, payload: any) {
+  console.log("=== CHECK APP INSTALLED ===");
+  
+  const { integration_id } = payload;
+  
+  if (!integration_id) {
+    return new Response(
+      JSON.stringify({ error: "integration_id is required" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const { data: integration, error: integrationError } = await supabase
+    .from("integrations")
+    .select("*")
+    .eq("id", integration_id)
+    .single();
+
+  if (integrationError || !integration) {
+    return new Response(
+      JSON.stringify({ error: "Integration not found" }),
+      { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const config = integration.config || {};
+  const accessToken = await refreshBitrixToken(integration, supabase);
+  
+  if (!accessToken) {
+    return new Response(
+      JSON.stringify({ 
+        success: false, 
+        error: "No access token",
+        app_installed: false
+      }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
+  
+  try {
+    // Call app.info to check if app is installed
+    const response = await fetch(`${clientEndpoint}app.info`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ auth: accessToken })
+    });
+    
+    const result = await response.json();
+    console.log("app.info result:", JSON.stringify(result, null, 2));
+    
+    if (result.error) {
+      return new Response(
+        JSON.stringify({ 
+          success: false, 
+          error: result.error_description || result.error,
+          app_installed: false 
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+    
+    const appInfo = result.result || {};
+    const isInstalled = appInfo.INSTALLED === true || appInfo.INSTALLED === "Y" || appInfo.INSTALLED === "1";
+    
+    return new Response(
+      JSON.stringify({ 
+        success: true,
+        app_installed: isInstalled,
+        app_info: {
+          installed: isInstalled,
+          id: appInfo.ID,
+          code: appInfo.CODE,
+          version: appInfo.VERSION,
+          status: appInfo.STATUS,
+          payment_expired: appInfo.PAYMENT_EXPIRED,
+          days: appInfo.DAYS,
+        }
+      }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  } catch (error) {
+    console.error("Error checking app.info:", error);
+    return new Response(
+      JSON.stringify({ 
+        success: false, 
+        error: error instanceof Error ? error.message : "Unknown error",
+        app_installed: false
+      }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+}
+
+// Handle force_reinstall_events - unbind all events and rebind to force Bitrix24 to re-evaluate
+async function handleForceReinstallEvents(supabase: any, payload: any, supabaseUrl: string) {
+  console.log("=== FORCE REINSTALL EVENTS ===");
+  
+  const { integration_id } = payload;
+  
+  if (!integration_id) {
+    return new Response(
+      JSON.stringify({ error: "integration_id is required" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const { data: integration, error: integrationError } = await supabase
+    .from("integrations")
+    .select("*")
+    .eq("id", integration_id)
+    .single();
+
+  if (integrationError || !integration) {
+    return new Response(
+      JSON.stringify({ error: "Integration not found" }),
+      { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const config = integration.config || {};
+  const accessToken = await refreshBitrixToken(integration, supabase);
+  
+  if (!accessToken) {
+    return new Response(
+      JSON.stringify({ success: false, error: "No access token" }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
+  const connectorId = config.connector_id || "thoth_whatsapp";
+  const lineId = config.line_id || config.activated_line_id || 2;
+  const eventsUrl = `${supabaseUrl}/functions/v1/bitrix24-events`;
+  
+  const results = {
+    unbound: [] as string[],
+    bound: [] as string[],
+    errors: [] as string[],
+    connector_reactivated: false,
+    app_info: null as any
+  };
+  
+  const eventsToRebind = [
+    "OnImConnectorMessageAdd",
+    "OnImConnectorDialogStart", 
+    "OnImConnectorDialogFinish",
+    "OnImConnectorStatusDelete"
+  ];
+
+  try {
+    // 1. First check app.info
+    console.log("Step 1: Checking app.info...");
+    const appInfoResponse = await fetch(`${clientEndpoint}app.info`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ auth: accessToken })
+    });
+    const appInfoResult = await appInfoResponse.json();
+    console.log("app.info result:", JSON.stringify(appInfoResult));
+    results.app_info = appInfoResult.result;
+    
+    // 2. Unbind all existing events
+    console.log("Step 2: Unbinding existing events...");
+    for (const eventName of eventsToRebind) {
+      try {
+        const unbindResponse = await fetch(`${clientEndpoint}event.unbind`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            auth: accessToken,
+            event: eventName,
+            handler: eventsUrl
+          })
+        });
+        const unbindResult = await unbindResponse.json();
+        console.log(`Unbind ${eventName}:`, JSON.stringify(unbindResult));
+        
+        if (unbindResult.result) {
+          results.unbound.push(eventName);
+        }
+      } catch (e) {
+        console.error(`Error unbinding ${eventName}:`, e);
+        results.errors.push(`unbind ${eventName}: ${e}`);
+      }
+    }
+    
+    // 3. Wait a moment for Bitrix24 to process
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    // 4. Rebind all events
+    console.log("Step 3: Rebinding events...");
+    for (const eventName of eventsToRebind) {
+      try {
+        const bindResponse = await fetch(`${clientEndpoint}event.bind`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            auth: accessToken,
+            event: eventName,
+            handler: eventsUrl,
+            auth_type: 0,
+            event_type: "online"
+          })
+        });
+        const bindResult = await bindResponse.json();
+        console.log(`Bind ${eventName}:`, JSON.stringify(bindResult));
+        
+        if (bindResult.result) {
+          results.bound.push(eventName);
+        } else if (bindResult.error === "HANDLER_ALREADY_BINDED") {
+          results.bound.push(eventName + " (already)");
+        } else {
+          results.errors.push(`bind ${eventName}: ${JSON.stringify(bindResult.error)}`);
+        }
+      } catch (e) {
+        console.error(`Error binding ${eventName}:`, e);
+        results.errors.push(`bind ${eventName}: ${e}`);
+      }
+    }
+    
+    // 5. Reactivate connector on the line
+    console.log("Step 4: Reactivating connector on line", lineId);
+    try {
+      // First deactivate
+      await fetch(`${clientEndpoint}imconnector.activate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          auth: accessToken,
+          CONNECTOR: connectorId,
+          LINE: lineId,
+          ACTIVE: 0
+        })
+      });
+      
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      // Then reactivate
+      const activateResponse = await fetch(`${clientEndpoint}imconnector.activate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          auth: accessToken,
+          CONNECTOR: connectorId,
+          LINE: lineId,
+          ACTIVE: 1
+        })
+      });
+      const activateResult = await activateResponse.json();
+      console.log("Reactivate connector result:", JSON.stringify(activateResult));
+      results.connector_reactivated = !!activateResult.result;
+      
+      // Set connector data
+      await fetch(`${clientEndpoint}imconnector.connector.data.set`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          auth: accessToken,
+          CONNECTOR: connectorId,
+          LINE: lineId,
+          DATA: {
+            id: `${connectorId}_line_${lineId}`,
+            url: eventsUrl,
+            url_im: eventsUrl,
+            name: "Thoth WhatsApp"
+          }
+        })
+      });
+      
+    } catch (e) {
+      console.error("Error reactivating connector:", e);
+      results.errors.push(`reactivate connector: ${e}`);
+    }
+    
+    // 6. Update integration config with reinstall timestamp
+    await supabase
+      .from("integrations")
+      .update({
+        config: {
+          ...config,
+          last_force_reinstall: new Date().toISOString(),
+          events_reinstalled_count: (config.events_reinstalled_count || 0) + 1
+        },
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", integration_id);
+    
+    const success = results.bound.length >= 3 && results.errors.length === 0;
+    
+    return new Response(
+      JSON.stringify({ 
+        success,
+        message: success 
+          ? `Reinstalação forçada concluída: ${results.bound.length} eventos rebindados` 
+          : `Reinstalação parcial: ${results.errors.length} erros`,
+        results
+      }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+    
+  } catch (error) {
+    console.error("Error in force reinstall:", error);
+    return new Response(
+      JSON.stringify({ 
+        success: false, 
+        error: error instanceof Error ? error.message : "Unknown error",
+        results
+      }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+}
+
 // Handle complete_setup action (called from Thoth.ai Integrations page)
 async function handleCompleteSetup(supabase: any, payload: any, supabaseUrl: string) {
   console.log("=== COMPLETE SETUP ===");
@@ -4845,6 +5161,16 @@ serve(async (req) => {
       return await handleRebindPlacements(supabase, payload, supabaseUrl);
     }
 
+    // Handle check_app_installed action - verify if app is marked as INSTALLED in Bitrix24
+    if (action === "check_app_installed" || payload.action === "check_app_installed") {
+      return await handleCheckAppInstalled(supabase, payload);
+    }
+
+    // Handle force_reinstall_events action - unbind and rebind all events to force Bitrix24 to re-evaluate
+    if (action === "force_reinstall_events" || payload.action === "force_reinstall_events") {
+      return await handleForceReinstallEvents(supabase, payload, supabaseUrl);
+    }
+
     // Check if this is a robot execution call (bizproc.robot handler)
     if (payload.event_token || payload.EVENT_TOKEN || 
         (payload.properties && (payload.properties.phone || payload.properties.message)) ||
@@ -4949,7 +5275,7 @@ serve(async (req) => {
           "list_channels", "diagnose", "auto_setup", "cleanup", "reconfigure_connector",
           "list_bot_events", "get_bound_events", "cleanup_duplicate_events", "register_robot",
           "get_connector_lines", "activate_line", "sync_contacts", "complete_setup",
-          "rebind_events_to_new_url", "rebind_placements"
+          "rebind_events_to_new_url", "rebind_placements", "check_app_installed", "force_reinstall_events"
         ]
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
