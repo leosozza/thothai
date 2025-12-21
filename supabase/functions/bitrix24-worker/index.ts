@@ -18,6 +18,60 @@ const corsHeaders = {
  * Esta função é chamada pelo bitrix24-events após enfileirar eventos.
  */
 
+/**
+ * Clean Bitrix24 BBCode formatting for WhatsApp
+ * Converts BBCode tags to WhatsApp-compatible format or removes them
+ */
+function cleanBBCodeForWhatsApp(text: string): string {
+  if (!text) return "";
+  
+  let cleaned = text;
+  
+  // Convert formatting tags to WhatsApp format
+  cleaned = cleaned.replace(/\[b\](.*?)\[\/b\]/gi, "*$1*");      // Bold: [b]text[/b] -> *text*
+  cleaned = cleaned.replace(/\[i\](.*?)\[\/i\]/gi, "_$1_");      // Italic: [i]text[/i] -> _text_
+  cleaned = cleaned.replace(/\[s\](.*?)\[\/s\]/gi, "~$1~");      // Strikethrough: [s]text[/s] -> ~text~
+  cleaned = cleaned.replace(/\[u\](.*?)\[\/u\]/gi, "$1");        // Underline: remove (no WA equivalent)
+  
+  // Line breaks
+  cleaned = cleaned.replace(/\[br\]/gi, "\n");                    // [br] -> newline
+  cleaned = cleaned.replace(/\[br\/\]/gi, "\n");                  // [br/] -> newline
+  
+  // URLs: [url=link]text[/url] -> text (link)
+  cleaned = cleaned.replace(/\[url=([^\]]+)\](.*?)\[\/url\]/gi, "$2 ($1)");
+  cleaned = cleaned.replace(/\[url\](.*?)\[\/url\]/gi, "$1");     // [url]link[/url] -> link
+  
+  // Images: [img]url[/img] -> (imagem)
+  cleaned = cleaned.replace(/\[img\](.*?)\[\/img\]/gi, "(imagem: $1)");
+  
+  // Quotes
+  cleaned = cleaned.replace(/\[quote\](.*?)\[\/quote\]/gi, "> $1");
+  cleaned = cleaned.replace(/\[quote=([^\]]+)\](.*?)\[\/quote\]/gi, "> $1: $2");
+  
+  // Code
+  cleaned = cleaned.replace(/\[code\](.*?)\[\/code\]/gi, "```$1```");
+  
+  // Colors, fonts, sizes - just remove the tags
+  cleaned = cleaned.replace(/\[color=[^\]]+\](.*?)\[\/color\]/gi, "$1");
+  cleaned = cleaned.replace(/\[font=[^\]]+\](.*?)\[\/font\]/gi, "$1");
+  cleaned = cleaned.replace(/\[size=[^\]]+\](.*?)\[\/size\]/gi, "$1");
+  
+  // Lists
+  cleaned = cleaned.replace(/\[list\](.*?)\[\/list\]/gi, "$1");
+  cleaned = cleaned.replace(/\[\*\]/gi, "• ");
+  
+  // Remove any remaining unknown BBCode tags
+  cleaned = cleaned.replace(/\[[^\]]+\]/g, "");
+  
+  // Clean up multiple newlines
+  cleaned = cleaned.replace(/\n{3,}/g, "\n\n");
+  
+  // Trim whitespace
+  cleaned = cleaned.trim();
+  
+  return cleaned;
+}
+
 // Helper to refresh Bitrix24 OAuth token
 async function refreshBitrixToken(integration: any, supabase: any): Promise<string | null> {
   const config = integration.config;
@@ -437,6 +491,11 @@ async function processOperatorMessage(
     conversationId = conversation.id;
   }
 
+  // Clean BBCode formatting before sending to WhatsApp
+  const cleanedMessage = cleanBBCodeForWhatsApp(messageText);
+  console.log("Original message:", messageText);
+  console.log("Cleaned message:", cleanedMessage);
+
   // Send to WhatsApp
   console.log("Sending to WhatsApp...");
   const sendResponse = await fetch(`${supabaseUrl}/functions/v1/wapi-send-message`, {
@@ -448,7 +507,7 @@ async function processOperatorMessage(
     body: JSON.stringify({
       instance_id: instanceId,
       phone_number: contact.phone_number,
-      message: messageText,
+      message: cleanedMessage,
       message_type: "text",
       conversation_id: conversationId,
       contact_id: contact.id,
