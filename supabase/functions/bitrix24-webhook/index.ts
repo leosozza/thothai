@@ -700,11 +700,24 @@ async function handleDiagnoseConnector(supabase: any, payload: any, supabaseUrl:
     const listResult = await listResponse.json();
     console.log("Connector list:", JSON.stringify(listResult, null, 2));
 
-    const connectorsList = listResult.result || [];
+    // imconnector.list returns an object with connector IDs as keys, not an array
+    const connectorsResult = listResult.result || {};
+    let connectorsList: any[] = [];
+    
+    if (Array.isArray(connectorsResult)) {
+      connectorsList = connectorsResult;
+    } else if (typeof connectorsResult === 'object') {
+      // Convert object to array
+      connectorsList = Object.keys(connectorsResult).map(key => ({
+        ID: key,
+        ...connectorsResult[key]
+      }));
+    }
+    
     const ourConnector = connectorsList.find((c: any) => 
-      c.ID === connectorId || c.ID?.toLowerCase().includes("thoth")
+      c.ID === connectorId || c.ID?.toLowerCase().includes("thoth") || String(c.ID).includes("thoth")
     );
-    diagnosis.connector_registered = !!ourConnector;
+    diagnosis.connector_registered = !!ourConnector || Object.keys(connectorsResult).some(k => k.includes("thoth") || k === connectorId);
 
     if (!ourConnector) {
       diagnosis.issues.push("Conector não está registrado no Bitrix24");
@@ -725,8 +738,15 @@ async function handleDiagnoseConnector(supabase: any, payload: any, supabaseUrl:
     console.log("Connector status:", JSON.stringify(statusResult, null, 2));
 
     if (statusResult.result) {
-      diagnosis.connector_active = statusResult.result.active === true || statusResult.result.ACTIVE === "Y";
-      diagnosis.connector_connection = statusResult.result.connection === true || statusResult.result.CONNECTION === "Y";
+      // Bitrix24 returns STATUS (boolean) or ACTIVE (string "Y"/"N")
+      diagnosis.connector_active = statusResult.result.active === true || 
+                                   statusResult.result.ACTIVE === "Y" || 
+                                   statusResult.result.STATUS === true ||
+                                   statusResult.result.status === true;
+      diagnosis.connector_connection = statusResult.result.connection === true || 
+                                       statusResult.result.CONNECTION === "Y" ||
+                                       statusResult.result.CONFIGURED === true ||
+                                       statusResult.result.configured === true;
     }
 
     if (!diagnosis.connector_active) {
