@@ -349,7 +349,7 @@ export default function Integrations() {
   };
 
   // Fetch Bitrix24 channels with connector status
-  const fetchBitrixChannels = async (includeConnectorStatus = false) => {
+  const fetchBitrixChannels = async (includeConnectorStatus = true) => {
     const bitrix = integrations.find((i) => i.type === "bitrix24");
     if (!bitrix?.config?.access_token && !bitrix?.config?.webhook_url) return;
 
