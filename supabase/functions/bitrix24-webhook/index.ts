@@ -3598,14 +3598,17 @@ async function handleVerifyIntegration(supabase: any, payload: any, supabaseUrl:
         })
       });
       const statusResult = await statusResponse.json();
+      console.log(`imconnector.status for line ${lineId}:`, JSON.stringify(statusResult));
 
+      // Use same logic as list_channels - Bitrix24 returns: STATUS (active), CONFIGURED (registered), ERROR
+      const result = statusResult.result || {};
       verification.lines.push({
         id: lineId,
         name: line.LINE_NAME,
         active: line.ACTIVE === "Y",
-        connector_active: statusResult.result?.active === true || statusResult.result?.ACTIVE === "Y",
-        connector_registered: statusResult.result?.register === true || statusResult.result?.REGISTER === "Y",
-        connector_connection: statusResult.result?.connection === true || statusResult.result?.CONNECTION === "Y",
+        connector_active: result.STATUS === true || result.active === true || result.ACTIVE === "Y",
+        connector_registered: result.CONFIGURED === true || result.register === true || result.REGISTER === "Y",
+        connector_connection: !result.ERROR && (result.CONNECTION === true || result.connection === true),
       });
     }
 
