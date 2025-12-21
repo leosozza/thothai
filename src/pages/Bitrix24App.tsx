@@ -516,6 +516,18 @@ function SettingsView({
   const [reconectando, setReconectando] = useState(false);
   const [reconfigurando, setReconfigurando] = useState(false);
   
+  // Bot AI states
+  const [botStatus, setBotStatus] = useState<{
+    registered: boolean;
+    bot_id: string | null;
+    bot_name: string;
+    bot_enabled: boolean;
+    bot_persona_id: string | null;
+  } | null>(null);
+  const [loadingBotStatus, setLoadingBotStatus] = useState(false);
+  const [registeringBot, setRegisteringBot] = useState(false);
+  const [togglingBot, setTogglingBot] = useState(false);
+  
   const [verificationResult, setVerificationResult] = useState<{
     success: boolean;
     message: string;
@@ -526,6 +538,124 @@ function SettingsView({
     issues: Array<{ level: "error" | "warning" | "info"; message: string }>;
     recommendations: string[];
   } | null>(null);
+
+  // Load bot status on mount
+  useEffect(() => {
+    if (status?.integration_id) {
+      loadBotStatus();
+    }
+  }, [status?.integration_id]);
+
+  const loadBotStatus = async () => {
+    try {
+      setLoadingBotStatus(true);
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/bitrix24-bot-register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "status",
+          integration_id: status?.integration_id,
+        }),
+      });
+      
+      const data = await response.json();
+      setBotStatus(data);
+    } catch (err) {
+      console.error("Error loading bot status:", err);
+    } finally {
+      setLoadingBotStatus(false);
+    }
+  };
+
+  const handleRegisterBot = async () => {
+    try {
+      setRegisteringBot(true);
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/bitrix24-bot-register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "register",
+          integration_id: status?.integration_id,
+          bot_name: "Thoth AI",
+          bot_description: "Assistente Virtual com Inteligência Artificial",
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (response.ok && data.success) {
+        toast.success("Bot registrado com sucesso!");
+        await loadBotStatus();
+      } else {
+        toast.error(data.error || "Erro ao registrar bot");
+      }
+    } catch (err: any) {
+      toast.error("Erro ao registrar bot: " + err.message);
+    } finally {
+      setRegisteringBot(false);
+    }
+  };
+
+  const handleToggleBotAI = async () => {
+    try {
+      setTogglingBot(true);
+      const newEnabled = !botStatus?.bot_enabled;
+      
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/bitrix24-webhook`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "update_bot_config",
+          integration_id: status?.integration_id,
+          bot_enabled: newEnabled,
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (response.ok && data.success) {
+        toast.success(newEnabled ? "Bot AI ativado!" : "Bot AI desativado");
+        await loadBotStatus();
+      } else {
+        toast.error(data.error || "Erro ao atualizar configuração");
+      }
+    } catch (err: any) {
+      toast.error("Erro: " + err.message);
+    } finally {
+      setTogglingBot(false);
+    }
+  };
+
+  const handleUnregisterBot = async () => {
+    if (!confirm("Tem certeza que deseja remover o bot? Os usuários não poderão mais conversar com ele.")) {
+      return;
+    }
+    
+    try {
+      setRegisteringBot(true);
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/bitrix24-bot-register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "unregister",
+          integration_id: status?.integration_id,
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (response.ok && data.success) {
+        toast.success("Bot removido com sucesso");
+        await loadBotStatus();
+      } else {
+        toast.error(data.error || "Erro ao remover bot");
+      }
+    } catch (err: any) {
+      toast.error("Erro: " + err.message);
+    } finally {
+      setRegisteringBot(false);
+    }
+  };
 
   const handleVerifyIntegration = async () => {
     try {
@@ -740,6 +870,99 @@ function SettingsView({
             <span className="text-muted-foreground">Instâncias</span>
             <span className="font-medium">{status?.instances?.length || 0}</span>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Bot AI Configuration Card */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Bot className="h-5 w-5" />
+            Bot AI (Chat Interno)
+          </CardTitle>
+          <CardDescription>
+            Configure o bot para responder automaticamente mensagens internas no Bitrix24
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {loadingBotStatus ? (
+            <div className="flex items-center justify-center py-4">
+              <Loader2 className="h-6 w-6 animate-spin" />
+            </div>
+          ) : botStatus?.registered ? (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                    <Bot className="h-5 w-5 text-primary" />
+                  </div>
+                  <div>
+                    <p className="font-medium">{botStatus.bot_name}</p>
+                    <p className="text-xs text-muted-foreground">Bot ID: {botStatus.bot_id}</p>
+                  </div>
+                </div>
+                <Badge variant={botStatus.bot_enabled ? "default" : "secondary"}>
+                  {botStatus.bot_enabled ? "Ativo" : "Desativado"}
+                </Badge>
+              </div>
+
+              <div className="flex gap-2">
+                <Button 
+                  onClick={handleToggleBotAI}
+                  disabled={togglingBot}
+                  variant={botStatus.bot_enabled ? "outline" : "default"}
+                  className="flex-1"
+                >
+                  {togglingBot ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : botStatus.bot_enabled ? (
+                    <>
+                      <XCircle className="h-4 w-4 mr-2" />
+                      Desativar AI
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle className="h-4 w-4 mr-2" />
+                      Ativar AI
+                    </>
+                  )}
+                </Button>
+                <Button 
+                  onClick={handleUnregisterBot}
+                  disabled={registeringBot}
+                  variant="destructive"
+                  size="icon"
+                >
+                  <RotateCcw className="h-4 w-4" />
+                </Button>
+              </div>
+
+              <div className="text-xs text-muted-foreground bg-muted/30 p-3 rounded">
+                <p><strong>Como usar:</strong> Os usuários do Bitrix24 podem iniciar uma conversa com o bot "Thoth AI" na busca de chats internos.</p>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="text-center py-4">
+                <Bot className="h-12 w-12 text-muted-foreground mx-auto mb-2" />
+                <p className="text-sm text-muted-foreground">
+                  Nenhum bot registrado. Registre para que usuários possam conversar com a IA internamente.
+                </p>
+              </div>
+              <Button 
+                onClick={handleRegisterBot}
+                disabled={registeringBot}
+                className="w-full"
+              >
+                {registeringBot ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Bot className="h-4 w-4 mr-2" />
+                )}
+                Registrar Bot Thoth AI
+              </Button>
+            </div>
+          )}
         </CardContent>
       </Card>
 
