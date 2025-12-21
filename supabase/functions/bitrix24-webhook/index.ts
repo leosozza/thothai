@@ -1981,8 +1981,8 @@ async function handleReconfigureConnector(supabase: any, payload: any, supabaseU
   // Use fixed connector ID - avoid duplicates
   const connectorId = "thoth_whatsapp";
   
-  // CRITICAL: Use CLEAN webhook URL without query parameters
-  const cleanWebhookUrl = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
+  // CRITICAL: Use bitrix24-events (PUBLIC) for receiving Bitrix24 events
+  const cleanWebhookUrl = `${supabaseUrl}/functions/v1/bitrix24-events`;
   
   // Default to LINE 2 if not specified (where "Thoth whatsapp" channel is configured)
   const targetLineId = line_id || 2;
@@ -2227,8 +2227,8 @@ async function handleAutoSetup(supabase: any, payload: any, supabaseUrl: string)
   // Use fixed connector ID to avoid duplicates
   const connectorId = "thoth_whatsapp";
   
-  // CRITICAL: Use CLEAN webhook URL without query parameters for event handlers
-  const webhookUrl = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
+  // CRITICAL: Use bitrix24-events (PUBLIC) for receiving Bitrix24 events
+  const webhookUrl = `${supabaseUrl}/functions/v1/bitrix24-events`;
   const effectiveInstanceId = instance_id || config.instance_id;
 
   const results = {
@@ -4037,909 +4037,98 @@ serve(async (req) => {
       return await handleSendSms(supabase, payload, supabaseUrl);
     }
 
-    // Check if this is a PLACEMENT call
+    // ========================================
+    // NOVA ARQUITETURA: Eventos são processados por bitrix24-events
+    // Este webhook agora é apenas para ações ADMIN (protegido por JWT)
+    // ========================================
+
+    // Check if this is a PLACEMENT call - redirect to bitrix24-events
     if (payload.PLACEMENT || payload.PLACEMENT_OPTIONS) {
-      console.log("=== DETECTED PLACEMENT CALL ===");
+      console.log("=== PLACEMENT CALL - Redirecting to bitrix24-events ===");
+      // PLACEMENT calls should go to the public bitrix24-events function
+      // But since this function is now protected by JWT, we handle it here for backward compatibility
       return await handlePlacement(supabase, payload, supabaseUrl);
     }
 
-    // Otherwise, process as event
-    const event = payload.event;
-    console.log("=== PROCESSING BITRIX24 EVENT ===");
-    console.log("Event type:", event);
-    console.log("Event timestamp:", new Date().toISOString());
-    
-    // Log all events for debugging
+    // Check if this is a Bitrix24 event - redirect to bitrix24-events
+    const event = payload.event?.toUpperCase();
     if (event) {
-      console.log("Event payload keys:", Object.keys(payload.data || payload));
-    }
-
-    switch (event) {
-      case "ONIMCONNECTORMESSAGEADD": {
-        // This event is triggered when an operator sends a message from Bitrix24 Open Channel
-        // The message needs to be forwarded to WhatsApp
-        console.log("=== ONIMCONNECTORMESSAGEADD - OPERATOR MESSAGE TO SEND TO WHATSAPP ===");
-        console.log("Event received at:", new Date().toISOString());
-        console.log("Full payload:", JSON.stringify(payload, null, 2));
-        console.log("Full payload data:", JSON.stringify(payload.data, null, 2));
+      console.log("=== BITRIX24 EVENT RECEIVED ===");
+      console.log("Event type:", event);
+      console.log("NOTE: Events should be sent to /bitrix24-events (public) not /bitrix24-webhook (admin)");
+      
+      // List of events that should be processed by bitrix24-events
+      const eventsThatNeedRedirect = [
+        "ONIMCONNECTORMESSAGEADD",
+        "ONIMCONNECTORMESSAGERECEIVE", 
+        "ONIMBOTMESSAGEADD",
+        "ONIMBOTJOINOPEN",
+        "ONIMBOTMESSAGEDELETE",
+        "ONIMBOTMESSAGEUPDATE",
+        "ONIMCONNECTORTYPING",
+        "ONIMCONNECTORDIALOGFINISH",
+        "ONIMCONNECTORSTATUSDELETE",
+        "ONIMBOTDELETE",
+        "ONAPPTEST",
+      ];
+      
+      if (eventsThatNeedRedirect.includes(event)) {
+        console.log("This event should be handled by bitrix24-events function");
+        console.log("Forwarding event to queue...");
         
-        const messages = payload.data?.MESSAGES || [];
-        const firstMessage = messages[0] || payload.data;
-        
-        if (!firstMessage) {
-          console.log("No message data in ONIMCONNECTORMESSAGEADD");
-          break;
-        }
-
-        // Extract message details - Bitrix24 sends operator's message to be delivered
-        // The user object contains the RECIPIENT (client) info, not the operator
-        const recipientId = firstMessage.user?.id || firstMessage.im?.user_id;
-        const recipientChatId = firstMessage.chat?.id || firstMessage.im?.chat_id;
-        const messageText = firstMessage.message?.text || firstMessage.text || "";
-        const line = firstMessage.line || payload.data?.LINE;
-
-        console.log("Operator sending message:", { 
-          recipientId, 
-          recipientChatId, 
-          messageText: messageText.substring(0, 50) + "...", 
-          line 
-        });
-
-        if (!messageText) {
-          console.log("Empty message text, skipping");
-          break;
-        }
-
-        // Find the integration and instance for this line
-        let instanceId: string | null = null;
-        let workspaceId: string | null = null;
-
-        if (line) {
-          const { data: mapping } = await supabase
-            .from("bitrix_channel_mappings")
-            .select("instance_id, workspace_id")
-            .eq("line_id", line)
-            .eq("is_active", true)
-            .maybeSingle();
-
-          if (mapping) {
-            instanceId = mapping.instance_id;
-            workspaceId = mapping.workspace_id;
-            console.log("Found mapping for line:", line, "instance:", instanceId);
-          }
-        }
-
-        if (!instanceId) {
-          // Fallback: find from integration config
-          const { data: integration } = await supabase
-            .from("integrations")
-            .select("*")
-            .eq("type", "bitrix24")
-            .eq("is_active", true)
-            .maybeSingle();
-
-          if (integration?.config?.instance_id) {
-            instanceId = integration.config.instance_id;
-            workspaceId = integration.workspace_id;
-            console.log("Using instance from integration config:", instanceId);
-          }
-        }
-
-        if (!instanceId) {
-          console.error("No instance_id found for sending message");
-          break;
-        }
-
-        // The recipientId should be the phone number we originally sent as user.id 
-        // when creating the chat in imconnector.send.messages
-        const cleanRecipientId = recipientId?.toString().replace(/\D/g, "");
-        console.log("Looking for contact:", { recipientId, cleanRecipientId, instanceId });
-
-        // Try multiple strategies to find the contact
-        let contact = null;
-
-        // Strategy 1: Find by phone_number (exact match with cleaned ID)
-        if (cleanRecipientId) {
-          const { data: contactByPhone } = await supabase
-            .from("contacts")
-            .select("*")
-            .eq("instance_id", instanceId)
-            .eq("phone_number", cleanRecipientId)
-            .maybeSingle();
-
-          if (contactByPhone) {
-            contact = contactByPhone;
-            console.log("Contact found by exact phone_number:", contact.id, contact.phone_number);
-          }
-        }
-
-        // Strategy 2: Find by phone ending with the recipientId (in case of formatting differences)
-        if (!contact && cleanRecipientId && cleanRecipientId.length >= 8) {
-          const { data: contactByPhoneSuffix } = await supabase
-            .from("contacts")
-            .select("*")
-            .eq("instance_id", instanceId)
-            .ilike("phone_number", `%${cleanRecipientId.slice(-10)}`)
-            .maybeSingle();
-
-          if (contactByPhoneSuffix) {
-            contact = contactByPhoneSuffix;
-            console.log("Contact found by phone suffix:", contact.id, contact.phone_number);
-          }
-        }
-
-        // Strategy 3: Find by bitrix24_user_id in metadata
-        if (!contact && recipientId) {
-          const { data: contactByMetadata } = await supabase
-            .from("contacts")
-            .select("*")
-            .eq("instance_id", instanceId)
-            .contains("metadata", { bitrix24_user_id: recipientId.toString() })
-            .maybeSingle();
-          
-          if (contactByMetadata) {
-            contact = contactByMetadata;
-            console.log("Contact found by bitrix24_user_id metadata:", contact.id);
-          }
-        }
-
-        // Strategy 4: Find by bitrix24_chat_id in metadata
-        if (!contact && recipientChatId) {
-          const { data: contactByChatId } = await supabase
-            .from("contacts")
-            .select("*")
-            .eq("instance_id", instanceId)
-            .contains("metadata", { bitrix24_chat_id: recipientChatId.toString() })
-            .maybeSingle();
-          
-          if (contactByChatId) {
-            contact = contactByChatId;
-            console.log("Contact found by bitrix24_chat_id metadata:", contact.id);
-          }
-        }
-
-        if (!contact) {
-          console.error("Contact not found. recipientId:", recipientId, "recipientChatId:", recipientChatId, "cleanRecipientId:", cleanRecipientId);
-          console.log("Listing contacts for this instance for debugging...");
-          
-          const { data: allContacts } = await supabase
-            .from("contacts")
-            .select("id, phone_number, name, metadata")
-            .eq("instance_id", instanceId)
-            .limit(5);
-          
-          console.log("Sample contacts:", JSON.stringify(allContacts, null, 2));
-          break;
-        }
-
-        // Get conversation if exists
-        let conversationId = null;
-        const { data: conversation } = await supabase
-          .from("conversations")
-          .select("id")
-          .eq("contact_id", contact.id)
-          .eq("instance_id", instanceId)
-          .in("status", ["open", "pending"])
-          .order("created_at", { ascending: false })
-          .maybeSingle();
-
-        if (conversation) {
-          conversationId = conversation.id;
-        }
-
-        // Send to WhatsApp via W-API
-        console.log("Sending message to WhatsApp:", {
-          instance_id: instanceId,
-          phone_number: contact.phone_number,
-          message_preview: messageText.substring(0, 30) + "..."
-        });
-
-        const sendResponse = await fetch(`${supabaseUrl}/functions/v1/wapi-send-message`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${supabaseServiceKey}`,
-          },
-          body: JSON.stringify({
-            instance_id: instanceId,
-            phone_number: contact.phone_number,
-            message: messageText,
-            message_type: "text",
-            conversation_id: conversationId,
-            contact_id: contact.id,
-            workspace_id: workspaceId,
-            internal_call: true,
-          }),
-        });
-
-        const sendResult = await sendResponse.json();
-        console.log("WhatsApp send result:", JSON.stringify(sendResult));
-
-        if (sendResult.error) {
-          console.error("Error sending to WhatsApp:", sendResult.error);
-        } else {
-          console.log("Message successfully sent to WhatsApp, messageId:", sendResult.messageId);
-          
-          // CRITICAL: Call imconnector.send.status.delivery to confirm delivery to Bitrix24
-          // This is required for Bitrix24 to mark the message as delivered
-          try {
-            const messageId = firstMessage.message?.id || firstMessage.im?.message_id;
-            if (messageId && line) {
-              // Find integration to get access token
-              const { data: integrationData } = await supabase
-                .from("integrations")
-                .select("*")
-                .eq("type", "bitrix24")
-                .eq("is_active", true)
-                .maybeSingle();
-
-              if (integrationData?.config?.access_token) {
-                const bitrixAccessToken = await refreshBitrixToken(integrationData, supabase);
-                const bitrixEndpoint = integrationData.config.client_endpoint || `https://${integrationData.config.domain}/rest/`;
-                const bitrixConnectorId = integrationData.config.connector_id || "thoth_whatsapp";
-
-                console.log("Sending delivery status to Bitrix24...");
-                const deliveryResponse = await fetch(`${bitrixEndpoint}imconnector.send.status.delivery`, {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({
-                    auth: bitrixAccessToken,
-                    CONNECTOR: bitrixConnectorId,
-                    LINE: line,
-                    MESSAGES: [{
-                      im: {
-                        chat_id: recipientChatId,
-                        message_id: messageId
-                      },
-                      message: {
-                        id: [sendResult.messageId || sendResult.id || `wa_${Date.now()}`]
-                      },
-                      chat: {
-                        id: recipientChatId
-                      }
-                    }]
-                  })
-                });
-                const deliveryResult = await deliveryResponse.json();
-                console.log("imconnector.send.status.delivery result:", deliveryResult);
-              }
-            }
-          } catch (deliveryError) {
-            console.error("Error sending delivery status:", deliveryError);
-            // Don't fail the whole operation if delivery status fails
-          }
-          
-          // If we have a conversation, also save the outgoing message
-          if (conversationId && !sendResult.message) {
-            await supabase
-              .from("messages")
-              .insert({
-                conversation_id: conversationId,
-                contact_id: contact.id,
-                instance_id: instanceId,
-                content: messageText,
-                direction: "outgoing",
-                is_from_bot: false,
-                message_type: "text",
-                status: "sent",
-                metadata: { source: "bitrix24_operator" }
-              });
-          }
-
-          // Update conversation
-          if (conversationId) {
-            await supabase
-              .from("conversations")
-              .update({ 
-                last_message_at: new Date().toISOString(),
-                updated_at: new Date().toISOString()
-              })
-              .eq("id", conversationId);
-          }
-        }
-
-        break;
-      }
-
-      // Handle client messages received via Open Channel (connector)
-      case "ONIMCONNECTORMESSAGERECEIVE": {
-        console.log("=== CLIENT MESSAGE RECEIVED VIA CONNECTOR ===");
-        const data = payload.data?.MESSAGES?.[0] || payload.data;
-        
-        if (!data) {
-          console.log("No message data");
-          break;
-        }
-
-        const clientUserId = data.user?.id || data.im?.user_id;
-        const clientChatId = data.chat?.id || data.im?.chat_id;
-        const clientMessageText = data.message?.text || data.text || "";
-        const clientLine = data.line || payload.data?.LINE;
-        const clientName = data.user?.name || data.user?.first_name || "Cliente";
-
-        console.log("Client message:", { clientUserId, clientChatId, clientMessageText, clientLine, clientName });
-
-        if (!clientMessageText) {
-          console.log("Empty message, skipping");
-          break;
-        }
-
-        // Find integration and mapping for this line
-        let integrationData: any = null;
-        let mappingData: any = null;
-
-        if (clientLine) {
-          const { data: mapping } = await supabase
-            .from("bitrix_channel_mappings")
-            .select("*, integrations(*)")
-            .eq("line_id", clientLine)
-            .eq("is_active", true)
-            .maybeSingle();
-
-          if (mapping) {
-            mappingData = mapping;
-            integrationData = mapping.integrations;
-          }
-        }
-
-        if (!integrationData) {
-          // Try to find by member_id or domain
-          const memberId = payload.auth?.member_id || payload.member_id;
-          const domain = payload.auth?.domain || payload.DOMAIN;
-
-          if (memberId) {
-            const { data: integration } = await supabase
-              .from("integrations")
-              .select("*")
-              .eq("type", "bitrix24")
-              .eq("config->>member_id", memberId)
-              .eq("is_active", true)
-              .maybeSingle();
-            integrationData = integration;
-          }
-
-          if (!integrationData && domain) {
-            const { data: integration } = await supabase
-              .from("integrations")
-              .select("*")
-              .eq("type", "bitrix24")
-              .ilike("config->>domain", `%${domain}%`)
-              .eq("is_active", true)
-              .maybeSingle();
-            integrationData = integration;
-          }
-        }
-
-        if (!integrationData) {
-          console.error("No integration found for client message");
-          break;
-        }
-
-        console.log("Found integration:", integrationData.id, "workspace:", integrationData.workspace_id);
-
-        // Check if chatbot is enabled for this integration (connector chatbot)
-        if (!integrationData.config?.chatbot_enabled) {
-          console.log("Chatbot not enabled for this integration, skipping AI response");
-          break;
-        }
-
-        const workspaceId = integrationData.workspace_id;
-        const instanceId = mappingData?.instance_id || integrationData.config?.instance_id;
-
-        if (!instanceId) {
-          console.error("No instance_id configured");
-          break;
-        }
-
-        // Create or find contact
-        let contact: any = null;
-        
-        // Try to find existing contact by bitrix24_user_id
-        const { data: existingContact } = await supabase
-          .from("contacts")
-          .select("*")
-          .eq("instance_id", instanceId)
-          .contains("metadata", { bitrix24_user_id: clientUserId })
-          .maybeSingle();
-
-        if (existingContact) {
-          contact = existingContact;
-          console.log("Found existing contact:", contact.id);
-        } else {
-          // Create new contact
-          const { data: newContact, error: contactError } = await supabase
-            .from("contacts")
-            .insert({
-              instance_id: instanceId,
-              name: clientName,
-              phone_number: `bitrix_${clientUserId}`,
-              push_name: clientName,
-              metadata: {
-                bitrix24_user_id: clientUserId,
-                bitrix24_chat_id: clientChatId,
-                source: "bitrix24_connector"
-              }
-            })
-            .select()
-            .single();
-
-          if (contactError) {
-            console.error("Error creating contact:", contactError);
-            break;
-          }
-          contact = newContact;
-          console.log("Created new contact:", contact.id);
-        }
-
-        // Update contact metadata with latest chat_id
-        if (contact && clientChatId) {
-          await supabase
-            .from("contacts")
-            .update({
-              metadata: {
-                ...contact.metadata,
-                bitrix24_chat_id: clientChatId
-              }
-            })
-            .eq("id", contact.id);
-        }
-
-        // Create or find conversation
-        let conversation: any = null;
-
-        const { data: existingConversation } = await supabase
-          .from("conversations")
-          .select("*")
-          .eq("contact_id", contact.id)
-          .eq("instance_id", instanceId)
-          .in("status", ["open", "pending"])
-          .order("created_at", { ascending: false })
-          .maybeSingle();
-
-        if (existingConversation) {
-          conversation = existingConversation;
-          console.log("Found existing conversation:", conversation.id);
-        } else {
-          const { data: newConversation, error: convError } = await supabase
-            .from("conversations")
-            .insert({
-              contact_id: contact.id,
-              instance_id: instanceId,
-              status: "open",
-              attendance_mode: "ai",
-              last_message_at: new Date().toISOString()
-            })
-            .select()
-            .single();
-
-          if (convError) {
-            console.error("Error creating conversation:", convError);
-            break;
-          }
-          conversation = newConversation;
-          console.log("Created new conversation:", conversation.id);
-        }
-
-        // Save incoming message
-        const { error: msgError } = await supabase
-          .from("messages")
+        // Enqueue the event for processing by worker
+        const { error: queueError } = await supabase
+          .from("bitrix_event_queue")
           .insert({
-            conversation_id: conversation.id,
-            contact_id: contact.id,
-            instance_id: instanceId,
-            content: clientMessageText,
-            direction: "incoming",
-            is_from_bot: false,
-            message_type: "text",
-            status: "received",
-            metadata: { source: "bitrix24_connector", bitrix24_user_id: clientUserId }
+            event_type: event,
+            payload: payload,
+            status: "pending"
           });
-
-        if (msgError) {
-          console.error("Error saving message:", msgError);
-        }
-
-        // Update conversation
-        await supabase
-          .from("conversations")
-          .update({
-            last_message_at: new Date().toISOString(),
-            unread_count: (conversation.unread_count || 0) + 1
-          })
-          .eq("id", conversation.id);
-
-        // Check attendance mode - only call AI if mode is "ai"
-        if (conversation.attendance_mode === "ai" || !existingConversation) {
-          console.log("Calling AI to process message (connector)...");
+        
+        if (queueError) {
+          console.error("Error enqueuing event:", queueError);
+        } else {
+          console.log("Event enqueued successfully");
           
-          // Call ai-process-bitrix24 function with message_type = "connector"
-          const aiResponse = await fetch(`${supabaseUrl}/functions/v1/ai-process-bitrix24`, {
+          // Trigger worker asynchronously
+          fetch(`${supabaseUrl}/functions/v1/bitrix24-worker`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              Authorization: `Bearer ${supabaseServiceKey}`,
+              "Authorization": `Bearer ${supabaseServiceKey}`,
             },
-            body: JSON.stringify({
-              conversation_id: conversation.id,
-              contact_id: contact.id,
-              instance_id: instanceId,
-              content: clientMessageText,
-              workspace_id: workspaceId,
-              integration_id: integrationData.id,
-              bitrix24_user_id: clientUserId,
-              bitrix24_chat_id: clientChatId,
-              line_id: clientLine,
-              message_type: "connector" // Indicates to use imconnector.send.messages
-            })
-          });
-
-          const aiResult = await aiResponse.json();
-          console.log("AI process result:", aiResult);
-        } else {
-          console.log("Attendance mode is not AI, skipping automatic response");
+            body: JSON.stringify({ source: "bitrix24-webhook-redirect" })
+          }).catch(err => console.error("Worker trigger error:", err));
         }
-
-        break;
-      }
-
-      // Handle messages sent to bot (universal bot)
-      case "ONIMBOTMESSAGEADD": {
-        console.log("=== BOT MESSAGE RECEIVED ===");
-        const data = payload.data || {};
         
-        // Bot message data structure is different from connector
-        const botId = data.BOT_ID || data.bot_id;
-        const dialogId = data.DIALOG_ID || data.dialog_id;
-        const fromUserId = data.FROM_USER_ID || data.from_user_id;
-        const toUserId = data.TO_USER_ID || data.to_user_id; // Our bot ID
-        const messageText = data.MESSAGE || data.message || "";
-        const messageId = data.MESSAGE_ID || data.message_id;
-
-        console.log("Bot message data:", { botId, dialogId, fromUserId, toUserId, messageText, messageId });
-
-        if (!messageText) {
-          console.log("Empty message, skipping");
-          break;
-        }
-
-        // Find integration by bot_id or member_id
-        let integrationData: any = null;
-        const memberId = payload.auth?.member_id || payload.member_id;
-        const domain = payload.auth?.domain || payload.DOMAIN;
-
-        // First try to find by bot_id in config
-        if (botId) {
-          const { data: integration } = await supabase
-            .from("integrations")
-            .select("*")
-            .eq("type", "bitrix24")
-            .eq("config->>bot_id", String(botId))
-            .eq("is_active", true)
-            .maybeSingle();
-          integrationData = integration;
-        }
-
-        // If not found, try by member_id
-        if (!integrationData && memberId) {
-          const { data: integration } = await supabase
-            .from("integrations")
-            .select("*")
-            .eq("type", "bitrix24")
-            .eq("config->>member_id", memberId)
-            .eq("is_active", true)
-            .maybeSingle();
-          integrationData = integration;
-        }
-
-        // If still not found, try by domain
-        if (!integrationData && domain) {
-          const { data: integration } = await supabase
-            .from("integrations")
-            .select("*")
-            .eq("type", "bitrix24")
-            .ilike("config->>domain", `%${domain}%`)
-            .eq("is_active", true)
-            .maybeSingle();
-          integrationData = integration;
-        }
-
-        if (!integrationData) {
-          console.error("No integration found for bot message");
-          break;
-        }
-
-        console.log("Found integration:", integrationData.id);
-
-        // Verify this message is for our bot
-        const ourBotId = integrationData.config?.bot_id;
-        if (!ourBotId) {
-          console.log("No bot registered for this integration, skipping");
-          break;
-        }
-
-        // Check if the message is directed to our bot (TO_USER_ID should match our bot)
-        // In group chats, check if bot was mentioned
-        if (toUserId && String(toUserId) !== String(ourBotId)) {
-          console.log("Message not directed to our bot, skipping. toUserId:", toUserId, "ourBotId:", ourBotId);
-          break;
-        }
-
-        // Check if bot is enabled
-        if (!integrationData.config?.bot_enabled) {
-          console.log("Bot not enabled for this integration, skipping");
-          break;
-        }
-
-        const workspaceId = integrationData.workspace_id;
-        const instanceId = integrationData.config?.instance_id;
-
-        // Create a virtual instance ID if not configured (bot doesn't need W-API instance)
-        const effectiveInstanceId = instanceId || `bot_${integrationData.id}`;
-
-        // Get user info from Bitrix if available
-        let userName = `Usuário ${fromUserId}`;
-
-        // Create or find contact for this bot user
-        let contact: any = null;
-        
-        const { data: existingContact } = await supabase
-          .from("contacts")
-          .select("*")
-          .contains("metadata", { bitrix24_bot_user_id: fromUserId })
-          .maybeSingle();
-
-        if (existingContact) {
-          contact = existingContact;
-          console.log("Found existing bot contact:", contact.id);
-        } else {
-          // We need a valid instance_id - if no W-API instance, we can't create contact
-          if (!instanceId) {
-            // Get or create first instance for this workspace to store bot contacts
-            const { data: firstInstance } = await supabase
-              .from("instances")
-              .select("id")
-              .eq("workspace_id", workspaceId)
-              .limit(1)
-              .maybeSingle();
-
-            if (!firstInstance) {
-              console.error("No instance available for bot contacts");
-              break;
-            }
-
-            const { data: newContact, error: contactError } = await supabase
-              .from("contacts")
-              .insert({
-                instance_id: firstInstance.id,
-                name: userName,
-                phone_number: `bot_user_${fromUserId}`,
-                push_name: userName,
-                metadata: {
-                  bitrix24_bot_user_id: fromUserId,
-                  bitrix24_dialog_id: dialogId,
-                  source: "bitrix24_bot"
-                }
-              })
-              .select()
-              .single();
-
-            if (contactError) {
-              console.error("Error creating bot contact:", contactError);
-              break;
-            }
-            contact = newContact;
-          } else {
-            const { data: newContact, error: contactError } = await supabase
-              .from("contacts")
-              .insert({
-                instance_id: instanceId,
-                name: userName,
-                phone_number: `bot_user_${fromUserId}`,
-                push_name: userName,
-                metadata: {
-                  bitrix24_bot_user_id: fromUserId,
-                  bitrix24_dialog_id: dialogId,
-                  source: "bitrix24_bot"
-                }
-              })
-              .select()
-              .single();
-
-            if (contactError) {
-              console.error("Error creating bot contact:", contactError);
-              break;
-            }
-            contact = newContact;
-          }
-          console.log("Created new bot contact:", contact.id);
-        }
-
-        // Update contact metadata with latest dialog_id
-        if (contact && dialogId) {
-          await supabase
-            .from("contacts")
-            .update({
-              metadata: {
-                ...contact.metadata,
-                bitrix24_dialog_id: dialogId
-              }
-            })
-            .eq("id", contact.id);
-        }
-
-        // Create or find conversation
-        let conversation: any = null;
-
-        const { data: existingConversation } = await supabase
-          .from("conversations")
-          .select("*")
-          .eq("contact_id", contact.id)
-          .in("status", ["open", "pending"])
-          .order("created_at", { ascending: false })
-          .maybeSingle();
-
-        if (existingConversation) {
-          conversation = existingConversation;
-          console.log("Found existing bot conversation:", conversation.id);
-        } else {
-          const { data: newConversation, error: convError } = await supabase
-            .from("conversations")
-            .insert({
-              contact_id: contact.id,
-              instance_id: contact.instance_id,
-              status: "open",
-              attendance_mode: "ai",
-              last_message_at: new Date().toISOString()
-            })
-            .select()
-            .single();
-
-          if (convError) {
-            console.error("Error creating bot conversation:", convError);
-            break;
-          }
-          conversation = newConversation;
-          console.log("Created new bot conversation:", conversation.id);
-        }
-
-        // Save incoming message
-        const { error: msgError } = await supabase
-          .from("messages")
-          .insert({
-            conversation_id: conversation.id,
-            contact_id: contact.id,
-            instance_id: contact.instance_id,
-            content: messageText,
-            direction: "incoming",
-            is_from_bot: false,
-            message_type: "text",
-            status: "received",
-            metadata: { 
-              source: "bitrix24_bot", 
-              bitrix24_bot_user_id: fromUserId,
-              bitrix24_message_id: messageId
-            }
-          });
-
-        if (msgError) {
-          console.error("Error saving bot message:", msgError);
-        }
-
-        // Update conversation
-        await supabase
-          .from("conversations")
-          .update({
-            last_message_at: new Date().toISOString(),
-            unread_count: (conversation.unread_count || 0) + 1
-          })
-          .eq("id", conversation.id);
-
-        // Always respond to bot messages (bot is always in AI mode)
-        console.log("Calling AI to process bot message...");
-        
-        // Call ai-process-bitrix24 function with message_type = "bot"
-        const aiResponse = await fetch(`${supabaseUrl}/functions/v1/ai-process-bitrix24`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${supabaseServiceKey}`,
-          },
-          body: JSON.stringify({
-            conversation_id: conversation.id,
-            contact_id: contact.id,
-            instance_id: contact.instance_id,
-            content: messageText,
-            workspace_id: workspaceId,
-            integration_id: integrationData.id,
-            bitrix24_bot_id: ourBotId,
-            bitrix24_dialog_id: dialogId,
-            bitrix24_user_id: fromUserId,
-            message_type: "bot" // Indicates to use imbot.message.add
-          })
+        // Return success to Bitrix24
+        return new Response("successfully", {
+          status: 200,
+          headers: { ...corsHeaders, "Content-Type": "text/plain; charset=utf-8" }
         });
-
-        const aiResult = await aiResponse.json();
-        console.log("AI process result for bot:", aiResult);
-
-        break;
       }
-
-      // Handle bot join open event (when user starts conversation with bot)
-      case "ONIMBOTJOINOPEN": {
-        console.log("=== BOT JOIN OPEN (User started conversation) ===");
-        const data = payload.data || {};
-        const dialogId = data.DIALOG_ID || data.dialog_id;
-        const botId = data.BOT_ID || data.bot_id;
-        const userId = data.USER_ID || data.user_id;
-
-        console.log("Bot join open data:", { dialogId, botId, userId });
-
-        if (!dialogId) {
-          console.log("No dialog ID, skipping welcome message");
-          break;
-        }
-
-        // Find integration by bot_id
-        let integrationData: any = null;
-        const memberId = payload.auth?.member_id || payload.member_id;
-
-        if (botId) {
-          const { data: integration } = await supabase
-            .from("integrations")
-            .select("*")
-            .eq("type", "bitrix24")
-            .eq("config->>bot_id", String(botId))
-            .eq("is_active", true)
-            .maybeSingle();
-          integrationData = integration;
-        }
-
-        if (!integrationData && memberId) {
-          const { data: integration } = await supabase
-            .from("integrations")
-            .select("*")
-            .eq("type", "bitrix24")
-            .eq("config->>member_id", memberId)
-            .eq("is_active", true)
-            .maybeSingle();
-          integrationData = integration;
-        }
-
-        if (!integrationData) {
-          console.log("No integration found for bot join event");
-          break;
-        }
-
-        // Check if bot is enabled and has welcome message
-        if (!integrationData.config?.bot_enabled) {
-          console.log("Bot not enabled, skipping welcome");
-          break;
-        }
-
-        const welcomeMessage = integrationData.config?.bot_welcome_message;
-        if (welcomeMessage) {
-          console.log("Sending welcome message to dialog:", dialogId);
-          await sendBotMessage(integrationData, supabase, dialogId, welcomeMessage);
-        } else {
-          console.log("No welcome message configured");
-        }
-
-        break;
-      }
-
-      case "ONIMCONNECTORTYPING":
-      case "ONIMCONNECTORDIALOGFINISH":
-      case "ONIMCONNECTORSTATUSDELETE":
-      case "ONIMBOTDELETE":
-        console.log("Event handled:", event);
-        break;
-
-      default:
-        console.log("Unhandled event:", event);
+      
+      // Unknown event - just ACK
+      console.log("Unknown event type:", event);
+      return new Response("successfully", {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "text/plain; charset=utf-8" }
+      });
     }
 
+    // No action or event - return info
+    console.log("No action or event detected - returning admin endpoint info");
     return new Response(
-      JSON.stringify({ success: true }),
+      JSON.stringify({ 
+        status: "ok",
+        message: "bitrix24-webhook is now an ADMIN-only endpoint (JWT required)",
+        hint: "For Bitrix24 events, use /bitrix24-events (public endpoint)",
+        available_actions: [
+          "list_channels", "diagnose", "auto_setup", "cleanup", "reconfigure_connector",
+          "list_bot_events", "get_bound_events", "cleanup_duplicate_events", "register_robot",
+          "get_connector_lines", "activate_line", "sync_contacts", "complete_setup"
+        ]
+      }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error) {

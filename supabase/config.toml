@@ -34,7 +34,7 @@ verify_jwt = true
 verify_jwt = false
 
 [functions.bitrix24-webhook]
-verify_jwt = false
+verify_jwt = true
 
 [functions.bitrix24-send]
 verify_jwt = false
@@ -65,3 +65,17 @@ verify_jwt = false
 
 [functions.gupshup-send-message]
 verify_jwt = false
+
+# ========================================
+# NOVA ARQUITETURA BITRIX24 (ACK Rápido)
+# ========================================
+
+# Função PÚBLICA para receber eventos do Bitrix24
+# ACK rápido + enfileiramento para processamento assíncrono
+[functions.bitrix24-events]
+verify_jwt = false
+
+# Worker PRIVADO para processar fila de eventos
+# Chamado internamente após enfileiramento
+[functions.bitrix24-worker]
+verify_jwt = true
