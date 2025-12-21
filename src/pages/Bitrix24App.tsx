@@ -485,12 +485,12 @@ function InstancesView({ status }: { status: BitrixStatus | null }) {
           <p className="text-sm text-muted-foreground">
             Para gerenciamento completo das instâncias (criar, editar, reconectar), acesse{" "}
             <a 
-              href="https://app.thoth24.com/instances" 
+              href="https://chat.thoth24.com/instances" 
               target="_blank" 
               rel="noopener noreferrer"
               className="text-primary hover:underline"
             >
-              app.thoth24.com
+              chat.thoth24.com
             </a>
           </p>
         </CardContent>
@@ -516,7 +516,7 @@ function TrainingView() {
             Acesse o painel completo para adicionar documentos, FAQs e configurar o treinamento do bot
           </p>
           <Button asChild>
-            <a href="https://app.thoth24.com/training" target="_blank" rel="noopener noreferrer">
+            <a href="https://chat.thoth24.com/training" target="_blank" rel="noopener noreferrer">
               Abrir Treinamento
             </a>
           </Button>
@@ -543,7 +543,7 @@ function PersonasView() {
             Acesse o painel completo para criar e editar personas com diferentes personalidades
           </p>
           <Button asChild>
-            <a href="https://app.thoth24.com/personas" target="_blank" rel="noopener noreferrer">
+            <a href="https://chat.thoth24.com/personas" target="_blank" rel="noopener noreferrer">
               Abrir Personas
             </a>
           </Button>
@@ -583,12 +583,12 @@ function SettingsView({ domain }: { domain: string | null }) {
           <p className="text-sm text-muted-foreground">
             Para configurações avançadas, acesse{" "}
             <a 
-              href="https://app.thoth24.com/settings" 
+              href="https://chat.thoth24.com/settings" 
               target="_blank" 
               rel="noopener noreferrer"
               className="text-primary hover:underline"
             >
-              app.thoth24.com
+              chat.thoth24.com
             </a>
           </p>
         </CardContent>
