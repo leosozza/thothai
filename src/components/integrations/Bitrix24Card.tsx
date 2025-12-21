@@ -7,6 +7,8 @@ import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Separator } from "@/components/ui/separator";
 import {
   Building2,
   CheckCircle2,
@@ -20,6 +22,9 @@ import {
   AlertTriangle,
   XCircle,
   RotateCcw,
+  ShoppingCart,
+  ChevronDown,
+  Wrench,
 } from "lucide-react";
 
 interface Integration {
@@ -77,6 +82,7 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
   const [summary, setSummary] = useState<string>("");
   const [fixesApplied, setFixesApplied] = useState<string[]>([]);
   const autoVerifiedRef = useRef(false);
+  const [localAppExpanded, setLocalAppExpanded] = useState(false);
 
   const config = integration?.config || {};
   const isConnected = integration?.is_active && config.auto_setup_completed;
@@ -468,133 +474,199 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
         </div>
       </CardHeader>
       <CardContent className="space-y-6">
-        {/* Quick Setup Instructions */}
-        <div className="bg-sky-500/5 border border-sky-500/20 rounded-lg p-4">
-          <h4 className="font-medium text-sky-600 dark:text-sky-400 mb-2">
-            Configuração Rápida
-          </h4>
-          <ol className="text-sm text-muted-foreground space-y-2">
-            <li className="flex gap-2">
-              <span className="font-bold text-primary">1.</span>
-              No Bitrix24, vá em Aplicações → Desenvolvedores → Adicionar App Local
-            </li>
-            <li className="flex gap-2">
-              <span className="font-bold text-primary">2.</span>
-              Configure as URLs abaixo e adicione permissões: imopenlines, imconnector, im, crm
-            </li>
-            <li className="flex gap-2">
-              <span className="font-bold text-primary">3.</span>
-              Instale o app e cole o token gerado aqui
-            </li>
-          </ol>
-        </div>
-
-        {/* URLs to copy */}
-        <div className="space-y-3">
-          <div className="space-y-1.5">
-            <Label className="text-xs text-muted-foreground">Handler URL</Label>
-            <div className="flex gap-2">
-              <Input
-                readOnly
-                value="https://ybqwwipwimnkonnebbys.supabase.co/functions/v1/bitrix24-install"
-                className="font-mono text-xs bg-muted"
-              />
-              <Button
-                variant="outline"
-                size="icon"
-                onClick={() => copyToClipboard("https://ybqwwipwimnkonnebbys.supabase.co/functions/v1/bitrix24-install")}
-              >
-                <Copy className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-
-          <div className="space-y-1.5">
-            <Label className="text-xs text-muted-foreground">Initial Install URL</Label>
-            <div className="flex gap-2">
-              <Input
-                readOnly
-                value="https://chat.thoth24.com/bitrix24-setup"
-                className="font-mono text-xs bg-muted"
-              />
-              <Button
-                variant="outline"
-                size="icon"
-                onClick={() => copyToClipboard("https://chat.thoth24.com/bitrix24-setup")}
-              >
-                <Copy className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-        </div>
-
-        {/* Token Generation */}
-        <div className="border rounded-lg p-4 space-y-3">
+        {/* MARKETPLACE - Primary Option */}
+        <div className="bg-green-500/5 border border-green-500/20 rounded-lg p-4 space-y-4">
           <div className="flex items-center gap-2">
-            <Key className="h-5 w-5 text-primary" />
-            <span className="font-medium">Token de Vinculação</span>
+            <ShoppingCart className="h-5 w-5 text-green-600" />
+            <h4 className="font-medium text-green-600 dark:text-green-400">
+              Instalação via Marketplace
+            </h4>
+            <Badge className="bg-green-500/10 text-green-600 border-green-500/20 text-xs">
+              Recomendado
+            </Badge>
           </div>
           
-          {linkingToken ? (
-            <div className="space-y-2">
-              <div className="flex gap-2">
-                <Input
-                  readOnly
-                  value={linkingToken}
-                  className="font-mono text-lg text-center tracking-widest bg-muted"
-                />
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={() => copyToClipboard(linkingToken)}
-                >
-                  <Copy className="h-4 w-4" />
-                </Button>
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Cole este token na tela de configuração do Bitrix24
-              </p>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleGenerateToken}
-                disabled={generatingToken}
-              >
-                {generatingToken ? (
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                ) : (
-                  <RefreshCw className="h-4 w-4 mr-2" />
-                )}
-                Gerar Novo Token
-              </Button>
-            </div>
-          ) : (
-            <Button
-              onClick={handleGenerateToken}
-              disabled={generatingToken}
-              className="w-full"
+          <ol className="text-sm text-muted-foreground space-y-2">
+            <li className="flex gap-2">
+              <span className="font-bold text-green-600">1.</span>
+              Acesse o Marketplace do Bitrix24
+            </li>
+            <li className="flex gap-2">
+              <span className="font-bold text-green-600">2.</span>
+              Busque por "Thoth WhatsApp" ou acesse o link direto
+            </li>
+            <li className="flex gap-2">
+              <span className="font-bold text-green-600">3.</span>
+              Clique em "Instalar" e siga as instruções
+            </li>
+          </ol>
+
+          <Button className="w-full" asChild>
+            <a 
+              href="https://www.bitrix24.com.br/apps/app/thoth24.thoth_whatsapp/" 
+              target="_blank" 
+              rel="noopener noreferrer"
             >
-              {generatingToken ? (
-                <Loader2 className="h-4 w-4 animate-spin mr-2" />
-              ) : (
-                <Key className="h-4 w-4 mr-2" />
-              )}
-              Gerar Token
-            </Button>
-          )}
+              <ShoppingCart className="h-4 w-4 mr-2" />
+              Ir para o Marketplace
+              <ExternalLink className="h-3 w-3 ml-2" />
+            </a>
+          </Button>
         </div>
 
-        {/* Documentation link */}
-        <Button variant="outline" className="w-full" asChild>
-          <a 
-            href="https://helpdesk.bitrix24.com.br/open/17558322/" 
-            target="_blank" 
-            rel="noopener noreferrer"
-          >
-            <ExternalLink className="h-4 w-4 mr-2" />
-            Ver Tutorial Completo
-          </a>
-        </Button>
+        {/* Separator */}
+        <div className="flex items-center gap-4">
+          <Separator className="flex-1" />
+          <span className="text-xs text-muted-foreground">ou</span>
+          <Separator className="flex-1" />
+        </div>
+
+        {/* LOCAL APP - Secondary/Advanced Option (Collapsible) */}
+        <Collapsible open={localAppExpanded} onOpenChange={setLocalAppExpanded}>
+          <CollapsibleTrigger asChild>
+            <Button variant="ghost" className="w-full justify-between p-4 h-auto">
+              <div className="flex items-center gap-2">
+                <Wrench className="h-4 w-4 text-muted-foreground" />
+                <span className="text-sm font-medium">Configuração Manual (Avançado)</span>
+              </div>
+              <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${localAppExpanded ? 'rotate-180' : ''}`} />
+            </Button>
+          </CollapsibleTrigger>
+          
+          <CollapsibleContent className="space-y-4 pt-2">
+            <div className="bg-muted/50 rounded-lg p-4 space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Para desenvolvedores ou configurações especiais. Use esta opção se precisar de controle total sobre a instalação.
+              </p>
+
+              {/* Setup Instructions */}
+              <div className="bg-sky-500/5 border border-sky-500/20 rounded-lg p-3">
+                <ol className="text-sm text-muted-foreground space-y-2">
+                  <li className="flex gap-2">
+                    <span className="font-bold text-sky-600">1.</span>
+                    No Bitrix24: Aplicações → Desenvolvedores → Adicionar App Local
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="font-bold text-sky-600">2.</span>
+                    Configure as URLs abaixo e permissões: imopenlines, imconnector, im, crm
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="font-bold text-sky-600">3.</span>
+                    Instale e use o token gerado
+                  </li>
+                </ol>
+              </div>
+
+              {/* URLs to copy */}
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Handler URL</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      readOnly
+                      value="https://ybqwwipwimnkonnebbys.supabase.co/functions/v1/bitrix24-install"
+                      className="font-mono text-xs bg-muted"
+                    />
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() => copyToClipboard("https://ybqwwipwimnkonnebbys.supabase.co/functions/v1/bitrix24-install")}
+                    >
+                      <Copy className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Initial Install URL</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      readOnly
+                      value="https://chat.thoth24.com/bitrix24-setup"
+                      className="font-mono text-xs bg-muted"
+                    />
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={() => copyToClipboard("https://chat.thoth24.com/bitrix24-setup")}
+                    >
+                      <Copy className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Token Generation */}
+              <div className="border rounded-lg p-4 space-y-3 bg-background">
+                <div className="flex items-center gap-2">
+                  <Key className="h-5 w-5 text-primary" />
+                  <span className="font-medium">Token de Vinculação</span>
+                </div>
+                
+                {linkingToken ? (
+                  <div className="space-y-2">
+                    <div className="flex gap-2">
+                      <Input
+                        readOnly
+                        value={linkingToken}
+                        className="font-mono text-lg text-center tracking-widest bg-muted"
+                      />
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={() => copyToClipboard(linkingToken)}
+                      >
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Cole este token na tela de configuração do Bitrix24
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleGenerateToken}
+                      disabled={generatingToken}
+                    >
+                      {generatingToken ? (
+                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                      ) : (
+                        <RefreshCw className="h-4 w-4 mr-2" />
+                      )}
+                      Gerar Novo Token
+                    </Button>
+                  </div>
+                ) : (
+                  <Button
+                    onClick={handleGenerateToken}
+                    disabled={generatingToken}
+                    className="w-full"
+                    variant="outline"
+                  >
+                    {generatingToken ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    ) : (
+                      <Key className="h-4 w-4 mr-2" />
+                    )}
+                    Gerar Token
+                  </Button>
+                )}
+              </div>
+
+              {/* Documentation link */}
+              <Button variant="outline" className="w-full" size="sm" asChild>
+                <a 
+                  href="https://helpdesk.bitrix24.com.br/open/17558322/" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                >
+                  <ExternalLink className="h-4 w-4 mr-2" />
+                  Ver Tutorial Completo
+                </a>
+              </Button>
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
       </CardContent>
     </Card>
   );
