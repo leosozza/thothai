@@ -3566,44 +3566,12 @@ async function handleVerifyIntegration(supabase: any, payload: any, supabaseUrl:
       name: connectorsObj[id]?.NAME || connectorsObj[id]?.name || id
     }));
 
-    // Check for duplicates and AUTO-REMOVE them
-    const thothConnectors = verification.connectors.filter(c => 
-      c.id.toLowerCase().includes("thoth") || c.id.toLowerCase().includes("whatsapp")
-    );
-    
-    if (thothConnectors.length > 1 && auto_fix) {
-      console.log("AUTO-FIX: Removing duplicate connectors...");
-      const mainConnectorId = "thoth_whatsapp";
-      const duplicates = thothConnectors.filter(c => c.id !== mainConnectorId);
-      
-      for (const dup of duplicates) {
-        console.log(`AUTO-FIX: Removing duplicate connector: ${dup.id}`);
-        try {
-          for (let lineId = 1; lineId <= 10; lineId++) {
-            await fetch(`${clientEndpoint}imconnector.activate`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ auth: accessToken, CONNECTOR: dup.id, LINE: lineId, ACTIVE: 0 })
-            });
-          }
-          await fetch(`${clientEndpoint}imconnector.unregister`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ auth: accessToken, ID: dup.id })
-          });
-          verification.fixes_applied.push(`Removido conector duplicado: ${dup.id}`);
-        } catch (e) {
-          console.error(`Error removing ${dup.id}:`, e);
-        }
-      }
-      verification.duplicate_connectors = duplicates.map(c => c.id);
-      verification.connectors = verification.connectors.filter(c => 
-        !duplicates.some(d => d.id === c.id)
-      );
-    }
-
     // ========== STEP 2: CHECK IF MAIN CONNECTOR IS REGISTERED, IF NOT - REGISTER IT ==========
+    // IMPORTANT: Do this FIRST before any cleanup to ensure we have a working connector
     const mainConnectorExists = verification.connectors.some(c => c.id === connectorId);
+    
+    // Valid WhatsApp icon in base64 (green circle with phone)
+    const WHATSAPP_ICON_BASE64 = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzI1RDM2NiI+PGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iMTIiLz48cGF0aCBmaWxsPSIjZmZmIiBkPSJNMTcuNDcyIDYuNTI4QzE2LjAzNSA1LjA5MSAxNC4wNjUgNC4yODUgMTEuOTQxIDQuMjg1Yy00LjQwMiAwLTcuOTg1IDMuNTgzLTcuOTg1IDcuOTg1IDAgMS40MDcuMzY3IDIuNzggMS4wNjQgMy45OTFsLTEuMTMgNC4xMjQgNC4yMjItMS4xMDhhNy45NyA3Ljk3IDAgMCAwIDMuODI5Ljk3OGg4LjE0OWMtLjAwNC00LjQtMy41ODctNy45ODItNy45ODktNy45ODJhNy45MyA3LjkzIDAgMCAwLTUuMDUzIDEuODE4bC0uMDcyLjA2LjA2NS4wNzRhNS43MSA1LjcxIDAgMCAxIDMuNjM1LTEuMzA2YzMuMTU5IDAgNS43MjkgMi41NyA1LjcyOSA1LjcyOSAwIDMuMTU5LTIuNTcgNS43MjktNS43MjkgNS43MjktMy4xNTkgMC01LjcyOS0yLjU3LTUuNzI5LTUuNzI5eiIvPjwvc3ZnPg==";
     
     if (!mainConnectorExists && auto_fix) {
       console.log("AUTO-FIX: Main connector not registered, registering now...");
@@ -3615,7 +3583,12 @@ async function handleVerifyIntegration(supabase: any, payload: any, supabaseUrl:
             auth: accessToken,
             ID: connectorId,
             NAME: "Thoth WhatsApp",
-            ICON: { DATA_IMAGE: "", COLOR: "#25D366", SIZE: "90%", POSITION: "center" },
+            ICON: { 
+              DATA_IMAGE: WHATSAPP_ICON_BASE64, 
+              COLOR: "#25D366", 
+              SIZE: "90%", 
+              POSITION: "center" 
+            },
             PLACEMENT_HANDLER: webhookUrl,
             CHAT_GROUP: "N"
           })
@@ -3623,13 +3596,71 @@ async function handleVerifyIntegration(supabase: any, payload: any, supabaseUrl:
         const registerResult = await registerResponse.json();
         console.log("Register result:", registerResult);
         
-        if (registerResult.result || registerResult.error === "ERROR_CONNECTOR_ALREADY_EXISTS") {
+        if (registerResult.result) {
           verification.fixes_applied.push("Conector principal registrado");
           verification.connectors.push({ id: connectorId, name: "Thoth WhatsApp" });
+        } else if (registerResult.error === "ERROR_CONNECTOR_ALREADY_EXISTS") {
+          // Connector exists, just add to list
+          verification.connectors.push({ id: connectorId, name: "Thoth WhatsApp" });
+        } else {
+          console.error("Failed to register connector:", registerResult);
+          verification.issues.push(`Falha ao registrar conector: ${registerResult.error_description || registerResult.error || "Erro desconhecido"}`);
         }
-      } catch (e) {
+      } catch (e: unknown) {
         console.error("Error registering connector:", e);
+        verification.issues.push(`Erro ao registrar conector: ${e instanceof Error ? e.message : String(e)}`);
       }
+    }
+
+    // Check for OUR duplicate connectors only (NOT Bitrix24 native ones!)
+    // IMPORTANT: Only remove connectors that start with "thoth" - never touch native connectors
+    const BITRIX_NATIVE_CONNECTORS = [
+      "livechat", "viber", "telegrambot", "telegram", "imessage", 
+      "facebook", "facebookcomments", "fbinstagramdirect", "network", 
+      "notifications", "whatsappbytwilio", "whatsappbyedna", "whatsapp",
+      "vkgroup", "vkgrouporder", "avito", "olx", "yandex"
+    ];
+    
+    const thothConnectors = verification.connectors.filter(c => {
+      const id = c.id.toLowerCase();
+      // Only consider as "ours" if it contains "thoth" 
+      // NEVER touch native Bitrix24 connectors or third-party integrations
+      return id.includes("thoth");
+    });
+    
+    // Only remove duplicates if we have more than one thoth connector AND the main one exists
+    const mainConnectorNowExists = verification.connectors.some(c => c.id === connectorId);
+    
+    if (thothConnectors.length > 1 && mainConnectorNowExists && auto_fix) {
+      console.log("AUTO-FIX: Removing duplicate THOTH connectors only...");
+      const duplicates = thothConnectors.filter(c => c.id !== connectorId);
+      
+      for (const dup of duplicates) {
+        console.log(`AUTO-FIX: Removing duplicate thoth connector: ${dup.id}`);
+        try {
+          // First deactivate from all lines
+          for (let lineId = 1; lineId <= 10; lineId++) {
+            await fetch(`${clientEndpoint}imconnector.activate`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ auth: accessToken, CONNECTOR: dup.id, LINE: lineId, ACTIVE: 0 })
+            });
+          }
+          // Then unregister
+          await fetch(`${clientEndpoint}imconnector.unregister`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ auth: accessToken, ID: dup.id })
+          });
+          verification.fixes_applied.push(`Removido conector thoth duplicado: ${dup.id}`);
+        } catch (e) {
+          console.error(`Error removing ${dup.id}:`, e);
+        }
+      }
+      verification.duplicate_connectors = duplicates.map(c => c.id);
+      verification.connectors = verification.connectors.filter(c => 
+        !duplicates.some(d => d.id === c.id)
+      );
     }
 
     // ========== STEP 3: GET OPEN LINES AND CHECK/ACTIVATE CONNECTOR ==========
