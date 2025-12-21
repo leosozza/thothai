@@ -316,6 +316,31 @@ export default function Integrations() {
         if (bitrixIntegration.config.member_id) {
           setBitrixConfigMode("app");
         }
+        
+        // Auto-detect connected state: if domain + access_token exist, mark as setup completed
+        const hasToken = !!(bitrixIntegration.config.access_token || bitrixIntegration.config.webhook_url);
+        const hasDomain = !!bitrixIntegration.config.domain;
+        const isMarkedComplete = !!bitrixIntegration.config.auto_setup_completed;
+        
+        // Auto-update config if connected but not marked as completed
+        if (hasToken && hasDomain && !isMarkedComplete && bitrixIntegration.is_active) {
+          console.log("Auto-marking Bitrix24 integration as setup completed");
+          await supabase
+            .from("integrations")
+            .update({
+              config: {
+                ...bitrixIntegration.config,
+                auto_setup_completed: true,
+                connector_active: true,
+              },
+              updated_at: new Date().toISOString()
+            })
+            .eq("id", bitrixIntegration.id);
+          
+          // Update local state
+          bitrixIntegration.config.auto_setup_completed = true;
+          bitrixIntegration.config.connector_active = true;
+        }
       }
     } catch (error) {
       console.error("Error fetching integrations:", error);
