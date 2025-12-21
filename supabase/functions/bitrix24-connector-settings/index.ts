@@ -21,16 +21,23 @@ const corsHeaders = {
 };
 
 // Bitrix opens this handler inside an iframe (Contact Center → Settings).
-// IMPORTANT: We removed X-Frame-Options (ALLOWALL is invalid and ignored by browsers)
-// Using ONLY frame-ancestors * in CSP to allow embedding from any origin.
-// Also adding meta CSP in HTML as fallback since Supabase/Cloudflare may inject restrictive CSP.
+// IMPORTANT: Headers for Bitrix24 Contact Center iframe embedding:
+// 1. Content-Security-Policy with frame-ancestors for allowed origins
+// 2. X-Frame-Options is deprecated but some proxies still check it
+// 3. Meta CSP tags in HTML as fallback for CDN/proxy overrides
+//
+// Note on frame-ancestors wildcards:
+// - *.bitrix24.com allows all Bitrix24 cloud subdomains (e.g., company.bitrix24.com)
+// - Regional domains (.com.br, .eu, .es, .de) support Bitrix24's global presence
+// - Wildcards are intentional to support all Bitrix24 customer portals
+// - Alternative: restrict to specific domains if self-hosted or private deployment
 const cspValue = [
   "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:",
   "script-src * 'unsafe-inline' 'unsafe-eval'",
   "style-src * 'unsafe-inline'",
   "img-src * data: blob:",
   "connect-src *",
-  "frame-ancestors *",
+  "frame-ancestors 'self' https://*.bitrix24.com https://*.bitrix24.com.br https://*.bitrix24.eu https://*.bitrix24.es https://*.bitrix24.de",
   "font-src * data:",
 ].join('; ');
 
@@ -38,6 +45,9 @@ const htmlHeaders = {
   ...corsHeaders,
   "Content-Type": "text/html; charset=utf-8",
   "Content-Security-Policy": cspValue,
+  // Note: X-Frame-Options is deprecated and conflicts with CSP frame-ancestors
+  // Modern browsers prefer CSP. If needed, use ALLOW-FROM but it's not widely supported.
+  // For maximum compatibility, we rely on CSP frame-ancestors above.
 } as const;
 
 // Meta tag CSP to embed in HTML (backup if headers are overridden)
@@ -106,6 +116,15 @@ serve(async (req) => {
   console.log("=== BITRIX24-CONNECTOR-SETTINGS ===");
   console.log("Method:", req.method);
   console.log("URL:", req.url);
+  console.log("Timestamp:", new Date().toISOString());
+  
+  // Log request headers for debugging iframe issues
+  console.log("=== REQUEST HEADERS ===");
+  const relevantHeaders = ["referer", "origin", "user-agent", "content-type"];
+  for (const header of relevantHeaders) {
+    const value = req.headers.get(header);
+    if (value) console.log(`  ${header}: ${value}`);
+  }
   
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -143,7 +162,12 @@ serve(async (req) => {
     const memberId = body.auth?.member_id || body.member_id;
     const placement = body.PLACEMENT;
 
-    console.log("Auth data:", { hasAuthId: !!authId, domain, memberId, placement });
+    console.log("=== PARSED PARAMETERS ===");
+    console.log("  Auth ID present:", !!authId);
+    console.log("  Domain:", domain);
+    console.log("  Member ID:", memberId);
+    console.log("  Placement:", placement);
+    console.log("  Request Type:", req.method);
 
     // Parse PLACEMENT_OPTIONS
     let options: { LINE?: number; ACTIVE_STATUS?: number; CONNECTOR?: string } = {};
@@ -338,13 +362,17 @@ serve(async (req) => {
     // If this is a SETTING_CONNECTOR placement call, activate the connector
     if (placement === "SETTING_CONNECTOR" || activeStatus === 1) {
       console.log("=== ACTIVATING CONNECTOR ===");
+      console.log("  Connector ID:", connectorId);
+      console.log("  Line ID:", lineId);
+      console.log("  Active Status:", activeStatus);
       
       const accessToken = authId || await refreshBitrixToken(integration, supabase);
       const apiUrl = domain ? `https://${domain}/rest/` : (config.client_endpoint || `https://${config.domain}/rest/`);
 
       if (accessToken) {
         try {
-          // 1. Activate connector
+          // 1. Activate connector using imconnector.activate
+          console.log("Calling imconnector.activate...");
           const activateResponse = await fetch(`${apiUrl}imconnector.activate`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -356,11 +384,12 @@ serve(async (req) => {
             })
           });
           const activateResult = await activateResponse.json();
-          console.log("imconnector.activate result:", activateResult);
+          console.log("imconnector.activate result:", JSON.stringify(activateResult));
 
           // 2. Set connector data - use bitrix24-events (public, no JWT)
           if (activeStatus === 1) {
-            await fetch(`${apiUrl}imconnector.connector.data.set`, {
+            console.log("Setting connector data with events URL...");
+            const dataSetResponse = await fetch(`${apiUrl}imconnector.connector.data.set`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -375,9 +404,40 @@ serve(async (req) => {
                 }
               })
             });
+            const dataSetResult = await dataSetResponse.json();
+            console.log("imconnector.connector.data.set result:", JSON.stringify(dataSetResult));
           }
 
-          // 3. Update integration config
+          // 3. Verify activation status via imopenlines.config.list.get
+          console.log("Verifying connector status via imopenlines.config.list.get...");
+          const configListResponse = await fetch(`${apiUrl}imopenlines.config.list.get`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ auth: accessToken })
+          });
+          const configListResult = await configListResponse.json();
+          console.log("imopenlines.config.list.get result:", JSON.stringify(configListResult));
+
+          // Check if our line is active
+          let connectorActive = false;
+          if (configListResult.result && Array.isArray(configListResult.result)) {
+            const ourLine = configListResult.result.find((line: any) => 
+              String(line.ID) === String(lineId) || line.ID === lineId
+            );
+            if (ourLine) {
+              // Check both ACTIVE field and connector_active field
+              // Note: API may return boolean true, string "true", or number 1
+              connectorActive = ourLine.ACTIVE === "Y" || 
+                               ourLine.connector_active === true || 
+                               ourLine.connector_active === "true" ||
+                               ourLine.connector_active === 1;
+              console.log(`Line ${lineId} found - ACTIVE: ${ourLine.ACTIVE}, connector_active: ${ourLine.connector_active}`);
+            } else {
+              console.log(`Line ${lineId} not found in config list`);
+            }
+          }
+
+          // 4. Update integration config with verified status
           await supabase
             .from("integrations")
             .update({
@@ -386,11 +446,15 @@ serve(async (req) => {
                 connector_id: connectorId,
                 line_id: lineId,
                 activated_line_id: lineId,
+                connector_active: connectorActive,
                 connector_configured_at: new Date().toISOString(),
+                activation_verified: true,
               },
               updated_at: new Date().toISOString()
             })
             .eq("id", integration.id);
+
+          console.log("Connector activation complete. Status:", connectorActive ? "ACTIVE" : "PENDING");
 
         } catch (error) {
           console.error("Error activating connector:", error);
