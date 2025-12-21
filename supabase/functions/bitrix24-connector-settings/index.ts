@@ -239,9 +239,16 @@ async function refreshBitrixToken(integration: any, supabase: any, logger?: Debu
   return config.access_token;
 }
 
-// Helper to create HTML response with logging
+// Helper to create HTML response with logging - ensures proper UTF-8 encoding
 function createHtmlResponse(html: string, status = 200, logger?: DebugLogger): Response {
-  const response = new Response(html, { status, headers: htmlHeaders });
+  // Use TextEncoder to ensure proper UTF-8 encoding of Portuguese characters
+  const encoder = new TextEncoder();
+  const utf8Bytes = encoder.encode(html);
+  
+  const response = new Response(utf8Bytes, { 
+    status, 
+    headers: htmlHeaders 
+  });
   logger?.response(status, "HTML response sent", Object.fromEntries(response.headers.entries()));
   return response;
 }
