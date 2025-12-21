@@ -22,6 +22,7 @@ import {
   XCircle,
   Search,
   RotateCcw,
+  Zap,
 } from "lucide-react";
 
 interface Integration {
@@ -84,6 +85,7 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
   const [fixing, setFixing] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [reconfiguring, setReconfiguring] = useState(false);
+  const [forcingActivation, setForcingActivation] = useState<number | null>(null);
   const [diagnosis, setDiagnosis] = useState<DiagnosisResult | null>(null);
   const [verification, setVerification] = useState<VerificationResult | null>(null);
 
@@ -290,7 +292,46 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
       console.error("Error reconfiguring:", error);
       toast.error("Erro na reconfiguração");
     } finally {
-      setReconfiguring(false);
+    setReconfiguring(false);
+    }
+  };
+
+  const handleForceActivateLine = async (lineId: number) => {
+    if (!integration?.id) {
+      toast.error("Integração não encontrada");
+      return;
+    }
+
+    setForcingActivation(lineId);
+    
+    try {
+      const response = await supabase.functions.invoke("bitrix24-webhook", {
+        body: {
+          action: "force_activate",
+          integration_id: integration.id,
+          line_id: lineId,
+        }
+      });
+
+      console.log("Force activate response:", response.data);
+
+      if (response.data?.success) {
+        if (response.data.active) {
+          toast.success(`Linha ${lineId} ativada com sucesso!`);
+        } else {
+          toast.info("Comandos enviados. A ativação pode levar alguns segundos.");
+        }
+        // Refresh verification to show updated status
+        handleVerifyIntegration();
+        onRefresh();
+      } else {
+        toast.error(response.data?.error || "Erro ao forçar ativação");
+      }
+    } catch (error) {
+      console.error("Error forcing activation:", error);
+      toast.error("Erro ao forçar ativação");
+    } finally {
+      setForcingActivation(null);
     }
   };
 
@@ -483,17 +524,38 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
                   <span className="font-medium">{verification.lines.length}</span>
                 </div>
 
-                {/* Lines status */}
+                {/* Lines status with force activate button */}
                 {verification.lines.map((line) => (
                   <div key={line.id} className="flex items-center justify-between text-xs bg-muted/50 rounded p-2">
                     <span>{line.name} (ID: {line.id})</span>
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-2">
                       {line.connector_active ? (
-                        <CheckCircle2 className="h-3 w-3 text-green-500" />
+                        <>
+                          <CheckCircle2 className="h-3 w-3 text-green-500" />
+                          <span className="text-green-600">Ativo</span>
+                        </>
                       ) : (
-                        <XCircle className="h-3 w-3 text-red-500" />
+                        <>
+                          <XCircle className="h-3 w-3 text-red-500" />
+                          <span className="text-red-600">Inativo</span>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleForceActivateLine(line.id)}
+                            disabled={forcingActivation === line.id}
+                            className="h-6 text-xs px-2 ml-1"
+                          >
+                            {forcingActivation === line.id ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : (
+                              <>
+                                <Zap className="h-3 w-3 mr-1" />
+                                Ativar
+                              </>
+                            )}
+                          </Button>
+                        </>
                       )}
-                      <span>{line.connector_active ? "Ativo" : "Inativo"}</span>
                     </div>
                   </div>
                 ))}
