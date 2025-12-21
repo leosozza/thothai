@@ -177,6 +177,10 @@ export default function Integrations() {
   const [syncingContacts, setSyncingContacts] = useState(false);
   const [syncDirection, setSyncDirection] = useState<"both" | "to_bitrix" | "from_bitrix">("both");
 
+  // Bitrix24 Portal Linking
+  const [bitrixPortalUrl, setBitrixPortalUrl] = useState("");
+  const [linkingPortal, setLinkingPortal] = useState(false);
+
   // MARKETPLACE: Token linking removed - app is installed via marketplace
 
   // MARKETPLACE: OAuth credentials now come from environment, no manual config needed
@@ -1203,6 +1207,52 @@ export default function Integrations() {
     }
   };
 
+  // Link Bitrix24 portal by URL
+  const handleLinkBitrixPortal = async () => {
+    if (!bitrixPortalUrl.trim()) {
+      toast.error("Digite a URL do portal Bitrix24");
+      return;
+    }
+
+    if (!workspace?.id) {
+      toast.error("Erro: workspace não encontrado");
+      return;
+    }
+
+    setLinkingPortal(true);
+    try {
+      // Extract domain from URL
+      let domain = bitrixPortalUrl
+        .replace(/^https?:\/\//, "")
+        .replace(/\/+$/, "")
+        .toLowerCase();
+
+      const response = await supabase.functions.invoke("bitrix24-link-portal", {
+        body: {
+          domain,
+          workspace_id: workspace.id,
+        },
+      });
+
+      if (response.error) {
+        throw new Error(response.error.message || "Erro ao vincular portal");
+      }
+
+      if (response.data?.success) {
+        toast.success(response.data.message || "Portal vinculado com sucesso!");
+        setBitrixPortalUrl("");
+        fetchIntegrations();
+      } else {
+        toast.error(response.data?.error || "Erro ao vincular portal");
+      }
+    } catch (error) {
+      console.error("Error linking portal:", error);
+      toast.error(error instanceof Error ? error.message : "Erro ao vincular portal");
+    } finally {
+      setLinkingPortal(false);
+    }
+  };
+
   const bitrixIntegration = getIntegrationStatus("bitrix24");
   const bitrixConfig = bitrixIntegration?.config || {};
 
@@ -1488,13 +1538,40 @@ export default function Integrations() {
                       </Button>
                     </div>
 
+                    {/* Link existing portal */}
+                    <div className="border-t pt-4">
+                      <p className="text-sm font-medium mb-3">Já instalou o app no Bitrix24?</p>
+                      <div className="flex gap-2">
+                        <Input
+                          placeholder="https://seuportal.bitrix24.com.br"
+                          value={bitrixPortalUrl}
+                          onChange={(e) => setBitrixPortalUrl(e.target.value)}
+                          className="flex-1"
+                        />
+                        <Button 
+                          onClick={handleLinkBitrixPortal}
+                          disabled={linkingPortal || !bitrixPortalUrl.trim()}
+                        >
+                          {linkingPortal ? (
+                            <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                          ) : (
+                            <ArrowLeftRight className="h-4 w-4 mr-2" />
+                          )}
+                          Vincular
+                        </Button>
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-2">
+                        Digite a URL do seu portal Bitrix24 para vincular a integração existente à sua conta Thoth.
+                      </p>
+                    </div>
+
                     <div className="bg-muted/50 rounded-lg p-4 text-sm space-y-2">
                       <p className="font-medium">Como instalar:</p>
                       <ol className="list-decimal list-inside text-muted-foreground space-y-1">
                         <li>Clique em "Ir para o Marketplace"</li>
                         <li>Faça login no seu portal Bitrix24</li>
                         <li>Clique em "Instalar" no app Thoth WhatsApp</li>
-                        <li>Após a instalação, o app aparecerá aqui como "Conectado"</li>
+                        <li>Volte aqui e digite a URL do seu portal para vincular</li>
                       </ol>
                     </div>
 
