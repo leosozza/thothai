@@ -736,16 +736,29 @@ serve(async (req) => {
     console.log("Full body:", JSON.stringify(body, null, 2));
     console.log("Auth object:", JSON.stringify(auth, null, 2));
 
-    // Extract auth data
-    const accessToken = auth.access_token;
-    const refreshToken = auth.refresh_token;
-    const domain = auth.domain;
-    const memberId = auth.member_id;
-    const clientEndpoint = auth.client_endpoint;
+    // ✅ SUPPORT BOTH LOCAL APPS AND MARKETPLACE APPS
+    // Marketplace apps send AUTH_ID, REFRESH_ID directly in body
+    // Local apps send access_token, refresh_token in body.auth
+    const accessToken = auth.access_token || body.AUTH_ID;
+    const refreshToken = auth.refresh_token || body.REFRESH_ID;
+    const memberId = auth.member_id || body.member_id;
+    
+    // Extract domain from SERVER_ENDPOINT for Marketplace apps
+    // Format: https://oauth.bitrix.info/rest/ -> we need to get it from another field
+    // For Marketplace, we'll need to call an API to get the actual portal domain
+    let domain = auth.domain;
+    if (!domain && body.SERVER_ENDPOINT) {
+      // Marketplace apps don't directly provide domain, but we can get it via API call
+      // For now, we'll use member_id as identifier and fetch domain later
+      domain = null; // Will be resolved below
+    }
+    
+    const clientEndpoint = auth.client_endpoint || body.SERVER_ENDPOINT;
     const applicationToken = body.application_token || auth.application_token;
-    const expiresIn = parseInt(auth.expires_in || "3600", 10);
+    const expiresIn = parseInt(auth.expires_in || body.AUTH_EXPIRES || "3600", 10);
+    const placement = body.PLACEMENT;
 
-    console.log("Extracted auth data:", {
+    console.log("Extracted auth data (supporting both formats):", {
       hasAccessToken: !!accessToken,
       hasRefreshToken: !!refreshToken,
       domain,
@@ -753,12 +766,156 @@ serve(async (req) => {
       clientEndpoint,
       hasApplicationToken: !!applicationToken,
       expiresIn,
+      placement,
+      isMarketplaceFormat: !!body.AUTH_ID,
     });
+
+    // ✅ HANDLE PLACEMENT: "DEFAULT" - App opened in Bitrix24 (Marketplace apps)
+    // When user opens the app, Bitrix24 sends PLACEMENT: "DEFAULT" with fresh tokens
+    if (placement === "DEFAULT" && accessToken && memberId) {
+      console.log("=== PLACEMENT DEFAULT - App opened in Bitrix24 ===");
+      
+      // Try to get portal domain via API call using the fresh tokens
+      let portalDomain = domain;
+      let portalInfo: any = {};
+      
+      if (accessToken && clientEndpoint) {
+        try {
+          // Call profile API to get portal info
+          const profileUrl = clientEndpoint.replace('/rest/', '') + '/rest/profile';
+          console.log("Fetching profile from:", profileUrl);
+          
+          const profileResponse = await fetch(`${profileUrl}?auth=${accessToken}`);
+          const profileData = await profileResponse.json();
+          console.log("Profile response:", profileData);
+          
+          if (profileData.result?.ADMIN_MODE !== undefined) {
+            portalInfo = profileData.result;
+          }
+        } catch (e) {
+          console.log("Could not fetch profile:", e);
+        }
+        
+        // Also try to get app info
+        try {
+          const appInfoUrl = `https://oauth.bitrix.info/rest/app.info?auth=${accessToken}`;
+          const appResponse = await fetch(appInfoUrl);
+          const appData = await appResponse.json();
+          console.log("App info response:", appData);
+          
+          if (appData.result?.install?.client_endpoint) {
+            const endpoint = appData.result.install.client_endpoint;
+            // Extract domain from client_endpoint: https://domain.bitrix24.com/rest/ -> domain.bitrix24.com
+            const match = endpoint.match(/https?:\/\/([^\/]+)/);
+            if (match) {
+              portalDomain = match[1];
+              console.log("Extracted domain from client_endpoint:", portalDomain);
+            }
+          }
+        } catch (e) {
+          console.log("Could not fetch app info:", e);
+        }
+      }
+
+      // Calculate token expiration
+      const tokenExpiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
+
+      // Check if integration already exists for this member_id
+      const { data: existing } = await supabase
+        .from("integrations")
+        .select("*")
+        .eq("type", "bitrix24")
+        .filter("config->>member_id", "eq", memberId)
+        .maybeSingle();
+
+      const configData = {
+        member_id: memberId,
+        domain: portalDomain || existing?.config?.domain,
+        client_endpoint: clientEndpoint || existing?.config?.client_endpoint,
+        access_token: accessToken,
+        refresh_token: refreshToken,
+        application_token: applicationToken || existing?.config?.application_token,
+        token_expires_at: tokenExpiresAt,
+        installed: true,
+        last_token_refresh: new Date().toISOString(),
+        is_marketplace_app: true,
+      };
+
+      if (existing) {
+        // Update with fresh tokens
+        console.log("Updating existing integration with fresh tokens from PLACEMENT DEFAULT");
+        await supabase
+          .from("integrations")
+          .update({
+            config: { ...existing.config, ...configData },
+            is_active: true,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", existing.id);
+      } else {
+        // Create new integration (will be linked to workspace via token later)
+        console.log("Creating new integration from PLACEMENT DEFAULT");
+        await supabase
+          .from("integrations")
+          .insert({
+            type: "bitrix24",
+            name: `Bitrix24 Marketplace - ${portalDomain || memberId}`,
+            config: configData,
+            is_active: true,
+          });
+      }
+
+      // Return HTML page for iframe display
+      return new Response(
+        `<!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="UTF-8">
+          <title>Thoth.ai</title>
+          <script src="https://api.bitrix24.com/api/v1/"></script>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+            .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); max-width: 500px; margin: 0 auto; }
+            h2 { color: #333; margin-bottom: 10px; }
+            p { color: #666; }
+            .success { color: #4CAF50; }
+            .info { background: #e3f2fd; padding: 10px; border-radius: 4px; margin: 10px 0; }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <h2 class="success">✓ Thoth.ai Conectado</h2>
+            <p>Aplicativo instalado com sucesso no portal ${portalDomain || memberId}.</p>
+            <div class="info">
+              <strong>Próximo passo:</strong> Vincule este portal a um workspace Thoth.ai usando um token de vinculação.
+            </div>
+            <p style="font-size: 12px; color: #999;">Member ID: ${memberId}</p>
+          </div>
+          <script>
+            if (window.BX24) {
+              BX24.init(function() {
+                BX24.installFinish();
+              });
+            }
+          </script>
+        </body>
+        </html>`,
+        { 
+          headers: { 
+            ...corsHeaders, 
+            "Content-Type": "text/html; charset=utf-8",
+            "Content-Security-Policy": "frame-ancestors 'self' https://*.bitrix24.com https://*.bitrix24.com.br https://*.bitrix24.eu https://*.bitrix24.de;",
+          } 
+        }
+      );
+    }
 
     if (event === "ONAPPINSTALL") {
       console.log("=== ONAPPINSTALL EVENT ===");
       
-      if (!domain || !memberId || !accessToken) {
+      // For Marketplace apps, domain might not be available directly
+      // We'll use memberId as primary identifier
+      if (!memberId || !accessToken) {
         console.error("Missing required auth data for ONAPPINSTALL:", {
           hasDomain: !!domain,
           hasMemberId: !!memberId,
@@ -770,7 +927,7 @@ serve(async (req) => {
         );
       }
 
-      console.log(`Installing Bitrix24 app for domain: ${domain}, member_id: ${memberId}`);
+      console.log(`Installing Bitrix24 app for domain: ${domain || 'unknown'}, member_id: ${memberId}`);
 
       // Calculate token expiration time
       const tokenExpiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
@@ -791,8 +948,8 @@ serve(async (req) => {
 
       const configData = {
         member_id: memberId,
-        domain,
-        client_endpoint: clientEndpoint || `https://${domain}/rest/`,
+        domain: domain || existing?.config?.domain,
+        client_endpoint: clientEndpoint || `https://${domain || 'oauth.bitrix.info'}/rest/`,
         access_token: accessToken,
         refresh_token: refreshToken,
         application_token: applicationToken,
@@ -803,6 +960,7 @@ serve(async (req) => {
         connector_id: null,
         line_id: null,
         instance_id: null,
+        is_marketplace_app: !!body.AUTH_ID, // Flag to identify Marketplace apps
       };
 
       if (existing) {
@@ -830,7 +988,7 @@ serve(async (req) => {
           .from("integrations")
           .insert({
             type: "bitrix24",
-            name: `Bitrix24 - ${domain}`,
+            name: `Bitrix24 - ${domain || memberId}`,
             config: configData,
             is_active: true,
             // workspace_id will be null until token validation
@@ -846,52 +1004,55 @@ serve(async (req) => {
         }
       }
 
-      // ✅ Register placements after successful install
-      // NOTE: REST_APP placement is NOT registered via API for local apps.
-      // The main app URL is configured in the "Handler path" field of the local app settings in Bitrix24.
-      console.log("=== REGISTERING PLACEMENTS ===");
-      const apiUrl = clientEndpoint || `https://${domain}/rest/`;
-      const eventsUrl = `${supabaseUrl}/functions/v1/bitrix24-events`;
-      
-      try {
-        // 1. Bind SETTING_CONNECTOR placement - Contact Center connector settings
-        const settingConnectorResult = await fetch(`${apiUrl}placement.bind`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            auth: accessToken,
-            PLACEMENT: "SETTING_CONNECTOR",
-            HANDLER: `${supabaseUrl}/functions/v1/bitrix24-connector-settings`,
-            TITLE: "Thoth WhatsApp"
-          })
-        });
-        const settingConnectorData = await settingConnectorResult.json();
-        console.log("SETTING_CONNECTOR placement result:", settingConnectorData);
-
-        // 2. Bind events to the public bitrix24-events endpoint
-        const events = [
-          "ONIMCONNECTORMESSAGEADD",
-          "ONIMCONNECTORMESSAGEUPDATE", 
-          "ONIMCONNECTORSTATUSDELETE",
-          "ONIMCONNECTORLINEDELETE"
-        ];
-
-        for (const eventName of events) {
-          await fetch(`${apiUrl}event.bind`, {
+      // ✅ Register placements after successful install (only if we have domain)
+      if (domain && clientEndpoint) {
+        console.log("=== REGISTERING PLACEMENTS ===");
+        const apiUrl = clientEndpoint || `https://${domain}/rest/`;
+        const eventsUrl = `${supabaseUrl}/functions/v1/bitrix24-events`;
+        
+        try {
+          // 1. Bind SETTING_CONNECTOR placement - Contact Center connector settings
+          const settingConnectorResult = await fetch(`${apiUrl}placement.bind`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               auth: accessToken,
-              event: eventName,
-              handler: eventsUrl
+              PLACEMENT: "SETTING_CONNECTOR",
+              HANDLER: `${supabaseUrl}/functions/v1/bitrix24-connector-settings`,
+              TITLE: "Thoth WhatsApp"
             })
           });
-        }
-        console.log("Events bound to:", eventsUrl);
+          const settingConnectorData = await settingConnectorResult.json();
+          console.log("SETTING_CONNECTOR placement result:", settingConnectorData);
 
-      } catch (placementError) {
-        console.error("Error registering placements:", placementError);
-        // Don't fail the install - placements can be added later
+          // 2. Bind events to the public bitrix24-events endpoint
+          const events = [
+            "ONIMCONNECTORMESSAGEADD",
+            "ONIMCONNECTORMESSAGEUPDATE", 
+            "ONIMCONNECTORSTATUSDELETE",
+            "ONIMCONNECTORLINEDELETE"
+          ];
+
+          for (const eventName of events) {
+            await fetch(`${apiUrl}event.bind`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                auth: accessToken,
+                event: eventName,
+                handler: eventsUrl
+              })
+            });
+          }
+          console.log("Events bound to:", eventsUrl);
+
+        } catch (placementError) {
+          console.error("Error registering placements:", placementError);
+          // Don't fail the install - placements can be added later
+        }
+      } else {
+        console.log("Skipping placement registration - domain not available (Marketplace app)");
+        console.log("Placements will be registered when domain is resolved");
       }
 
       return new Response(
@@ -899,7 +1060,7 @@ serve(async (req) => {
           success: true, 
           message: "App installed successfully",
           member_id: memberId,
-          domain,
+          domain: domain || null,
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
