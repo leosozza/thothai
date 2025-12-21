@@ -964,6 +964,127 @@ serve(async (req) => {
         }
       }
       
+      // === AUTO-SETUP CONNECTOR AND BOT IF NOT DONE YET ===
+      // This ensures connector/bot are registered even when coming from PLACEMENT (not ONAPPINSTALL)
+      if (integration && !integration.config?.auto_setup_completed && body.AUTH_ID) {
+        console.log("=== AUTO-SETUP IN PLACEMENT: Registering connector and bot ===");
+        
+        const accessToken = body.AUTH_ID;
+        const clientEndpoint = integration.config?.domain?.includes('bitrix24')
+          ? `https://${integration.config.domain}/rest/`
+          : integration.config?.client_endpoint || `https://${actualDomain}/rest/`;
+        const eventsUrl = `${supabaseUrl}/functions/v1/bitrix24-events`;
+        const connectorId = "thoth_whatsapp";
+        
+        let connectorRegistered = false;
+        let connectorActivated = false;
+        let botId: number | null = null;
+        let botRegistered = false;
+
+        // 1. Register connector
+        try {
+          const iconUrl = `${supabaseUrl}/storage/v1/object/public/assets/thoth-whatsapp-icon.png`;
+          const registerResult = await fetch(`${clientEndpoint}imconnector.register?auth=${accessToken}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              ID: connectorId,
+              NAME: "Thoth WhatsApp",
+              ICON: { DATA_IMAGE: iconUrl },
+              PLACEMENT_HANDLER: `${supabaseUrl}/functions/v1/bitrix24-connector-settings`,
+            }),
+          });
+          const registerData = await registerResult.json();
+          console.log("PLACEMENT imconnector.register:", JSON.stringify(registerData));
+          connectorRegistered = registerData.result === true || registerData.error === "CONNECTOR_ALREADY_EXISTS";
+        } catch (e) {
+          console.error("PLACEMENT Error registering connector:", e);
+        }
+
+        // 2. Activate connector on line 1
+        if (connectorRegistered) {
+          try {
+            const activateResult = await fetch(`${clientEndpoint}imconnector.activate?auth=${accessToken}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ CONNECTOR: connectorId, LINE: 1, ACTIVE: 1 }),
+            });
+            const activateData = await activateResult.json();
+            console.log("PLACEMENT imconnector.activate:", JSON.stringify(activateData));
+            connectorActivated = activateData.result === true;
+          } catch (e) {
+            console.error("PLACEMENT Error activating connector:", e);
+          }
+        }
+
+        // 3. Set connector webhook data
+        if (connectorActivated) {
+          try {
+            await fetch(`${clientEndpoint}imconnector.connector.data.set?auth=${accessToken}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                CONNECTOR: connectorId,
+                LINE: 1,
+                DATA: { id: `${connectorId}_line_1`, url: eventsUrl, url_im: eventsUrl, name: "Thoth WhatsApp" },
+              }),
+            });
+            console.log("PLACEMENT imconnector.connector.data.set completed");
+          } catch (e) {
+            console.error("PLACEMENT Error setting connector data:", e);
+          }
+        }
+
+        // 4. Register AI Bot
+        try {
+          const botResult = await fetch(`${clientEndpoint}imbot.register?auth=${accessToken}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              CODE: "thoth_ai_bot",
+              TYPE: "B",
+              OPENLINE: "Y",
+              EVENT_MESSAGE_ADD: eventsUrl,
+              EVENT_WELCOME_MESSAGE: eventsUrl,
+              PROPERTIES: { NAME: "Thoth AI", WORK_POSITION: "Assistente Virtual com IA", COLOR: "PURPLE" },
+            }),
+          });
+          const botData = await botResult.json();
+          console.log("PLACEMENT imbot.register:", JSON.stringify(botData));
+          if (botData.result) {
+            botId = botData.result;
+            botRegistered = true;
+          } else if (botData.error === "BOT_ALREADY_EXISTS") {
+            botRegistered = true;
+          }
+        } catch (e) {
+          console.error("PLACEMENT Error registering bot:", e);
+        }
+
+        // 5. Update integration with setup status
+        const updatedConfig = {
+          ...integration.config,
+          connector_id: connectorId,
+          registered: connectorRegistered,
+          activated: connectorActivated,
+          bot_id: botId,
+          bot_registered: botRegistered,
+          bot_enabled: false,
+          bot_name: "Thoth AI",
+          auto_setup_completed: true,
+          auto_setup_at: new Date().toISOString(),
+          auto_setup_via: "placement",
+        };
+
+        await supabase
+          .from("integrations")
+          .update({ config: updatedConfig, updated_at: new Date().toISOString() })
+          .eq("id", integration.id);
+
+        console.log("PLACEMENT auto-setup completed:", { connectorRegistered, connectorActivated, botRegistered });
+        integration.config = updatedConfig;
+      }
+      
       // CRITICAL: Do NOT use 302 redirect - return HTML with BX24.installFinish() and JS redirect
       // 302 redirects break the Bitrix24 iframe flow
       const redirectUrl = `${supabaseUrl}/functions/v1/bitrix24-connector-settings?${new URLSearchParams(body as any).toString()}`;
