@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Loader2, MessageSquare, Bot, BookOpen, Settings, Phone, LayoutDashboard, Zap, AlertCircle, ExternalLink } from "lucide-react";
+import { Loader2, MessageSquare, Bot, BookOpen, Settings, Phone, LayoutDashboard, Zap, AlertCircle, ExternalLink, RefreshCw, RotateCcw, Search, Stethoscope, CheckCircle, XCircle, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -346,7 +346,7 @@ export default function Bitrix24App() {
         {view === "instances" && <InstancesView status={status} />}
         {view === "training" && <TrainingView />}
         {view === "personas" && <PersonasView />}
-        {view === "settings" && <SettingsView domain={domain} />}
+        {view === "settings" && <SettingsView domain={domain} status={status} memberId={memberId} onReload={loadData} />}
       </main>
     </div>
   );
@@ -553,8 +553,205 @@ function PersonasView() {
   );
 }
 
-// Settings View
-function SettingsView({ domain }: { domain: string | null }) {
+// Settings View with Diagnostic Tools
+function SettingsView({ 
+  domain, 
+  status, 
+  memberId,
+  onReload 
+}: { 
+  domain: string | null; 
+  status: BitrixStatus | null;
+  memberId: string | null;
+  onReload: () => Promise<void>;
+}) {
+  const [verificando, setVerificando] = useState(false);
+  const [diagnosticando, setDiagnosticando] = useState(false);
+  const [reconectando, setReconectando] = useState(false);
+  const [reconfigurando, setReconfigurando] = useState(false);
+  
+  const [verificationResult, setVerificationResult] = useState<{
+    success: boolean;
+    message: string;
+    details?: Record<string, any>;
+  } | null>(null);
+  
+  const [diagnosisResult, setDiagnosisResult] = useState<{
+    issues: Array<{ level: "error" | "warning" | "info"; message: string }>;
+    recommendations: string[];
+  } | null>(null);
+
+  const handleVerifyIntegration = async () => {
+    try {
+      setVerificando(true);
+      setVerificationResult(null);
+      
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/bitrix24-webhook`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "check_status",
+          integration_id: status?.integration_id,
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (response.ok && data.success !== false) {
+        setVerificationResult({
+          success: true,
+          message: "Integração funcionando corretamente",
+          details: data,
+        });
+        toast.success("Integração verificada com sucesso!");
+      } else {
+        setVerificationResult({
+          success: false,
+          message: data.error || "Problemas detectados na integração",
+          details: data,
+        });
+        toast.error("Problemas detectados na integração");
+      }
+    } catch (err: any) {
+      setVerificationResult({
+        success: false,
+        message: err.message || "Erro ao verificar integração",
+      });
+      toast.error("Erro ao verificar integração");
+    } finally {
+      setVerificando(false);
+    }
+  };
+
+  const handleDiagnose = async () => {
+    try {
+      setDiagnosticando(true);
+      setDiagnosisResult(null);
+      
+      const issues: Array<{ level: "error" | "warning" | "info"; message: string }> = [];
+      const recommendations: string[] = [];
+
+      // Check basic status
+      if (!status?.integration_id) {
+        issues.push({ level: "error", message: "Integração não encontrada no banco de dados" });
+        recommendations.push("Reinstale o app no Bitrix24");
+      }
+
+      if (!status?.workspace_id) {
+        issues.push({ level: "error", message: "Workspace não vinculado" });
+        recommendations.push("Vincule um workspace Thoth.ai usando um token de vinculação");
+      }
+
+      if (!status?.has_access_token) {
+        issues.push({ level: "warning", message: "Access token pode estar expirado" });
+        recommendations.push("Clique em 'Reconectar' para renovar o token");
+      }
+
+      if (!status?.instances || status.instances.length === 0) {
+        issues.push({ level: "info", message: "Nenhuma instância WhatsApp conectada" });
+        recommendations.push("Crie uma instância WhatsApp em chat.thoth24.com");
+      }
+
+      // Check connector status
+      try {
+        const connectorResponse = await fetch(`${SUPABASE_URL}/functions/v1/bitrix24-webhook`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "list_channels",
+            integration_id: status?.integration_id,
+            include_connector_status: true,
+          }),
+        });
+        
+        const connectorData = await connectorResponse.json();
+        
+        if (!connectorData.channels || connectorData.channels.length === 0) {
+          issues.push({ level: "warning", message: "Nenhum canal Open Channel configurado no Bitrix24" });
+          recommendations.push("Configure o conector no Contact Center do Bitrix24");
+        } else {
+          const inactiveChannels = connectorData.channels.filter((c: any) => !c.active);
+          if (inactiveChannels.length > 0) {
+            issues.push({ level: "warning", message: `${inactiveChannels.length} canal(is) inativo(s) no Bitrix24` });
+          }
+        }
+      } catch (e) {
+        issues.push({ level: "info", message: "Não foi possível verificar status do conector" });
+      }
+
+      if (issues.length === 0) {
+        issues.push({ level: "info", message: "Nenhum problema encontrado!" });
+      }
+
+      setDiagnosisResult({ issues, recommendations });
+      toast.success("Diagnóstico concluído");
+    } catch (err: any) {
+      toast.error("Erro ao diagnosticar: " + err.message);
+    } finally {
+      setDiagnosticando(false);
+    }
+  };
+
+  const handleReconnect = async () => {
+    try {
+      setReconectando(true);
+      
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/bitrix24-webhook`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "refresh_token",
+          integration_id: status?.integration_id,
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (response.ok && data.success) {
+        toast.success("Reconexão realizada com sucesso!");
+        await onReload();
+      } else {
+        toast.error(data.error || "Erro ao reconectar");
+      }
+    } catch (err: any) {
+      toast.error("Erro ao reconectar: " + err.message);
+    } finally {
+      setReconectando(false);
+    }
+  };
+
+  const handleReconfigureFromZero = async () => {
+    if (!confirm("Isso vai reconfigurar completamente o conector. Continuar?")) {
+      return;
+    }
+    
+    try {
+      setReconfigurando(true);
+      
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/bitrix24-webhook`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "reconfigure_connector",
+          integration_id: status?.integration_id,
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (response.ok && data.success) {
+        toast.success("Reconfiguração concluída! O conector foi re-registrado.");
+        await onReload();
+      } else {
+        toast.error(data.error || "Erro ao reconfigurar");
+      }
+    } catch (err: any) {
+      toast.error("Erro ao reconfigurar: " + err.message);
+    } finally {
+      setReconfigurando(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -562,6 +759,7 @@ function SettingsView({ domain }: { domain: string | null }) {
         <p className="text-muted-foreground">Configurações da integração Bitrix24</p>
       </div>
 
+      {/* Integration Info Card */}
       <Card>
         <CardHeader>
           <CardTitle>Informações da Integração</CardTitle>
@@ -569,15 +767,182 @@ function SettingsView({ domain }: { domain: string | null }) {
         <CardContent className="space-y-4">
           <div className="flex justify-between items-center py-2 border-b">
             <span className="text-muted-foreground">Portal Bitrix24</span>
-            <span className="font-medium">{domain}</span>
+            <span className="font-medium">{domain || "-"}</span>
           </div>
           <div className="flex justify-between items-center py-2 border-b">
-            <span className="text-muted-foreground">Status</span>
-            <Badge variant="default" className="bg-green-500">Ativo</Badge>
+            <span className="text-muted-foreground">Member ID</span>
+            <span className="font-mono text-sm">{memberId || "-"}</span>
+          </div>
+          <div className="flex justify-between items-center py-2 border-b">
+            <span className="text-muted-foreground">Integration ID</span>
+            <span className="font-mono text-xs">{status?.integration_id || "-"}</span>
+          </div>
+          <div className="flex justify-between items-center py-2 border-b">
+            <span className="text-muted-foreground">Workspace Vinculado</span>
+            {status?.workspace_id ? (
+              <Badge variant="default" className="bg-green-500">Sim</Badge>
+            ) : (
+              <Badge variant="destructive">Não</Badge>
+            )}
+          </div>
+          <div className="flex justify-between items-center py-2 border-b">
+            <span className="text-muted-foreground">Access Token</span>
+            {status?.has_access_token ? (
+              <Badge variant="default" className="bg-green-500">Válido</Badge>
+            ) : (
+              <Badge variant="secondary">Expirado/Ausente</Badge>
+            )}
+          </div>
+          <div className="flex justify-between items-center py-2">
+            <span className="text-muted-foreground">Instâncias</span>
+            <span className="font-medium">{status?.instances?.length || 0}</span>
           </div>
         </CardContent>
       </Card>
 
+      {/* Advanced Actions Card */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Settings className="h-5 w-5" />
+            Ações Avançadas
+          </CardTitle>
+          <CardDescription>Diagnóstico e manutenção da integração</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Button 
+              onClick={handleVerifyIntegration} 
+              disabled={verificando}
+              variant="outline"
+              className="w-full justify-start"
+            >
+              {verificando ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Search className="h-4 w-4 mr-2" />
+              )}
+              Verificar Integração
+            </Button>
+            
+            <Button 
+              onClick={handleDiagnose} 
+              disabled={diagnosticando}
+              variant="outline"
+              className="w-full justify-start"
+            >
+              {diagnosticando ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Stethoscope className="h-4 w-4 mr-2" />
+              )}
+              Diagnosticar Problemas
+            </Button>
+            
+            <Button 
+              onClick={handleReconnect} 
+              disabled={reconectando}
+              variant="outline"
+              className="w-full justify-start"
+            >
+              {reconectando ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <RefreshCw className="h-4 w-4 mr-2" />
+              )}
+              Reconectar
+            </Button>
+            
+            <Button 
+              onClick={handleReconfigureFromZero} 
+              disabled={reconfigurando}
+              variant="destructive"
+              className="w-full justify-start"
+            >
+              {reconfigurando ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <RotateCcw className="h-4 w-4 mr-2" />
+              )}
+              Reconfigurar do Zero
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Verification Result */}
+      {verificationResult && (
+        <Card className={verificationResult.success ? "border-green-500/50" : "border-destructive/50"}>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              {verificationResult.success ? (
+                <CheckCircle className="h-5 w-5 text-green-500" />
+              ) : (
+                <XCircle className="h-5 w-5 text-destructive" />
+              )}
+              Resultado da Verificação
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className={verificationResult.success ? "text-green-600" : "text-destructive"}>
+              {verificationResult.message}
+            </p>
+            {verificationResult.details && (
+              <pre className="mt-2 p-2 bg-muted rounded text-xs overflow-auto max-h-32">
+                {JSON.stringify(verificationResult.details, null, 2)}
+              </pre>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Diagnosis Result */}
+      {diagnosisResult && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <Stethoscope className="h-5 w-5" />
+              Resultado do Diagnóstico
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Issues */}
+            <div className="space-y-2">
+              <h4 className="font-medium text-sm">Problemas Encontrados:</h4>
+              {diagnosisResult.issues.map((issue, i) => (
+                <div 
+                  key={i} 
+                  className={cn(
+                    "flex items-start gap-2 p-2 rounded text-sm",
+                    issue.level === "error" && "bg-destructive/10 text-destructive",
+                    issue.level === "warning" && "bg-amber-500/10 text-amber-600",
+                    issue.level === "info" && "bg-blue-500/10 text-blue-600"
+                  )}
+                >
+                  {issue.level === "error" && <XCircle className="h-4 w-4 shrink-0 mt-0.5" />}
+                  {issue.level === "warning" && <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />}
+                  {issue.level === "info" && <Info className="h-4 w-4 shrink-0 mt-0.5" />}
+                  {issue.message}
+                </div>
+              ))}
+            </div>
+            
+            {/* Recommendations */}
+            {diagnosisResult.recommendations.length > 0 && (
+              <div className="space-y-2">
+                <h4 className="font-medium text-sm">Recomendações:</h4>
+                <ul className="list-disc list-inside space-y-1 text-sm text-muted-foreground">
+                  {diagnosisResult.recommendations.map((rec, i) => (
+                    <li key={i}>{rec}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Link to full settings */}
       <Card>
         <CardContent className="py-4">
           <p className="text-sm text-muted-foreground">
