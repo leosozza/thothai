@@ -95,6 +95,10 @@ serve(async (req) => {
         const expiresIn = parseInt(tokenData.expires_in || "3600", 10);
         const tokenExpiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
 
+        // IMPORTANTE: Sempre usar o domínio do portal, NUNCA oauth.bitrix.info
+        // client_endpoint deve ser https://PORTAL.bitrix24.com.br/rest/
+        const correctClientEndpoint = `https://${domain}/rest/`;
+
         // Update integration with tokens
         const updatedConfig = {
           ...integration.config,
@@ -102,7 +106,8 @@ serve(async (req) => {
           refresh_token: tokenData.refresh_token,
           token_expires_at: tokenExpiresAt,
           member_id: tokenData.member_id || integration.config.member_id,
-          client_endpoint: tokenData.client_endpoint || `https://${domain}/rest/`,
+          client_endpoint: correctClientEndpoint, // Sempre usar domínio correto
+          domain: domain, // Garantir que domain está salvo
           oauth_pending: false,
         };
 
@@ -376,9 +381,13 @@ serve(async (req) => {
       
       const accessToken = auth.access_token || body.AUTH_ID;
       const refreshToken = auth.refresh_token;
-      const clientEndpoint = auth.client_endpoint || `https://${domain}/rest/`;
+      // IMPORTANTE: Sempre usar domínio do portal, NUNCA oauth.bitrix.info
+      // auth.client_endpoint pode vir como oauth.bitrix.info - ignorar e usar domain
+      const clientEndpoint = domain ? `https://${domain}/rest/` : auth.client_endpoint;
       const expiresIn = parseInt(auth.expires_in || "3600", 10);
       const tokenExpiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
+      
+      console.log("ONAPPINSTALL - Using correct client_endpoint:", clientEndpoint);
 
       // Find existing integration or create new one
       let integration = null;
