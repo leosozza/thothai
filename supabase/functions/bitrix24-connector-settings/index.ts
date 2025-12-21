@@ -487,10 +487,13 @@ serve(async (req) => {
 </body>
 </html>`;
 
-      return createHtmlResponse(setupHtml);
+      logger.info("No integration found, returning setup instructions");
+      await logger.flush();
+      return createHtmlResponse(setupHtml, 200, logger);
     }
 
-    console.log("Found integration:", integration.id);
+    logger.info("Found integration", { integration_id: integration.id, workspace_id: integration.workspace_id });
+    logger.setContext(integration.id, integration.workspace_id);
 
     // Check if already configured
     const config = integration.config || {};
@@ -498,62 +501,63 @@ serve(async (req) => {
 
     // If this is a SETTING_CONNECTOR placement call, activate the connector
     if (placement === "SETTING_CONNECTOR" || activeStatus === 1) {
-      console.log("=== ACTIVATING CONNECTOR ===");
-      console.log("  Connector ID:", connectorId);
-      console.log("  Line ID:", lineId);
-      console.log("  Active Status:", activeStatus);
+      logger.info("Activating connector", { connector_id: connectorId, line_id: lineId, active_status: activeStatus });
       
-      const accessToken = authId || await refreshBitrixToken(integration, supabase);
+      const accessToken = authId || await refreshBitrixToken(integration, supabase, logger);
       const apiUrl = domain ? `https://${domain}/rest/` : (config.client_endpoint || `https://${config.domain}/rest/`);
 
       if (accessToken) {
         try {
           // 1. Activate connector using imconnector.activate
-          console.log("Calling imconnector.activate...");
-          const activateResponse = await fetch(`${apiUrl}imconnector.activate`, {
+          const activateUrl = `${apiUrl}imconnector.activate`;
+          const activatePayload = { auth: accessToken, CONNECTOR: connectorId, LINE: lineId, ACTIVE: activeStatus };
+          logger.apiCall(activateUrl, "POST", activatePayload);
+          
+          const activateResponse = await fetch(activateUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              auth: accessToken,
-              CONNECTOR: connectorId,
-              LINE: lineId,
-              ACTIVE: activeStatus
-            })
+            body: JSON.stringify(activatePayload)
           });
           const activateResult = await activateResponse.json();
-          console.log("imconnector.activate result:", JSON.stringify(activateResult));
+          logger.apiResponse(activateUrl, activateResponse.status, activateResult);
 
           // 2. Set connector data - use bitrix24-events (public, no JWT)
           if (activeStatus === 1) {
-            console.log("Setting connector data with events URL...");
-            const dataSetResponse = await fetch(`${apiUrl}imconnector.connector.data.set`, {
+            // 2. Set connector data
+            const dataSetUrl = `${apiUrl}imconnector.connector.data.set`;
+            const dataSetPayload = {
+              auth: accessToken,
+              CONNECTOR: connectorId,
+              LINE: lineId,
+              DATA: {
+                id: `${connectorId}_line_${lineId}`,
+                url: eventsUrl,
+                url_im: eventsUrl,
+                name: "Thoth WhatsApp"
+              }
+            };
+            logger.apiCall(dataSetUrl, "POST", dataSetPayload);
+            
+            const dataSetResponse = await fetch(dataSetUrl, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                auth: accessToken,
-                CONNECTOR: connectorId,
-                LINE: lineId,
-                DATA: {
-                  id: `${connectorId}_line_${lineId}`,
-                  url: eventsUrl,
-                  url_im: eventsUrl,
-                  name: "Thoth WhatsApp"
-                }
-              })
+              body: JSON.stringify(dataSetPayload)
             });
             const dataSetResult = await dataSetResponse.json();
-            console.log("imconnector.connector.data.set result:", JSON.stringify(dataSetResult));
+            logger.apiResponse(dataSetUrl, dataSetResponse.status, dataSetResult);
           }
 
           // 3. Verify activation status via imopenlines.config.list.get
-          console.log("Verifying connector status via imopenlines.config.list.get...");
-          const configListResponse = await fetch(`${apiUrl}imopenlines.config.list.get`, {
+          const configListUrl = `${apiUrl}imopenlines.config.list.get`;
+          logger.apiCall(configListUrl, "POST", { auth: "***" });
+          
+          const configListResponse = await fetch(configListUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ auth: accessToken })
           });
           const configListResult = await configListResponse.json();
-          console.log("imopenlines.config.list.get result:", JSON.stringify(configListResult));
+          logger.apiResponse(configListUrl, configListResponse.status, configListResult);
 
           // Check if our line is active
           let connectorActive = false;
@@ -562,15 +566,13 @@ serve(async (req) => {
               String(line.ID) === String(lineId) || line.ID === lineId
             );
             if (ourLine) {
-              // Check both ACTIVE field and connector_active field
-              // Note: API may return boolean true, string "true", or number 1
               connectorActive = ourLine.ACTIVE === "Y" || 
                                ourLine.connector_active === true || 
                                ourLine.connector_active === "true" ||
                                ourLine.connector_active === 1;
-              console.log(`Line ${lineId} found - ACTIVE: ${ourLine.ACTIVE}, connector_active: ${ourLine.connector_active}`);
+              logger.info("Line status found", { line_id: lineId, active: ourLine.ACTIVE, connector_active: ourLine.connector_active });
             } else {
-              console.log(`Line ${lineId} not found in config list`);
+              logger.warn("Line not found in config list", { line_id: lineId });
             }
           }
 
@@ -591,10 +593,10 @@ serve(async (req) => {
             })
             .eq("id", integration.id);
 
-          console.log("Connector activation complete. Status:", connectorActive ? "ACTIVE" : "PENDING");
+          logger.info("Connector activation complete", { status: connectorActive ? "ACTIVE" : "PENDING" });
 
         } catch (error) {
-          console.error("Error activating connector:", error);
+          logger.error("Error activating connector", { error: error instanceof Error ? error.message : "Unknown error" });
         }
       }
     }
@@ -733,7 +735,9 @@ serve(async (req) => {
 </body>
 </html>`;
 
-      return createHtmlResponse(tokenHtml);
+      logger.info("Workspace not linked, returning token input HTML");
+      await logger.flush();
+      return createHtmlResponse(tokenHtml, 200, logger);
     }
 
     // Workspace is linked - return success confirmation page
@@ -844,10 +848,13 @@ serve(async (req) => {
 </body>
 </html>`;
 
-    return createHtmlResponse(successHtml);
+    logger.info("Returning success HTML");
+    await logger.flush();
+    return createHtmlResponse(successHtml, 200, logger);
 
   } catch (error) {
-    console.error("Connector settings error:", error);
+    logger.error("Connector settings error", { error: error instanceof Error ? error.message : "Unknown error" });
+    await logger.flush();
     
     // Return error HTML with meta CSP
     const errorHtml = `<!DOCTYPE html>
@@ -862,6 +869,6 @@ serve(async (req) => {
 </body>
 </html>`;
 
-    return createHtmlResponse(errorHtml, 500);
+    return createHtmlResponse(errorHtml, 500, logger);
   }
 });
