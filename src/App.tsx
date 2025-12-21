@@ -39,17 +39,16 @@ const App = () => (
     storageKey="thoth-theme"
   >
     <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <Toaster />
-        <Sonner />
-        <BrowserRouter>
+      <BrowserRouter>
+        <TooltipProvider>
+          <Toaster />
+          <Sonner />
           <Routes>
             {/* Rotas públicas para Bitrix24 - fora dos providers de auth */}
             <Route path="/bitrix24-setup" element={<Bitrix24Setup />} />
             <Route path="/bitrix24-app" element={<Bitrix24App />} />
             <Route path="/license" element={<License />} />
             <Route path="/privacy" element={<Privacy />} />
-            <Route path="/docs" element={<Docs />} />
             <Route path="/docs" element={<Docs />} />
             
             {/* Rotas protegidas com autenticação */}
@@ -80,8 +79,8 @@ const App = () => (
               }
             />
           </Routes>
-        </BrowserRouter>
-      </TooltipProvider>
+        </TooltipProvider>
+      </BrowserRouter>
     </QueryClientProvider>
   </ThemeProvider>
 );
