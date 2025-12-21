@@ -3676,7 +3676,7 @@ async function handleGetBoundEvents(supabase: any, payload: any) {
   }
 }
 
-// Handle cleanup_duplicate_events action - Remove duplicate events keeping only those with proper params
+// Handle cleanup_duplicate_events action - Remove duplicate events keeping only those with CLEAN URLs (no query params)
 async function handleCleanupDuplicateEvents(supabase: any, payload: any, supabaseUrl: string) {
   console.log("=== CLEANUP DUPLICATE EVENTS ===");
   const { integration_id, dry_run = false } = payload;
@@ -3712,7 +3712,7 @@ async function handleCleanupDuplicateEvents(supabase: any, payload: any, supabas
 
   const config = integration.config;
   const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
-  const webhookUrl = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
+  const cleanWebhookUrl = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
 
   try {
     // Get all events
@@ -3738,63 +3738,43 @@ async function handleCleanupDuplicateEvents(supabase: any, payload: any, supabas
 
     console.log("Found events:", ourEvents.length);
 
-    // Identify events to remove:
-    // 1. Events without workspace_id/connector_id query params (old/broken)
-    // 2. Duplicate events (keep one with proper params)
+    // NEW LOGIC: Keep CLEAN URLs (no query params), remove those WITH query params
+    // This is the INVERTED logic - we now standardize on clean URLs
     const eventsToRemove: any[] = [];
     const eventsToKeep: any[] = [];
-    const seenEvents: Set<string> = new Set();
+    const seenCleanEvents: Set<string> = new Set();
 
-    // Sort events: prefer those with query params (longer URLs)
+    // Sort events: prefer those WITHOUT query params (shorter/cleaner URLs)
     const sortedEvents = [...ourEvents].sort((a, b) => {
       const urlA = a.handler || a.HANDLER || "";
       const urlB = b.handler || b.HANDLER || "";
-      return urlB.length - urlA.length; // Longer URLs first (with params)
+      return urlA.length - urlB.length; // Shorter URLs first (clean, no params)
     });
 
     for (const event of sortedEvents) {
       const eventName = (event.event || event.EVENT).toUpperCase();
       const handler = event.handler || event.HANDLER || "";
       
-      // Check if handler has proper query params
-      const hasWorkspaceId = handler.includes("workspace_id=");
-      const hasConnectorId = handler.includes("connector_id=");
-      const hasProperParams = hasWorkspaceId || hasConnectorId;
+      // Check if handler has query params (workspace_id, connector_id, etc.)
+      const hasQueryParams = handler.includes("?") || handler.includes("workspace_id=") || handler.includes("connector_id=");
 
-      // For connector events, we prefer handlers with params
-      // For bot events, we keep the simple handler
-      const isConnectorEvent = eventName.includes("IMCONNECTOR");
-      
-      if (seenEvents.has(eventName)) {
-        // This is a duplicate - remove it
+      if (hasQueryParams) {
+        // Events WITH query params should be REMOVED (old pattern)
         eventsToRemove.push({
           event: eventName,
           handler: handler,
-          reason: "duplicate"
+          reason: "has_query_params"
         });
-      } else if (isConnectorEvent && !hasProperParams) {
-        // Connector event without proper params - check if there's one with params
-        const betterEvent = sortedEvents.find(e => 
-          (e.event || e.EVENT).toUpperCase() === eventName &&
-          ((e.handler || e.HANDLER || "").includes("workspace_id=") ||
-           (e.handler || e.HANDLER || "").includes("connector_id="))
-        );
-        
-        if (betterEvent) {
-          // There's a better version - remove this one
-          eventsToRemove.push({
-            event: eventName,
-            handler: handler,
-            reason: "missing_params"
-          });
-        } else {
-          // No better version exists - keep this one
-          seenEvents.add(eventName);
-          eventsToKeep.push({ event: eventName, handler });
-        }
+      } else if (seenCleanEvents.has(eventName)) {
+        // Duplicate clean event - remove it
+        eventsToRemove.push({
+          event: eventName,
+          handler: handler,
+          reason: "duplicate_clean"
+        });
       } else {
-        // Keep this event
-        seenEvents.add(eventName);
+        // Clean URL, first occurrence - KEEP
+        seenCleanEvents.add(eventName);
         eventsToKeep.push({ event: eventName, handler });
       }
     }
