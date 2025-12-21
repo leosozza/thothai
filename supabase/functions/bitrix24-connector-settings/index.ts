@@ -20,23 +20,28 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
 
+// CSP for iframe embedding in Bitrix24
 const cspValue = [
   "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:",
   "script-src * 'unsafe-inline' 'unsafe-eval'",
   "style-src * 'unsafe-inline'",
   "img-src * data: blob:",
   "connect-src *",
-  "frame-ancestors 'self' https://*.bitrix24.com https://*.bitrix24.com.br https://*.bitrix24.eu https://*.bitrix24.es https://*.bitrix24.de",
+  "frame-ancestors *",
   "font-src * data:",
 ].join('; ');
 
+// CRITICAL: Headers for iframe embedding - X-Frame-Options must NOT be DENY
 const htmlHeaders = {
   ...corsHeaders,
   "Content-Type": "text/html; charset=utf-8",
   "Content-Security-Policy": cspValue,
+  "X-Frame-Options": "ALLOWALL", // Allow embedding in any iframe
+  "X-Content-Type-Options": "nosniff",
 } as const;
 
-const metaCsp = `<meta http-equiv="Content-Security-Policy" content="${cspValue}">`;
+const metaCsp = `<meta http-equiv="Content-Security-Policy" content="${cspValue}">
+<meta http-equiv="X-Frame-Options" content="ALLOWALL">`;
 
 // Debug logger interface
 interface DebugLogEntry {

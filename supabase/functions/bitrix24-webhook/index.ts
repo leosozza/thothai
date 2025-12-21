@@ -2111,6 +2111,27 @@ async function handleReconfigureConnector(supabase: any, payload: any, supabaseU
       console.error("Data set error:", e);
     }
 
+    // 4.5. Try to bind SETTING_CONNECTOR placement explicitly (for local apps)
+    console.log("Step 4.5: Binding SETTING_CONNECTOR placement explicitly...");
+    try {
+      const placementUrl = `${supabaseUrl}/functions/v1/bitrix24-connector-settings`;
+      const placementResponse = await fetch(`${clientEndpoint}placement.bind`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          auth: accessToken,
+          PLACEMENT: "SETTING_CONNECTOR",
+          HANDLER: placementUrl,
+          TITLE: "Thoth WhatsApp Settings",
+          DESCRIPTION: "Configure Thoth WhatsApp connector"
+        })
+      });
+      const placementResult = await placementResponse.json();
+      console.log("placement.bind SETTING_CONNECTOR result:", placementResult);
+    } catch (e: any) {
+      console.log("placement.bind failed (may require Marketplace app):", e.message);
+    }
+
     // 5. Bind events with CLEAN URL (no query params!)
     console.log("Step 5: Binding events with CLEAN URL...");
     const events = [
