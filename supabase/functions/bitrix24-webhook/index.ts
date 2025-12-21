@@ -3904,14 +3904,14 @@ async function handleVerifyIntegration(supabase: any, payload: any, supabaseUrl:
     // IMPORTANT: Do this FIRST before any cleanup to ensure we have a working connector
     const mainConnectorExists = verification.connectors.some(c => c.id === connectorId);
     
-    // Thoth Ibis icon URL - beautiful ibis inside WhatsApp-style speech bubble on green background
-    const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
-    const PROJECT_ID = SUPABASE_URL.includes("supabase.co") ? SUPABASE_URL.split("//")[1]?.split(".")[0] : "ybqwwipwimnkonnebbys";
-    const THOTH_WHATSAPP_ICON_URL = `https://${PROJECT_ID}.supabase.co/storage/v1/object/public/assets/thoth-whatsapp-icon.png`;
+    // Thoth Ibis icon - use inline SVG data URI for reliability (no external URL dependency)
+    // WhatsApp-style green circle with white phone icon
+    const THOTH_WHATSAPP_ICON_SVG = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI2NCIgaGVpZ2h0PSI2NCIgdmlld0JveD0iMCAwIDY0IDY0Ij48Y2lyY2xlIGN4PSIzMiIgY3k9IjMyIiByPSIzMCIgZmlsbD0iIzI1RDM2NiIvPjxwYXRoIGZpbGw9IiNmZmYiIGQ9Ik00NC4yIDIwLjFjLTMuMi0zLjItNy41LTUtMTIuMS01LTkuNCAwLTE3LjEgNy43LTE3LjEgMTcuMSAwIDMgLjggNiAyLjMgOC42TDE1IDUwbDkuNS0yLjVjMi41IDEuNCA1LjMgMi4xIDguMSAyLjEgOS40IDAgMTcuMS03LjcgMTcuMS0xNy4xIDAtNC42LTEuOC04LjgtNS01Mi4xeiIvPjwvc3ZnPg==";
     
     if (!mainConnectorExists && auto_fix) {
       console.log("AUTO-FIX: Main connector not registered, registering now...");
       try {
+        // Use inline SVG icon - more reliable than external URL
         const registerResponse = await fetch(`${clientEndpoint}imconnector.register`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -3919,7 +3919,10 @@ async function handleVerifyIntegration(supabase: any, payload: any, supabaseUrl:
             auth: accessToken,
             ID: connectorId,
             NAME: "Thoth WhatsApp",
-            ICON: THOTH_WHATSAPP_ICON_URL,
+            ICON: {
+              DATA_IMAGE: THOTH_WHATSAPP_ICON_SVG,
+              COLOR: "#25D366"
+            },
             PLACEMENT_HANDLER: webhookUrl,
             CHAT_GROUP: "N"
           })
