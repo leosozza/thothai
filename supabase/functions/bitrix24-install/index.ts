@@ -433,12 +433,43 @@ serve(async (req) => {
         app_sid: auth.application_token || body.APP_SID,
       };
 
+      // MARKETPLACE: Auto-create workspace if it doesn't exist
+      let workspaceId = integration?.workspace_id;
+      
+      if (!workspaceId) {
+        // Create a new workspace automatically for marketplace installations
+        const workspaceName = `Bitrix24 - ${domain || memberId}`;
+        const workspaceSlug = `bitrix24-${(memberId || domain || Date.now().toString()).toString().toLowerCase().replace(/[^a-z0-9-]/g, '-').substring(0, 50)}`;
+        
+        console.log("Creating automatic workspace for marketplace app:", workspaceName);
+        
+        const { data: newWorkspace, error: wsError } = await supabase
+          .from("workspaces")
+          .insert({
+            name: workspaceName,
+            slug: workspaceSlug,
+            plan: "free",
+            owner_id: "00000000-0000-0000-0000-000000000000", // Placeholder for marketplace apps
+            settings: { source: "bitrix24_marketplace", member_id: memberId, domain: domain },
+          })
+          .select()
+          .single();
+        
+        if (wsError) {
+          console.error("Error creating workspace:", wsError);
+        } else {
+          workspaceId = newWorkspace.id;
+          console.log("Created workspace for marketplace:", workspaceId);
+        }
+      }
+
       if (integration) {
         await supabase
           .from("integrations")
           .update({
             config: { ...integration.config, ...configData },
             is_active: true,
+            workspace_id: workspaceId || integration.workspace_id,
             updated_at: new Date().toISOString(),
           })
           .eq("id", integration.id);
@@ -452,6 +483,7 @@ serve(async (req) => {
             name: `Bitrix24 - ${domain || memberId}`,
             config: configData,
             is_active: true,
+            workspace_id: workspaceId,
           })
           .select()
           .single();
@@ -460,7 +492,7 @@ serve(async (req) => {
           console.error("Error creating integration:", insertError);
         } else {
           integration = newInt;
-          console.log("Created new integration for ONAPPINSTALL:", integration?.id);
+          console.log("Created new integration for ONAPPINSTALL:", integration?.id, "with workspace:", workspaceId);
         }
       }
 
