@@ -597,6 +597,8 @@ serve(async (req) => {
     // 2. ACTIVATE connector immediately with default line (LINE: 2)
     // This ensures "Setup concluído" in Bitrix24 Contact Center
     // IMPORTANT: Use LINE 2 as that's where the "Thoth whatsapp" channel is configured
+    const defaultLineId = 2; // Default to LINE 2 where "Thoth whatsapp" is configured
+    
     console.log("=== ACTIVATING CONNECTOR IMMEDIATELY ===");
     console.log("Using connector ID:", finalConnectorId);
     console.log("Target LINE:", defaultLineId);
@@ -604,8 +606,6 @@ serve(async (req) => {
     // CRITICAL: Use bitrix24-events (PUBLIC) for receiving Bitrix24 events
     // Bitrix24 documentation states event handlers must use clean URLs
     const cleanWebhookUrl = `${supabaseUrl}/functions/v1/bitrix24-events`;
-    
-    const defaultLineId = 2; // Default to LINE 2 where "Thoth whatsapp" is configured
     
     // Call imconnector.activate
     const activateUrl = `${bitrixApiUrl}imconnector.activate?auth=${accessToken}`;
