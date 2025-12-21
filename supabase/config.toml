@@ -77,3 +77,6 @@ verify_jwt = false
 
 [functions.generate-logo]
 verify_jwt = true
+
+[functions.bitrix24-link-portal]
+verify_jwt = true
