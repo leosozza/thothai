@@ -2100,8 +2100,9 @@ async function handleReconfigureConnector(supabase: any, payload: any, supabaseU
     console.log("accessToken length:", accessToken?.length || 0);
     console.log("accessToken first 20 chars:", accessToken?.substring(0, 20) || "N/A");
     
-    // WhatsApp filled SVG icon (not stroke) for better visibility
-    const whatsappSvgIcon = "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSIjMjVENDY2Ij48cGF0aCBkPSJNMTcuNDcyIDYuMDA1QzE1Ljc4NCA0LjMxNSAxMy41MTIgMy4zODQgMTEuMTUgMy4zODRjLTQuOTQzIDAtOC45NjYgNC4wMjMtOC45NjYgOC45NjYgMCAxLjU4MS40MTMgMy4xMjcgMS4xOTggNC40ODlMMi40MTYgMjEuNjE2bDUuMjEyLTEuMzY4Yy4yNjEuMTQzIDQuNDcgMi41NzIgOC4wNTEuNjgxIDMuNjYxLTEuOTMzIDUuNzUxLTUuODQ1IDUuNzUxLTEwLjE3IDAtMi4zNjItLjkyLTQuNTg0LTIuNTktNi4yNTR6bS0xMS4yMjMgMTAuNjE0bC0uMDk0LS4wNDlIMy4xNDhsLjI4OS0xLjA1NS0uMTg3LS4yOTdjLS44MTQtMS4yOTQtMS4yNDQtMi43ODUtMS4yNDQtNC4zMTggMC00LjQ3NCAzLjY0LTguMTE0IDguMTE0LTguMTE0IDIuMTY2IDAgNC4yMDEuODQzIDUuNzMzIDIuMzc1IDEuNTMyIDEuNTMyIDIuMzc1IDMuNTY3IDIuMzc1IDUuNzMzIDAgNC40NzQtMy42NCA4LjExNC04LjExNCA4LjExNC0xLjQ3MyAwLTIuOTE5LS40LTQuMTc4LTEuMTUzbC0uMjk5LS4xNzctLjMxMy4wODItMi4xNjEuNTY2LjU1NC0yLjAyOHoiLz48cGF0aCBkPSJNMTUuMjk1IDE0LjY0M2MtLjI2MS0uMTMtMS41NDYtLjc2Mi0xLjc4NS0uODQ5LS4yNDEtLjA4Ny0uNDE1LS4xMzEtLjU4OS4xMy0uMTc0LjI2MS0uNjc2Ljg0OS0uODI4IDEuMDI0LS4xNTIuMTc0LS4zMDQuMTk2LS41NjUuMDY1cy0xLjEwMy0uNDA2LTIuMTAyLTEuMjk3Yy0uNzc2LS42OTItMS4zMDItMS41NDYtMS40NTQtMS44MDctLjE1Mi0uMjYxLS4wMTYtLjQwMi4xMTQtLjUzMi4xMTktLjExNy4yNjEtLjMwNC4zOTEtLjQ1Ni4xMy0uMTUyLjE3NC0uMjYxLjI2MS0uNDM1cy4wNDMtLjMyNi0uMDIyLS40NTZjLS4wNjUtLjEzLS41ODktMS40Mi0uODA2LTEuOTQ2LS4yMTMtLjUxMS0uNDI5LS40NDEtLjU4OS0uNDQ5LS4xNTItLjAwOC0uMzI2LS4wMS0uNS0uMDFzLS40NTYuMDY1LS42OTYuMzI2Yy0uMjQxLjI2LS45MTguODk3LS45MTggMi4xODhzLjk0IDIuNTM0IDEuMDcxIDIuNzA4YzEuMDMzIDEuMzc1IDIuNDcgMi4xNjIgMy41MjYgMi41NjguNDY3LjE4Ljg0MS4yODggMS4xMjkuMzY5LjQ3NC4xMzQuOTA2LjExNSAxLjI0Ny4wNy4zOC0uMDUuMTcxLS4yMDkgMS4xNDQtLjk4LjIzOS0uMTk3LjQ4NC0uMTgzLjgxMi0uMTEuMzI4LjA3NCAxLjMyMi41NTEgMS41NDguNjUxLjIyNi4xLjM3Ny4xNDguNDMzLjIzLjA1Ni4wODMuMDU2LjQ3OS0uMTI5Ljk0MXoiLz48L3N2Zz4=";
+    // Thoth Ibis icon - Ibis inside speech bubble on WhatsApp green background
+    const thothIbisSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="20" fill="#25D366"/><circle cx="50" cy="45" r="30" fill="none" stroke="white" stroke-width="4"/><path d="M35 75 L50 90 L50 75" fill="white"/><g fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M50 65 C42 62, 36 52, 38 40 C40 30, 46 26, 52 26 C58 26, 64 32, 64 42 C64 52, 58 62, 50 65"/><path d="M48 26 C45 22, 38 18, 32 14"/><circle cx="30" cy="12" r="5"/><path d="M25 12 C22 16, 18 22, 16 28"/><circle cx="29" cy="11" r="1.5" fill="white"/></g></svg>`;
+    const whatsappSvgIcon = btoa(thothIbisSvg);
     
     const registerPayload = {
       auth: accessToken,
@@ -3570,8 +3571,10 @@ async function handleVerifyIntegration(supabase: any, payload: any, supabaseUrl:
     // IMPORTANT: Do this FIRST before any cleanup to ensure we have a working connector
     const mainConnectorExists = verification.connectors.some(c => c.id === connectorId);
     
-    // Valid WhatsApp icon in base64 (green circle with phone)
-    const WHATSAPP_ICON_BASE64 = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0iIzI1RDM2NiI+PGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iMTIiLz48cGF0aCBmaWxsPSIjZmZmIiBkPSJNMTcuNDcyIDYuNTI4QzE2LjAzNSA1LjA5MSAxNC4wNjUgNC4yODUgMTEuOTQxIDQuMjg1Yy00LjQwMiAwLTcuOTg1IDMuNTgzLTcuOTg1IDcuOTg1IDAgMS40MDcuMzY3IDIuNzggMS4wNjQgMy45OTFsLTEuMTMgNC4xMjQgNC4yMjItMS4xMDhhNy45NyA3Ljk3IDAgMCAwIDMuODI5Ljk3OGg4LjE0OWMtLjAwNC00LjQtMy41ODctNy45ODItNy45ODktNy45ODJhNy45MyA3LjkzIDAgMCAwLTUuMDUzIDEuODE4bC0uMDcyLjA2LjA2NS4wNzRhNS43MSA1LjcxIDAgMCAxIDMuNjM1LTEuMzA2YzMuMTU5IDAgNS43MjkgMi41NyA1LjcyOSA1LjcyOSAwIDMuMTU5LTIuNTcgNS43MjktNS43MjkgNS43MjktMy4xNTkgMC01LjcyOS0yLjU3LTUuNzI5LTUuNzI5eiIvPjwvc3ZnPg==";
+    // Thoth Ibis icon URL - beautiful ibis inside WhatsApp-style speech bubble on green background
+    const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
+    const PROJECT_ID = SUPABASE_URL.includes("supabase.co") ? SUPABASE_URL.split("//")[1]?.split(".")[0] : "ybqwwipwimnkonnebbys";
+    const THOTH_WHATSAPP_ICON_URL = `https://${PROJECT_ID}.supabase.co/storage/v1/object/public/assets/thoth-whatsapp-icon.png`;
     
     if (!mainConnectorExists && auto_fix) {
       console.log("AUTO-FIX: Main connector not registered, registering now...");
@@ -3583,12 +3586,7 @@ async function handleVerifyIntegration(supabase: any, payload: any, supabaseUrl:
             auth: accessToken,
             ID: connectorId,
             NAME: "Thoth WhatsApp",
-            ICON: { 
-              DATA_IMAGE: WHATSAPP_ICON_BASE64, 
-              COLOR: "#25D366", 
-              SIZE: "90%", 
-              POSITION: "center" 
-            },
+            ICON: THOTH_WHATSAPP_ICON_URL,
             PLACEMENT_HANDLER: webhookUrl,
             CHAT_GROUP: "N"
           })
