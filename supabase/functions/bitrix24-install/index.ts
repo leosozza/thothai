@@ -57,8 +57,8 @@ serve(async (req) => {
         if (!integration || !integration.config?.client_id || !integration.config?.client_secret) {
           console.error("Integration not found for OAuth callback:", domain);
           return new Response(
-            `<html><body><h1>Erro</h1><p>Integração OAuth não encontrada. Por favor, configure novamente.</p></body></html>`,
-            { status: 400, headers: { ...corsHeaders, "Content-Type": "text/html" } }
+            `<!DOCTYPE html><html><head><meta charset="UTF-8"></head><body><h1>Erro</h1><p>Integração OAuth não encontrada. Por favor, configure novamente.</p></body></html>`,
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "text/html; charset=utf-8" } }
           );
         }
 
@@ -86,8 +86,8 @@ serve(async (req) => {
         if (!tokenData.access_token) {
           console.error("Failed to get access token:", tokenData);
           return new Response(
-            `<html><body><h1>Erro</h1><p>Falha ao obter token: ${tokenData.error_description || tokenData.error}</p></body></html>`,
-            { status: 400, headers: { ...corsHeaders, "Content-Type": "text/html" } }
+            `<!DOCTYPE html><html><head><meta charset="UTF-8"></head><body><h1>Erro</h1><p>Falha ao obter token: ${tokenData.error_description || tokenData.error}</p></body></html>`,
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "text/html; charset=utf-8" } }
           );
         }
 
@@ -511,7 +511,7 @@ serve(async (req) => {
           <p>Configure o conector em: Contact Center → Canais → Thoth WhatsApp</p>
         </body>
         </html>`,
-        { headers: { ...corsHeaders, "Content-Type": "text/html" } }
+        { headers: { ...corsHeaders, "Content-Type": "text/html; charset=utf-8" } }
       );
     }
 
