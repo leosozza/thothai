@@ -1380,9 +1380,10 @@ async function handleListChannels(supabase: any, payload: any) {
           console.log(`Connector status for line ${channel.id}:`, statusResult);
           
           if (statusResult.result) {
-            channel.connector_active = statusResult.result.active === true || statusResult.result.ACTIVE === "Y";
-            channel.connector_registered = statusResult.result.register === true || statusResult.result.REGISTER === "Y";
-            channel.connector_connection = statusResult.result.connection === true || statusResult.result.CONNECTION === "Y";
+            // Bitrix24 returns: STATUS (active), CONFIGURED (registered), ERROR
+            channel.connector_active = statusResult.result.STATUS === true || statusResult.result.active === true || statusResult.result.ACTIVE === "Y";
+            channel.connector_registered = statusResult.result.CONFIGURED === true || statusResult.result.register === true || statusResult.result.REGISTER === "Y";
+            channel.connector_connection = !statusResult.result.ERROR;
           }
         } catch (e) {
           console.error(`Error getting connector status for line ${channel.id}:`, e);
