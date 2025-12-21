@@ -891,13 +891,13 @@ serve(async (req) => {
           <path d="M20 6L9 17l-5-5"></path>
         </svg>
       </div>
-      <h1>Configuração Concluída!</h1>
-      <p>O conector Thoth WhatsApp está ativo e pronto para receber mensagens.</p>
-      <span class="status">✓ Conectado</span>
+      <h1>Configura&ccedil;&atilde;o Conclu&iacute;da!</h1>
+      <p>O conector Thoth WhatsApp est&aacute; ativo e pronto para receber mensagens.</p>
+      <span class="status">&#10003; Conectado</span>
       
       <div class="info">
-        <h3>Próximos passos:</h3>
-        <p>Envie uma mensagem para seu número WhatsApp para testar a integração. As mensagens aparecerão no Chat Aberto do Bitrix24.</p>
+        <h3>Pr&oacute;ximos passos:</h3>
+        <p>Envie uma mensagem para seu n&uacute;mero WhatsApp para testar a integra&ccedil;&atilde;o. As mensagens aparecer&atilde;o no Chat Aberto do Bitrix24.</p>
       </div>
       
       <button class="btn" onclick="closeSettings()">Fechar</button>
