@@ -143,9 +143,14 @@ export default function Bitrix24Setup() {
       if (data.integration_id) setIntegrationId(data.integration_id);
 
       // Determine step based on status
-      // Accept as connected if auto_setup_complete is true and has instance_id
-      // (even if connector_active is false - it may take time to sync)
-      if (data.auto_setup_complete && data.instance_id) {
+      // Consider connected if:
+      // 1. auto_setup_complete is true AND has instance_id, OR
+      // 2. has_access_token AND instance_id AND registered (fallback for older integrations)
+      const isConnected = 
+        (data.auto_setup_complete && data.instance_id) ||
+        (data.has_access_token && data.instance_id && data.registered);
+      
+      if (isConnected) {
         // CRITICAL: Notify Bitrix24 installation is complete when already connected
         notifyInstallFinish();
         setStep("connected");

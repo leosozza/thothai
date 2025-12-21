@@ -187,6 +187,9 @@ serve(async (req) => {
               has_oauth_config: !!(integration.config?.client_id && integration.config?.client_secret),
               client_id: integration.config?.client_id || null,
               oauth_pending: integration.config?.oauth_pending || false,
+              // Auto setup status - CRITICAL for frontend to detect connected state
+              auto_setup_complete: integration.config?.auto_setup_completed || false,
+              connector_active: integration.config?.activated || false,
             }),
             { headers: { ...corsHeaders, "Content-Type": "application/json" } }
           );
