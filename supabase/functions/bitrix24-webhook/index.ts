@@ -1558,6 +1558,83 @@ async function handleRefreshToken(supabase: any, payload: any) {
   }
 }
 
+// Handle update_bot_config action - Enable/disable bot AI and update settings
+async function handleUpdateBotConfig(supabase: any, payload: any) {
+  console.log("=== UPDATE BOT CONFIG ===");
+  const { integration_id, bot_enabled, bot_persona_id, bot_welcome_message } = payload;
+
+  if (!integration_id) {
+    return new Response(
+      JSON.stringify({ error: "Integration ID não fornecido" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const { data: integration, error: integrationError } = await supabase
+    .from("integrations")
+    .select("*")
+    .eq("id", integration_id)
+    .single();
+
+  if (integrationError || !integration) {
+    console.error("Integration not found:", integrationError);
+    return new Response(
+      JSON.stringify({ error: "Integração não encontrada" }),
+      { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const config = integration.config || {};
+  const updatedConfig: any = { ...config };
+
+  // Update bot_enabled if provided
+  if (typeof bot_enabled === "boolean") {
+    updatedConfig.bot_enabled = bot_enabled;
+    console.log("Setting bot_enabled to:", bot_enabled);
+  }
+
+  // Update bot_persona_id if provided
+  if (bot_persona_id !== undefined) {
+    updatedConfig.bot_persona_id = bot_persona_id;
+    console.log("Setting bot_persona_id to:", bot_persona_id);
+  }
+
+  // Update bot_welcome_message if provided
+  if (bot_welcome_message !== undefined) {
+    updatedConfig.bot_welcome_message = bot_welcome_message;
+    console.log("Setting bot_welcome_message");
+  }
+
+  // Save updated config
+  const { error: updateError } = await supabase
+    .from("integrations")
+    .update({
+      config: updatedConfig,
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", integration_id);
+
+  if (updateError) {
+    console.error("Error updating integration:", updateError);
+    return new Response(
+      JSON.stringify({ error: "Erro ao atualizar configuração" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  console.log("Bot config updated successfully");
+
+  return new Response(
+    JSON.stringify({
+      success: true,
+      message: "Configuração do bot atualizada",
+      bot_enabled: updatedConfig.bot_enabled,
+      bot_persona_id: updatedConfig.bot_persona_id,
+    }),
+    { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+  );
+}
+
 // Handle check_connector_status action - Check real connector status on Bitrix24
 async function handleCheckConnectorStatus(supabase: any, payload: any) {
   console.log("=== CHECK CONNECTOR STATUS ===");
@@ -5192,6 +5269,11 @@ serve(async (req) => {
     // Handle check_app_installed action - verify if app is marked as INSTALLED in Bitrix24
     if (action === "check_app_installed" || payload.action === "check_app_installed") {
       return await handleCheckAppInstalled(supabase, payload);
+    }
+
+    // Handle update_bot_config action - enable/disable bot AI and configure settings
+    if (action === "update_bot_config" || payload.action === "update_bot_config") {
+      return await handleUpdateBotConfig(supabase, payload);
     }
 
     // Handle force_reinstall_events action - unbind and rebind all events to force Bitrix24 to re-evaluate

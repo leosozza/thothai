@@ -612,7 +612,8 @@ async function processClientConnectorMessage(
 }
 
 /**
- * Process ONIMBOTMESSAGEADD - Bot message event
+ * Process ONIMBOTMESSAGEADD - User sends message to bot
+ * This triggers AI processing and sends response back
  */
 async function processBotMessage(
   payload: any, 
@@ -623,13 +624,198 @@ async function processBotMessage(
   console.log("=== PROCESSING BOT MESSAGE ===");
   console.log("Payload:", JSON.stringify(payload, null, 2));
   
-  // Bot messages are typically internal Bitrix24 events
-  // May need processing depending on bot configuration
-  console.log("ONIMBOTMESSAGEADD handled (logging only)");
+  const data = payload.data || payload;
+  
+  // Extract message data from Bitrix24 bot event
+  const messageText = data.PARAMS?.MESSAGE || data.MESSAGE || data.message || "";
+  const dialogId = data.PARAMS?.DIALOG_ID || data.DIALOG_ID || data.dialog_id || "";
+  const fromUserId = data.PARAMS?.FROM_USER_ID || data.FROM_USER_ID || data.from_user_id || "";
+  const botId = data.PARAMS?.BOT_ID || data.BOT_ID || data.bot_id || "";
+  const memberId = payload.auth?.member_id || payload.member_id || "";
+  const domain = payload.auth?.domain || payload.DOMAIN || "";
+  
+  console.log("Bot message details:", { messageText: messageText.substring(0, 50), dialogId, fromUserId, botId, memberId });
+
+  if (!messageText || messageText.trim() === "") {
+    console.log("Empty message, skipping");
+    return;
+  }
+
+  // Find integration by member_id or domain
+  let integration = null;
+  
+  if (memberId) {
+    const { data: intData } = await supabase
+      .from("integrations")
+      .select("*")
+      .eq("type", "bitrix24")
+      .eq("config->>member_id", memberId)
+      .eq("is_active", true)
+      .maybeSingle();
+    integration = intData;
+  }
+  
+  if (!integration && domain) {
+    const { data: intData } = await supabase
+      .from("integrations")
+      .select("*")
+      .eq("type", "bitrix24")
+      .ilike("config->>domain", `%${domain}%`)
+      .eq("is_active", true)
+      .maybeSingle();
+    integration = intData;
+  }
+
+  if (!integration) {
+    console.error("No integration found for bot message");
+    return;
+  }
+
+  const config = integration.config || {};
+  
+  // Check if bot AI is enabled
+  if (!config.bot_enabled) {
+    console.log("Bot AI is disabled for this integration");
+    return;
+  }
+
+  console.log("Integration found:", integration.id);
+
+  // Find or create contact for this Bitrix24 user
+  const workspaceId = integration.workspace_id;
+  const instanceId = config.instance_id;
+  
+  if (!instanceId) {
+    console.error("No instance_id configured for bot");
+    return;
+  }
+
+  // Use dialogId or fromUserId as unique identifier
+  const contactIdentifier = dialogId || `bitrix_user_${fromUserId}`;
+  
+  // Find existing contact by metadata
+  let contact = null;
+  const { data: existingContact } = await supabase
+    .from("contacts")
+    .select("*")
+    .eq("instance_id", instanceId)
+    .contains("metadata", { bitrix24_dialog_id: dialogId })
+    .maybeSingle();
+  
+  if (existingContact) {
+    contact = existingContact;
+  } else {
+    // Create new contact for this Bitrix24 user
+    const { data: newContact, error: contactError } = await supabase
+      .from("contacts")
+      .insert({
+        instance_id: instanceId,
+        phone_number: `bitrix_${fromUserId}`,
+        name: `Usuário Bitrix #${fromUserId}`,
+        metadata: {
+          source: "bitrix24_bot",
+          bitrix24_user_id: fromUserId,
+          bitrix24_dialog_id: dialogId,
+        }
+      })
+      .select()
+      .single();
+    
+    if (contactError) {
+      console.error("Error creating contact:", contactError);
+      return;
+    }
+    contact = newContact;
+    console.log("Created new contact:", contact.id);
+  }
+
+  // Find or create conversation
+  let conversation = null;
+  const { data: existingConversation } = await supabase
+    .from("conversations")
+    .select("*")
+    .eq("contact_id", contact.id)
+    .eq("instance_id", instanceId)
+    .in("status", ["open", "pending"])
+    .order("created_at", { ascending: false })
+    .maybeSingle();
+
+  if (existingConversation) {
+    conversation = existingConversation;
+  } else {
+    const { data: newConversation, error: convError } = await supabase
+      .from("conversations")
+      .insert({
+        contact_id: contact.id,
+        instance_id: instanceId,
+        status: "open",
+        attendance_mode: "ai",
+      })
+      .select()
+      .single();
+    
+    if (convError) {
+      console.error("Error creating conversation:", convError);
+      return;
+    }
+    conversation = newConversation;
+    console.log("Created new conversation:", conversation.id);
+  }
+
+  // Save incoming message
+  await supabase
+    .from("messages")
+    .insert({
+      conversation_id: conversation.id,
+      contact_id: contact.id,
+      instance_id: instanceId,
+      content: messageText,
+      direction: "incoming",
+      is_from_bot: false,
+      message_type: "text",
+      status: "received",
+      metadata: { source: "bitrix24_bot", dialog_id: dialogId }
+    });
+
+  // Call AI processing
+  console.log("Calling ai-process-bitrix24 for bot message...");
+  
+  try {
+    const aiResponse = await fetch(`${supabaseUrl}/functions/v1/ai-process-bitrix24`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${supabaseServiceKey}`,
+      },
+      body: JSON.stringify({
+        conversation_id: conversation.id,
+        contact_id: contact.id,
+        content: messageText,
+        workspace_id: workspaceId,
+        integration_id: integration.id,
+        instance_id: instanceId,
+        bitrix24_bot_id: botId || config.bot_id,
+        bitrix24_dialog_id: dialogId,
+        message_type: "bot"
+      })
+    });
+
+    const aiResult = await aiResponse.json();
+    console.log("AI processing result:", aiResult.success ? "Success" : aiResult.error);
+
+    if (!aiResponse.ok) {
+      console.error("AI processing failed:", aiResult);
+    }
+  } catch (aiError) {
+    console.error("Error calling AI processing:", aiError);
+  }
+
+  console.log("Bot message processed successfully");
 }
 
 /**
  * Process ONIMBOTJOINOPEN - User started conversation with bot
+ * Send welcome message when user opens chat with the bot
  */
 async function processBotJoinOpen(
   payload: any, 
@@ -640,9 +826,118 @@ async function processBotJoinOpen(
   console.log("=== PROCESSING BOT JOIN OPEN ===");
   console.log("Payload:", JSON.stringify(payload, null, 2));
   
-  // This event fires when a user opens a chat with the bot
-  // Could be used to send welcome messages
-  console.log("ONIMBOTJOINOPEN handled (logging only)");
+  const data = payload.data || payload;
+  
+  const dialogId = data.PARAMS?.DIALOG_ID || data.DIALOG_ID || data.dialog_id || "";
+  const botId = data.PARAMS?.BOT_ID || data.BOT_ID || data.bot_id || "";
+  const userId = data.PARAMS?.USER_ID || data.USER_ID || data.user_id || "";
+  const memberId = payload.auth?.member_id || payload.member_id || "";
+  const domain = payload.auth?.domain || payload.DOMAIN || "";
+  
+  console.log("Bot join details:", { dialogId, botId, userId, memberId });
+
+  // Find integration
+  let integration = null;
+  
+  if (memberId) {
+    const { data: intData } = await supabase
+      .from("integrations")
+      .select("*")
+      .eq("type", "bitrix24")
+      .eq("config->>member_id", memberId)
+      .eq("is_active", true)
+      .maybeSingle();
+    integration = intData;
+  }
+  
+  if (!integration && domain) {
+    const { data: intData } = await supabase
+      .from("integrations")
+      .select("*")
+      .eq("type", "bitrix24")
+      .ilike("config->>domain", `%${domain}%`)
+      .eq("is_active", true)
+      .maybeSingle();
+    integration = intData;
+  }
+
+  if (!integration) {
+    console.log("No integration found for bot join");
+    return;
+  }
+
+  const config = integration.config || {};
+  
+  // Check if bot is enabled and has welcome message
+  if (!config.bot_enabled) {
+    console.log("Bot AI is disabled");
+    return;
+  }
+
+  // Get welcome message from persona or config
+  let welcomeMessage = config.bot_welcome_message || "";
+  
+  // If no custom welcome message, try to get from persona
+  if (!welcomeMessage && config.bot_persona_id) {
+    const { data: persona } = await supabase
+      .from("personas")
+      .select("welcome_message")
+      .eq("id", config.bot_persona_id)
+      .single();
+    
+    if (persona?.welcome_message) {
+      welcomeMessage = persona.welcome_message;
+    }
+  }
+
+  // Default welcome message if none configured
+  if (!welcomeMessage) {
+    welcomeMessage = "Olá! 👋 Sou o assistente virtual. Como posso ajudá-lo hoje?";
+  }
+
+  // Get access token
+  const accessToken = await refreshBitrixToken(integration, supabase);
+  if (!accessToken) {
+    console.error("No access token available");
+    return;
+  }
+
+  // Send welcome message via imbot.message.add
+  const clientEndpoint = config.domain ? `https://${config.domain}/rest/` : config.client_endpoint;
+  const effectiveBotId = botId || config.bot_id;
+
+  if (!effectiveBotId) {
+    console.error("No bot_id available");
+    return;
+  }
+
+  const messagePayload = {
+    auth: accessToken,
+    BOT_ID: effectiveBotId,
+    DIALOG_ID: dialogId,
+    MESSAGE: welcomeMessage,
+  };
+
+  console.log("Sending welcome message:", JSON.stringify(messagePayload, null, 2));
+
+  try {
+    const response = await fetch(`${clientEndpoint}imbot.message.add`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(messagePayload)
+    });
+
+    const result = await response.json();
+    console.log("Welcome message result:", JSON.stringify(result, null, 2));
+
+    if (result.error) {
+      console.error("Error sending welcome message:", result.error);
+    } else {
+      console.log("Welcome message sent successfully");
+    }
+  } catch (error) {
+    console.error("Error sending welcome message:", error);
+  }
 }
 
 /**
