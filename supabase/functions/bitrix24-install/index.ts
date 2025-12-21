@@ -152,7 +152,12 @@ serve(async (req) => {
       const searchValue = queryMemberId || queryDomain;
 
       if (searchValue) {
-        // Try to find integration by member_id or domain
+        console.log("Searching for integration with value:", searchValue);
+        
+        // Detect if searchValue looks like a domain (contains "bitrix24")
+        const looksLikeDomain = searchValue.includes("bitrix24") || searchValue.includes(".");
+        
+        // Try to find integration by member_id first
         let integration = null;
         const { data: byMemberId2 } = await supabase
           .from("integrations")
@@ -163,14 +168,52 @@ serve(async (req) => {
         
         if (byMemberId2) {
           integration = byMemberId2;
-        } else {
+          console.log("Found integration by member_id:", integration.id);
+        }
+        
+        // If not found and looks like domain, search by domain
+        if (!integration) {
           const { data: byDomain2 } = await supabase
             .from("integrations")
             .select("*")
             .eq("type", "bitrix24")
             .eq("config->>domain", searchValue)
             .maybeSingle();
-          integration = byDomain2;
+          
+          if (byDomain2) {
+            integration = byDomain2;
+            console.log("Found integration by exact domain:", integration.id);
+          }
+        }
+        
+        // If still not found and looks like domain, try partial match (ilike)
+        if (!integration && looksLikeDomain) {
+          const { data: byDomainPartial } = await supabase
+            .from("integrations")
+            .select("*")
+            .eq("type", "bitrix24")
+            .ilike("config->>domain", `%${searchValue}%`)
+            .maybeSingle();
+          
+          if (byDomainPartial) {
+            integration = byDomainPartial;
+            console.log("Found integration by partial domain match:", integration.id);
+          }
+        }
+        
+        // Last resort: search in name field
+        if (!integration) {
+          const { data: byName } = await supabase
+            .from("integrations")
+            .select("*")
+            .eq("type", "bitrix24")
+            .ilike("name", `%${searchValue}%`)
+            .maybeSingle();
+          
+          if (byName) {
+            integration = byName;
+            console.log("Found integration by name:", integration.id);
+          }
         }
 
         // SIMPLIFIED: Return found:true if integration exists (workspace is OPTIONAL)
