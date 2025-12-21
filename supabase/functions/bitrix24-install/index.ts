@@ -843,6 +843,66 @@ serve(async (req) => {
         }
       }
 
+      // ✅ Register placements after successful install
+      console.log("=== REGISTERING PLACEMENTS ===");
+      const apiUrl = clientEndpoint || `https://${domain}/rest/`;
+      const eventsUrl = `${supabaseUrl}/functions/v1/bitrix24-events`;
+      
+      try {
+        // 1. Bind REST_APP placement - Main app (full Thoth dashboard)
+        const restAppResult = await fetch(`${apiUrl}placement.bind`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            auth: accessToken,
+            PLACEMENT: "REST_APP",
+            HANDLER: "https://chat.thoth24.com/bitrix24-app",
+            TITLE: "Thoth WhatsApp"
+          })
+        });
+        const restAppData = await restAppResult.json();
+        console.log("REST_APP placement result:", restAppData);
+
+        // 2. Bind SETTING_CONNECTOR placement - Contact Center connector settings
+        const settingConnectorResult = await fetch(`${apiUrl}placement.bind`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            auth: accessToken,
+            PLACEMENT: "SETTING_CONNECTOR",
+            HANDLER: `${supabaseUrl}/functions/v1/bitrix24-connector-settings`,
+            TITLE: "Thoth WhatsApp"
+          })
+        });
+        const settingConnectorData = await settingConnectorResult.json();
+        console.log("SETTING_CONNECTOR placement result:", settingConnectorData);
+
+        // 3. Bind events to the public bitrix24-events endpoint
+        const events = [
+          "ONIMCONNECTORMESSAGEADD",
+          "ONIMCONNECTORMESSAGEUPDATE", 
+          "ONIMCONNECTORSTATUSDELETE",
+          "ONIMCONNECTORLINEDELETE"
+        ];
+
+        for (const eventName of events) {
+          await fetch(`${apiUrl}event.bind`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              auth: accessToken,
+              event: eventName,
+              handler: eventsUrl
+            })
+          });
+        }
+        console.log("Events bound to:", eventsUrl);
+
+      } catch (placementError) {
+        console.error("Error registering placements:", placementError);
+        // Don't fail the install - placements can be added later
+      }
+
       return new Response(
         JSON.stringify({ 
           success: true, 

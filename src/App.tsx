@@ -22,6 +22,7 @@ import Integrations from "./pages/Integrations";
 import Settings from "./pages/Settings";
 import Playground from "./pages/Playground";
 import Bitrix24Setup from "./pages/Bitrix24Setup";
+import Bitrix24App from "./pages/Bitrix24App";
 import License from "./pages/License";
 import Privacy from "./pages/Privacy";
 import Docs from "./pages/Docs";
@@ -45,8 +46,10 @@ const App = () => (
           <Routes>
             {/* Rotas públicas para Bitrix24 - fora dos providers de auth */}
             <Route path="/bitrix24-setup" element={<Bitrix24Setup />} />
+            <Route path="/bitrix24-app" element={<Bitrix24App />} />
             <Route path="/license" element={<License />} />
             <Route path="/privacy" element={<Privacy />} />
+            <Route path="/docs" element={<Docs />} />
             <Route path="/docs" element={<Docs />} />
             
             {/* Rotas protegidas com autenticação */}
