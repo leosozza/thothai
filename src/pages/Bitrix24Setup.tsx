@@ -122,7 +122,9 @@ export default function Bitrix24Setup() {
       if (data.integration_id) setIntegrationId(data.integration_id);
 
       // Determine step based on status
-      if (data.auto_setup_complete && data.connector_active && data.instance_id) {
+      // Accept as connected if auto_setup_complete is true and has instance_id
+      // (even if connector_active is false - it may take time to sync)
+      if (data.auto_setup_complete && data.instance_id) {
         setStep("connected");
       } else if (data.workspace_id && data.instances?.length) {
         // Has workspace but not fully connected
@@ -229,12 +231,18 @@ export default function Bitrix24Setup() {
         throw new Error(data?.error || "Erro na configuração automática");
       }
 
+      // Accept partial success if auto_setup_completed is true
       if (data?.success) {
         toast.success("Conectado com sucesso!");
         setStep("connected");
         await loadData();
+      } else if (data?.results?.connector_registered && data?.results?.events_bound > 0) {
+        // Partial success - connector registered and events bound, but line may not verify as active immediately
+        toast.success("Conectado! A ativação pode levar alguns segundos.");
+        setStep("connected");
+        await loadData();
       } else {
-        throw new Error(data?.error || "Erro na configuração");
+        throw new Error(data?.error || data?.message || "Erro na configuração");
       }
     } catch (err: any) {
       console.error("Error in auto setup:", err);
