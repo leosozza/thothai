@@ -17,16 +17,13 @@ import { supabase } from "@/integrations/supabase/client";
 import { useTheme } from "next-themes";
 import { 
   User, 
-  Building2, 
   Bell, 
   Shield, 
   CreditCard, 
   Save,
   Loader2,
-  Key,
   Eye,
   EyeOff,
-  Copy,
   Check,
   Palette,
   Sun,
@@ -53,7 +50,7 @@ const Settings = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const { user, loading: authLoading } = useAuth();
-  const { workspace, refreshWorkspaces } = useWorkspace();
+  const { workspace } = useWorkspace();
   const { theme, setTheme } = useTheme();
 
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -64,9 +61,6 @@ const Settings = () => {
   const [fullName, setFullName] = useState("");
   const [companyName, setCompanyName] = useState("");
 
-  // Workspace form state
-  const [workspaceName, setWorkspaceName] = useState("");
-  const [workspaceSlug, setWorkspaceSlug] = useState("");
 
   // Notification settings
   const [notifications, setNotifications] = useState<NotificationSettings>({
@@ -83,9 +77,6 @@ const Settings = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
 
-  // API Key
-  const [showApiKey, setShowApiKey] = useState(false);
-  const [copiedKey, setCopiedKey] = useState(false);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -99,12 +90,6 @@ const Settings = () => {
     }
   }, [user]);
 
-  useEffect(() => {
-    if (workspace) {
-      setWorkspaceName(workspace.name);
-      setWorkspaceSlug(workspace.slug);
-    }
-  }, [workspace]);
 
   const fetchProfile = async () => {
     try {
@@ -157,38 +142,6 @@ const Settings = () => {
     }
   };
 
-  const saveWorkspace = async () => {
-    if (!workspace) return;
-    setSaving(true);
-
-    try {
-      const { error } = await supabase
-        .from("workspaces")
-        .update({
-          name: workspaceName,
-          slug: workspaceSlug.toLowerCase().replace(/[^a-z0-9-]/g, ""),
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", workspace.id);
-
-      if (error) throw error;
-
-      await refreshWorkspaces();
-
-      toast({
-        title: "Workspace atualizado",
-        description: "As configurações foram salvas com sucesso.",
-      });
-    } catch (error: any) {
-      toast({
-        title: "Erro ao salvar",
-        description: error.message,
-        variant: "destructive",
-      });
-    } finally {
-      setSaving(false);
-    }
-  };
 
   const changePassword = async () => {
     if (newPassword !== confirmPassword) {
@@ -237,17 +190,6 @@ const Settings = () => {
     }
   };
 
-  const copyApiKey = () => {
-    if (workspace) {
-      navigator.clipboard.writeText(workspace.id);
-      setCopiedKey(true);
-      setTimeout(() => setCopiedKey(false), 2000);
-      toast({
-        title: "Copiado!",
-        description: "API Key copiada para a área de transferência.",
-      });
-    }
-  };
 
   const getInitials = (name: string | null) => {
     if (!name) return "U";
@@ -280,14 +222,10 @@ const Settings = () => {
         </div>
 
         <Tabs defaultValue="profile" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-6 lg:w-auto lg:inline-flex">
+          <TabsList className="grid w-full grid-cols-5 lg:w-auto lg:inline-flex">
             <TabsTrigger value="profile" className="gap-2">
               <User className="h-4 w-4 hidden sm:inline" />
               Perfil
-            </TabsTrigger>
-            <TabsTrigger value="workspace" className="gap-2">
-              <Building2 className="h-4 w-4 hidden sm:inline" />
-              Workspace
             </TabsTrigger>
             <TabsTrigger value="appearance" className="gap-2">
               <Palette className="h-4 w-4 hidden sm:inline" />
@@ -373,103 +311,6 @@ const Settings = () => {
 
                 <div className="flex justify-end">
                   <Button onClick={saveProfile} disabled={saving}>
-                    {saving ? (
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    ) : (
-                      <Save className="h-4 w-4 mr-2" />
-                    )}
-                    Salvar alterações
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* Workspace Tab */}
-          <TabsContent value="workspace">
-            <Card>
-              <CardHeader>
-                <CardTitle>Configurações do Workspace</CardTitle>
-                <CardDescription>
-                  Gerencie as configurações do seu workspace
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="grid gap-4">
-                  <div className="grid gap-2">
-                    <Label htmlFor="workspaceName">Nome do workspace</Label>
-                    <Input
-                      id="workspaceName"
-                      value={workspaceName}
-                      onChange={(e) => setWorkspaceName(e.target.value)}
-                      placeholder="Nome do workspace"
-                    />
-                  </div>
-
-                  <div className="grid gap-2">
-                    <Label htmlFor="workspaceSlug">Slug (URL)</Label>
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm text-muted-foreground">
-                        thoth.app/
-                      </span>
-                      <Input
-                        id="workspaceSlug"
-                        value={workspaceSlug}
-                        onChange={(e) => setWorkspaceSlug(e.target.value)}
-                        placeholder="meu-workspace"
-                        className="flex-1"
-                      />
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      Apenas letras minúsculas, números e hífens
-                    </p>
-                  </div>
-                </div>
-
-                <Separator />
-
-                <div className="space-y-4">
-                  <h3 className="font-medium flex items-center gap-2">
-                    <Key className="h-4 w-4" />
-                    API Key
-                  </h3>
-                  <p className="text-sm text-muted-foreground">
-                    Use esta chave para integrar com APIs externas
-                  </p>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      type={showApiKey ? "text" : "password"}
-                      value={workspace?.id || ""}
-                      readOnly
-                      className="font-mono text-sm bg-muted"
-                    />
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      onClick={() => setShowApiKey(!showApiKey)}
-                    >
-                      {showApiKey ? (
-                        <EyeOff className="h-4 w-4" />
-                      ) : (
-                        <Eye className="h-4 w-4" />
-                      )}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      onClick={copyApiKey}
-                    >
-                      {copiedKey ? (
-                        <Check className="h-4 w-4 text-green-500" />
-                      ) : (
-                        <Copy className="h-4 w-4" />
-                      )}
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="flex justify-end">
-                  <Button onClick={saveWorkspace} disabled={saving}>
                     {saving ? (
                       <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                     ) : (
