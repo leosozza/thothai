@@ -36,7 +36,8 @@ function parsePhpStyleFormData(formDataString: string): Record<string, any> {
 }
 
 // Helper to refresh Bitrix24 OAuth token with proactive refresh
-async function refreshBitrixToken(integration: any, supabase: any): Promise<string | null> {
+// forceRefresh: if true, skip expiration check and always try to refresh
+async function refreshBitrixToken(integration: any, supabase: any, forceRefresh: boolean = false): Promise<string | null> {
   const config = integration.config;
   
   // Check if token exists
@@ -46,7 +47,8 @@ async function refreshBitrixToken(integration: any, supabase: any): Promise<stri
   }
 
   // Check token expiration with 10 minute buffer for proactive refresh
-  if (config.token_expires_at) {
+  // Skip this check if forceRefresh is true
+  if (!forceRefresh && config.token_expires_at) {
     const expiresAt = new Date(config.token_expires_at);
     const now = new Date();
     const bufferMs = 10 * 60 * 1000; // 10 minutes buffer
@@ -57,6 +59,10 @@ async function refreshBitrixToken(integration: any, supabase: any): Promise<stri
     }
     
     console.log("Token expired or expiring soon, attempting refresh...");
+  }
+
+  if (forceRefresh) {
+    console.log("Force refresh requested, attempting token refresh...");
   }
 
   // No refresh token available
@@ -73,8 +79,10 @@ async function refreshBitrixToken(integration: any, supabase: any): Promise<stri
   
   try {
     console.log("Calling OAuth refresh endpoint...");
+    console.log("Using refresh_token (first 20 chars):", config.refresh_token?.substring(0, 20));
     const response = await fetch(refreshUrl);
     const data = await response.json();
+    console.log("OAuth refresh response:", JSON.stringify(data));
 
     if (data.error) {
       console.error("OAuth refresh error:", data.error, data.error_description);
@@ -91,7 +99,7 @@ async function refreshBitrixToken(integration: any, supabase: any): Promise<stri
           updated_at: new Date().toISOString(),
         })
         .eq("id", integration.id);
-      return config.access_token; // Return old token as fallback
+      return null; // Return null on refresh failure
     }
 
     if (data.access_token) {
@@ -1501,8 +1509,12 @@ async function handleRefreshToken(supabase: any, payload: any) {
   }
 
   try {
-    // Attempt to refresh the token
-    const newToken = await refreshBitrixToken(integration, supabase);
+    // Check if force refresh is requested
+    const forceRefresh = payload.force === true || payload.force === "true";
+    console.log("Force refresh:", forceRefresh);
+    
+    // Attempt to refresh the token (force refresh to always get new token)
+    const newToken = await refreshBitrixToken(integration, supabase, forceRefresh);
     
     if (!newToken) {
       return new Response(
