@@ -207,7 +207,7 @@ export default function Bitrix24App() {
 
             <div className="flex flex-col gap-2 pt-2">
               <Button asChild variant="default">
-                <a href="https://app.thoth24.com" target="_blank" rel="noopener noreferrer">
+                <a href="https://chat.thoth24.com" target="_blank" rel="noopener noreferrer">
                   <ExternalLink className="h-4 w-4 mr-2" />
                   Acessar Thoth.ai Principal
                 </a>
@@ -256,7 +256,7 @@ export default function Bitrix24App() {
                 maxLength={9}
               />
               <p className="text-xs text-muted-foreground text-center">
-                Gere o token em <strong>app.thoth24.com</strong> → Integrações → Bitrix24
+                Gere o token em <strong>chat.thoth24.com</strong> → Integrações → Bitrix24
               </p>
             </div>
             
@@ -277,12 +277,12 @@ export default function Bitrix24App() {
               <p className="text-xs text-muted-foreground text-center">
                 Não tem uma conta? Acesse{" "}
                 <a 
-                  href="https://app.thoth24.com" 
+                  href="https://chat.thoth24.com" 
                   target="_blank" 
                   rel="noopener noreferrer"
                   className="text-primary hover:underline"
                 >
-                  app.thoth24.com
+                  chat.thoth24.com
                 </a>
                 {" "}para criar
               </p>
@@ -448,10 +448,10 @@ function InstancesView({ status }: { status: BitrixStatus | null }) {
             <Phone className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
             <h3 className="font-medium mb-2">Nenhuma instância encontrada</h3>
             <p className="text-sm text-muted-foreground mb-4">
-              Acesse o painel completo em app.thoth24.com para criar instâncias
+              Acesse o painel completo em chat.thoth24.com para criar instâncias
             </p>
             <Button asChild>
-              <a href="https://app.thoth24.com/instances" target="_blank" rel="noopener noreferrer">
+              <a href="https://chat.thoth24.com/instances" target="_blank" rel="noopener noreferrer">
                 Abrir Painel Completo
               </a>
             </Button>
