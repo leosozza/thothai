@@ -6,6 +6,35 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// Parse PHP-style form data (e.g., data[MESSAGES][0][text]=hello)
+function parsePhpStyleFormData(formDataString: string): Record<string, any> {
+  const result: Record<string, any> = {};
+  const params = new URLSearchParams(formDataString);
+  
+  for (const [key, value] of params.entries()) {
+    // Parse keys like "data[MESSAGES][0][text]" into nested object
+    const keys = key.match(/[^\[\]]+/g);
+    if (!keys) continue;
+    
+    let current = result;
+    for (let i = 0; i < keys.length - 1; i++) {
+      const k = keys[i];
+      const nextKey = keys[i + 1];
+      const isNextNumeric = /^\d+$/.test(nextKey);
+      
+      if (!(k in current)) {
+        current[k] = isNextNumeric ? [] : {};
+      }
+      current = current[k];
+    }
+    
+    const lastKey = keys[keys.length - 1];
+    current[lastKey] = value;
+  }
+  
+  return result;
+}
+
 // Helper to refresh Bitrix24 OAuth token with proactive refresh
 async function refreshBitrixToken(integration: any, supabase: any): Promise<string | null> {
   const config = integration.config;
@@ -3569,39 +3598,57 @@ serve(async (req) => {
       payload = await req.json();
     } else if (contentType.includes("application/x-www-form-urlencoded")) {
       const formData = await req.text();
-      const params = new URLSearchParams(formData);
+      console.log("=== RAW FORM DATA (first 1000 chars) ===");
+      console.log(formData.substring(0, 1000));
+      
+      // Use PHP-style parser for Bitrix24 events
+      const parsed = parsePhpStyleFormData(formData);
+      console.log("=== PARSED PHP-STYLE FORM DATA ===");
+      console.log(JSON.stringify(parsed, null, 2));
       
       payload = {
-        event: params.get("event"),
-        data: params.get("data") ? JSON.parse(params.get("data")!) : {},
-        PLACEMENT: params.get("PLACEMENT"),
-        PLACEMENT_OPTIONS: params.get("PLACEMENT_OPTIONS"),
-        AUTH_ID: params.get("AUTH_ID") || params.get("auth[access_token]"),
-        DOMAIN: params.get("DOMAIN") || params.get("auth[domain]"),
-        member_id: params.get("member_id") || params.get("auth[member_id]"),
-        auth: {
-          access_token: params.get("AUTH_ID") || params.get("auth[access_token]"),
-          domain: params.get("DOMAIN") || params.get("auth[domain]"),
-          member_id: params.get("member_id") || params.get("auth[member_id]"),
+        event: parsed.event,
+        data: parsed.data || {},
+        PLACEMENT: parsed.PLACEMENT,
+        PLACEMENT_OPTIONS: parsed.PLACEMENT_OPTIONS ? 
+          (typeof parsed.PLACEMENT_OPTIONS === 'string' ? 
+            JSON.parse(parsed.PLACEMENT_OPTIONS) : parsed.PLACEMENT_OPTIONS) : undefined,
+        AUTH_ID: parsed.AUTH_ID || parsed.auth?.access_token,
+        DOMAIN: parsed.DOMAIN || parsed.auth?.domain,
+        member_id: parsed.member_id || parsed.auth?.member_id,
+        auth: parsed.auth || {
+          access_token: parsed.AUTH_ID,
+          domain: parsed.DOMAIN,
+          member_id: parsed.member_id,
         },
+        ts: parsed.ts,
+        application_token: parsed.application_token,
       };
     } else {
       const text = await req.text();
+      console.log("=== RAW TEXT BODY (first 1000 chars) ===");
+      console.log(text.substring(0, 1000));
+      
       try {
         payload = JSON.parse(text);
       } catch {
-        const params = new URLSearchParams(text);
+        // Try PHP-style parsing as fallback
+        const parsed = parsePhpStyleFormData(text);
+        console.log("=== PARSED PHP-STYLE (fallback) ===");
+        console.log(JSON.stringify(parsed, null, 2));
+        
         payload = {
-          event: params.get("event"),
-          PLACEMENT: params.get("PLACEMENT"),
-          PLACEMENT_OPTIONS: params.get("PLACEMENT_OPTIONS"),
-          AUTH_ID: params.get("AUTH_ID"),
-          DOMAIN: params.get("DOMAIN"),
-          member_id: params.get("member_id"),
-          auth: {
-            access_token: params.get("AUTH_ID"),
-            domain: params.get("DOMAIN"),
-            member_id: params.get("member_id"),
+          event: parsed.event,
+          data: parsed.data || {},
+          PLACEMENT: parsed.PLACEMENT,
+          PLACEMENT_OPTIONS: parsed.PLACEMENT_OPTIONS,
+          AUTH_ID: parsed.AUTH_ID || parsed.auth?.access_token,
+          DOMAIN: parsed.DOMAIN || parsed.auth?.domain,
+          member_id: parsed.member_id || parsed.auth?.member_id,
+          auth: parsed.auth || {
+            access_token: parsed.AUTH_ID,
+            domain: parsed.DOMAIN,
+            member_id: parsed.member_id,
           },
         };
       }
