@@ -58,7 +58,6 @@ serve(async (req) => {
   console.log("=== BITRIX24-REGISTER REQUEST ===");
   console.log("Method:", req.method);
   console.log("Timestamp:", new Date().toISOString());
-  console.log("URL:", req.url);
   
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -66,12 +65,9 @@ serve(async (req) => {
 
   try {
     const body = await req.json();
-    console.log("=== REQUEST BODY ===");
     console.log("Request body:", JSON.stringify(body));
-    console.log("Action:", body.action);
-    console.log("Request type:", req.method);
     
-    const { action, webhook_url, connector_id, instance_id, workspace_id, integration_id, member_id, domain } = body;
+    const { action, connector_id, instance_id, workspace_id, integration_id, member_id, domain } = body;
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -80,10 +76,6 @@ serve(async (req) => {
     // Action: Clean connectors
     if (action === "clean_connectors") {
       console.log("=== CLEAN CONNECTORS ACTION ===");
-      console.log("integration_id:", integration_id);
-      console.log("workspace_id:", workspace_id);
-      console.log("member_id:", member_id);
-      console.log("domain:", domain);
       
       let integration: any = null;
 
@@ -105,7 +97,7 @@ serve(async (req) => {
             .from("integrations")
             .select("*")
             .eq("type", "bitrix24")
-            .or(`config->>member_id.eq.${searchId},config->>domain.eq.${searchId},config->>member_id.ilike.%${searchId}%,config->>domain.ilike.%${searchId}%`)
+            .or(`config->>member_id.eq.${searchId},config->>domain.eq.${searchId}`)
             .maybeSingle();
           integration = data;
         }
@@ -129,650 +121,269 @@ serve(async (req) => {
         );
       }
 
-      // Check if integration has OAuth token or webhook_url
       const config = integration.config || {};
-      let bitrixApiUrl: string;
       
-      if (config.access_token) {
-        // Refresh token if needed
-        const accessToken = await refreshBitrixToken(integration, supabase);
-        if (!accessToken) {
-          return new Response(
-            JSON.stringify({ error: "Falha ao obter token de acesso" }),
-            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-          );
-        }
-        const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
-        bitrixApiUrl = `${clientEndpoint}`;
-        
-        // List all connectors
-        console.log("Listing connectors (OAuth mode)...");
-        const listUrl = `${bitrixApiUrl}imconnector.list?auth=${accessToken}`;
-        const listResponse = await fetch(listUrl);
-        const listResult = await listResponse.json();
-        console.log("imconnector.list result:", JSON.stringify(listResult));
-
-        const removedConnectors: string[] = [];
-        
-        if (listResult.result) {
-          const connectorsToRemove = Object.keys(listResult.result).filter(id => {
-            const idLower = id.toLowerCase();
-            return idLower.includes("thoth") || idLower.includes("whatsapp");
-          });
-
-          console.log("Connectors to remove:", connectorsToRemove);
-
-          for (const connectorId of connectorsToRemove) {
-            console.log(`Unregistering connector: ${connectorId}`);
-            const unregisterUrl = `${bitrixApiUrl}imconnector.unregister?auth=${accessToken}`;
-            try {
-              const unregisterResponse = await fetch(unregisterUrl, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ ID: connectorId }),
-              });
-              const unregisterResult = await unregisterResponse.json();
-              console.log(`Unregister ${connectorId} result:`, JSON.stringify(unregisterResult));
-              
-              if (unregisterResult.result || !unregisterResult.error) {
-                removedConnectors.push(connectorId);
-              }
-            } catch (e) {
-              console.log(`Failed to unregister ${connectorId}:`, e);
-            }
-          }
-        }
-
+      if (!config.access_token) {
         return new Response(
-          JSON.stringify({ 
-            success: true, 
-            removed_count: removedConnectors.length,
-            removed_connectors: removedConnectors,
-            message: `${removedConnectors.length} conector(es) removido(s)`,
-          }),
-          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      } else if (config.webhook_url) {
-        // Webhook mode
-        bitrixApiUrl = config.webhook_url.endsWith("/") ? config.webhook_url : `${config.webhook_url}/`;
-        
-        console.log("Listing connectors (Webhook mode)...");
-        const listUrl = `${bitrixApiUrl}imconnector.list`;
-        const listResponse = await fetch(listUrl);
-        const listResult = await listResponse.json();
-        console.log("imconnector.list result:", JSON.stringify(listResult));
-
-        const removedConnectors: string[] = [];
-        
-        if (listResult.result) {
-          const connectorsToRemove = Object.keys(listResult.result).filter(id => {
-            const idLower = id.toLowerCase();
-            return idLower.includes("thoth") || idLower.includes("whatsapp");
-          });
-
-          console.log("Connectors to remove:", connectorsToRemove);
-
-          for (const connectorId of connectorsToRemove) {
-            console.log(`Unregistering connector: ${connectorId}`);
-            const unregisterUrl = `${bitrixApiUrl}imconnector.unregister`;
-            try {
-              const unregisterResponse = await fetch(unregisterUrl, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ ID: connectorId }),
-              });
-              const unregisterResult = await unregisterResponse.json();
-              console.log(`Unregister ${connectorId} result:`, JSON.stringify(unregisterResult));
-              
-              if (unregisterResult.result || !unregisterResult.error) {
-                removedConnectors.push(connectorId);
-              }
-            } catch (e) {
-              console.log(`Failed to unregister ${connectorId}:`, e);
-            }
-          }
-        }
-
-        return new Response(
-          JSON.stringify({ 
-            success: true, 
-            removed_count: removedConnectors.length,
-            removed_connectors: removedConnectors,
-            message: `${removedConnectors.length} conector(es) removido(s)`,
-          }),
-          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      } else {
-        return new Response(
-          JSON.stringify({ error: "Integração não possui token OAuth nem webhook configurado" }),
+          JSON.stringify({ error: "Integração não possui token OAuth configurado" }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
+
+      // Refresh token if needed
+      const accessToken = await refreshBitrixToken(integration, supabase);
+      if (!accessToken) {
+        return new Response(
+          JSON.stringify({ error: "Falha ao obter token de acesso" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      
+      const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
+      
+      // List all connectors
+      console.log("Listing connectors...");
+      const listUrl = `${clientEndpoint}imconnector.list?auth=${accessToken}`;
+      const listResponse = await fetch(listUrl);
+      const listResult = await listResponse.json();
+      console.log("imconnector.list result:", JSON.stringify(listResult));
+
+      const removedConnectors: string[] = [];
+      
+      if (listResult.result) {
+        const connectorsToRemove = Object.keys(listResult.result).filter(id => {
+          const idLower = id.toLowerCase();
+          return idLower.includes("thoth") || idLower.includes("whatsapp");
+        });
+
+        console.log("Connectors to remove:", connectorsToRemove);
+
+        for (const connectorId of connectorsToRemove) {
+          console.log(`Unregistering connector: ${connectorId}`);
+          const unregisterUrl = `${clientEndpoint}imconnector.unregister?auth=${accessToken}`;
+          try {
+            const unregisterResponse = await fetch(unregisterUrl, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ ID: connectorId }),
+            });
+            const unregisterResult = await unregisterResponse.json();
+            console.log(`Unregister ${connectorId} result:`, JSON.stringify(unregisterResult));
+            
+            if (unregisterResult.result || !unregisterResult.error) {
+              removedConnectors.push(connectorId);
+            }
+          } catch (e) {
+            console.log(`Failed to unregister ${connectorId}:`, e);
+          }
+        }
+      }
+
+      return new Response(
+        JSON.stringify({ 
+          success: true, 
+          removed_count: removedConnectors.length,
+          removed_connectors: removedConnectors,
+          message: `${removedConnectors.length} conector(es) removido(s)`,
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
     }
 
-    // Validate that we have at least member_id or webhook_url
-    if (!member_id && !webhook_url) {
-      console.error("No member_id or webhook_url provided");
+    // Validate that we have member_id for OAuth mode
+    if (!member_id) {
+      console.error("No member_id provided");
       return new Response(
-        JSON.stringify({ error: "member_id ou webhook_url é obrigatório" }),
+        JSON.stringify({ error: "member_id é obrigatório para registro via Marketplace" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
     console.log("Registering Bitrix24 connector:", { connector_id, workspace_id, member_id, instance_id });
 
-    let bitrixApiUrl: string = "";
+    // Find integration by member_id
     let integration: any = null;
-    let useWebhookMode = false;
-
-    // Mode 1: Using webhook_url directly (local apps - preferred for local installations)
-    if (webhook_url) {
-      console.log("=== WEBHOOK MODE (Local App) ===");
-      console.log("Using webhook_url:", webhook_url);
-      
-      // Ensure webhook URL ends with /
-      bitrixApiUrl = webhook_url.endsWith("/") ? webhook_url : `${webhook_url}/`;
-      useWebhookMode = true;
-
-      // Try to find existing integration by webhook_url or workspace_id
-      if (workspace_id) {
-        const { data: existingIntegration } = await supabase
-          .from("integrations")
-          .select("*")
-          .eq("type", "bitrix24")
-          .eq("workspace_id", workspace_id)
-          .maybeSingle();
-
-        if (existingIntegration) {
-          integration = existingIntegration;
-          console.log("Found integration by workspace_id:", integration.id);
-        }
-      }
-    }
-    // Mode 2: Using member_id (OAuth app installation - Marketplace apps)
-    else if (member_id) {
-      console.log("=== OAUTH MODE (Marketplace App) ===");
-      console.log("Looking for integration with member_id:", member_id);
-      
-      // Try multiple search strategies (same as bitrix24-install)
-      let existingIntegration = null;
-      
-      // Strategy 1: Search by config->>member_id
-      console.log("Strategy 1: Searching by config->>member_id...");
-      const { data: byMemberId } = await supabase
+    
+    const { data: byMemberId } = await supabase
+      .from("integrations")
+      .select("*")
+      .eq("type", "bitrix24")
+      .eq("config->>member_id", member_id)
+      .maybeSingle();
+    
+    if (byMemberId) {
+      integration = byMemberId;
+    } else {
+      const { data: byDomain } = await supabase
         .from("integrations")
         .select("*")
         .eq("type", "bitrix24")
-        .eq("config->>member_id", member_id)
+        .eq("config->>domain", member_id)
         .maybeSingle();
       
-      if (byMemberId) {
-        existingIntegration = byMemberId;
-        console.log("Found by member_id:", byMemberId.id);
-      }
-      
-      // Strategy 2: Search by config->>domain
-      if (!existingIntegration) {
-        console.log("Strategy 2: Searching by config->>domain...");
-        const { data: byDomain } = await supabase
-          .from("integrations")
-          .select("*")
-          .eq("type", "bitrix24")
-          .eq("config->>domain", member_id)
-          .maybeSingle();
-        
-        if (byDomain) {
-          existingIntegration = byDomain;
-          console.log("Found by domain:", byDomain.id);
-        }
-      }
-      
-      // Strategy 3: Search with LIKE for partial match
-      if (!existingIntegration) {
-        console.log("Strategy 3: Searching with LIKE pattern...");
+      if (byDomain) {
+        integration = byDomain;
+      } else {
         const { data: byLike } = await supabase
           .from("integrations")
           .select("*")
           .eq("type", "bitrix24")
           .or(`config->>member_id.ilike.%${member_id}%,config->>domain.ilike.%${member_id}%`)
           .maybeSingle();
-        
-        if (byLike) {
-          existingIntegration = byLike;
-          console.log("Found by LIKE pattern:", byLike.id);
-        }
+        integration = byLike;
       }
-
-      if (!existingIntegration) {
-        console.error("No integration found for member_id:", member_id);
-        console.log("Searched: member_id, domain, and LIKE patterns");
-        return new Response(
-          JSON.stringify({ error: "Integração Bitrix24 não encontrada. Por favor, reinstale o aplicativo." }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      console.log("Found integration:", existingIntegration.id, "workspace:", existingIntegration.workspace_id);
-      console.log("Integration config keys:", Object.keys(existingIntegration.config || {}));
-      integration = existingIntegration;
-
-      // Check if this is a local app with webhook_url
-      if (integration.config?.webhook_url && integration.config?.is_local_app) {
-        console.log("Integration is a local app, switching to webhook mode");
-        bitrixApiUrl = integration.config.webhook_url;
-        bitrixApiUrl = bitrixApiUrl.endsWith("/") ? bitrixApiUrl : `${bitrixApiUrl}/`;
-        useWebhookMode = true;
-      } else {
-        // OAuth mode - need to refresh token
-        const accessToken = await refreshBitrixToken(integration, supabase);
-        
-        if (!accessToken) {
-          // Check if we have a webhook_url as fallback
-          if (integration.config?.webhook_url) {
-            console.log("OAuth token failed, falling back to webhook_url");
-            bitrixApiUrl = integration.config.webhook_url;
-            bitrixApiUrl = bitrixApiUrl.endsWith("/") ? bitrixApiUrl : `${bitrixApiUrl}/`;
-            useWebhookMode = true;
-          } else {
-            console.error("Failed to get access token and no webhook fallback for integration:", integration.id);
-            return new Response(
-              JSON.stringify({ 
-                error: "Falha ao obter token de acesso. Para aplicações locais, configure a URL do webhook de saída.",
-                needs_webhook: true 
-              }),
-              { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-            );
-          }
-        } else {
-          const clientEndpoint = integration.config.client_endpoint || `https://${integration.config.domain}/rest/`;
-          bitrixApiUrl = clientEndpoint;
-        }
-      }
-      
-      console.log("Using Bitrix API URL:", bitrixApiUrl);
     }
+
+    if (!integration) {
+      console.error("No integration found for member_id:", member_id);
+      return new Response(
+        JSON.stringify({ error: "Integração Bitrix24 não encontrada. Por favor, reinstale o aplicativo." }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    console.log("Found integration:", integration.id);
+
+    // Get access token (OAuth mode)
+    const accessToken = await refreshBitrixToken(integration, supabase);
+    
+    if (!accessToken) {
+      console.error("Failed to get access token for integration:", integration.id);
+      return new Response(
+        JSON.stringify({ 
+          error: "Falha ao obter token de acesso. Por favor, reinstale o aplicativo via Marketplace.",
+        }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const clientEndpoint = integration.config.client_endpoint || `https://${integration.config.domain}/rest/`;
 
     // Use a FIXED connector_id to avoid duplicates
     const finalConnectorId = connector_id || "thoth_whatsapp";
     console.log("Using fixed connector ID:", finalConnectorId);
 
-    // For webhook mode (local apps), we skip imconnector.register as it requires OAuth app permissions
-    // Webhooks are meant for direct API access, not for registering connectors
-    if (useWebhookMode) {
-      console.log("=== WEBHOOK MODE: Skipping imconnector.register (not supported) ===");
-      console.log("Webhooks cannot register connectors - saving configuration only");
-
-      // Just update/save the integration configuration
-      const configUpdate = {
-        webhook_url: webhook_url,
-        connector_id: finalConnectorId,
-        instance_id: instance_id || null,
-        registered: true, // Mark as configured (not registered in Bitrix24 sense)
-        is_local_app: true,
-        webhook_configured: true,
-      };
-
-      if (integration_id || integration?.id) {
-        const idToUpdate = integration_id || integration.id;
-        const { data: currentIntegration } = await supabase
-          .from("integrations")
-          .select("config")
-          .eq("id", idToUpdate)
-          .single();
-
-        await supabase
-          .from("integrations")
-          .update({ 
-            config: { ...currentIntegration?.config, ...configUpdate }, 
-            is_active: true 
-          })
-          .eq("id", idToUpdate);
-      } else if (workspace_id) {
-        await supabase.from("integrations").insert({
-          workspace_id,
-          type: "bitrix24",
-          name: "Bitrix24",
-          config: configUpdate,
-          is_active: true,
-        });
-      }
-
-      return new Response(
-        JSON.stringify({ 
-          success: true, 
-          message: "Webhook configurado com sucesso. Mensagens serão enviadas diretamente via API REST.",
-          connector_id: finalConnectorId,
-          mode: "webhook",
-          note: "Para integrações via webhook, o envio de mensagens funciona diretamente pela API crm.* - o imconnector não é utilizado.",
-        }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // OAuth mode - can register connector in Contact Center
     console.log("=== OAUTH MODE: Registering imconnector for Contact Center ===");
 
-    // Get access token
-    const accessToken = integration.config.access_token;
-    if (!accessToken) {
-      return new Response(
-        JSON.stringify({ error: "Token de acesso não encontrado. Reinstale o aplicativo." }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // 0. AUTOMATIC CLEANUP: Remove ALL existing Thoth/WhatsApp connectors to avoid duplicates
-    console.log("=== AUTOMATIC CONNECTOR CLEANUP ===");
+    // Register the connector
+    const registerUrl = `${clientEndpoint}imconnector.register?auth=${accessToken}`;
+    console.log("Calling imconnector.register...");
     
-    // List all existing connectors
-    const listUrl = `${bitrixApiUrl}imconnector.list?auth=${accessToken}`;
-    try {
-      const listResponse = await fetch(listUrl);
-      const listResult = await listResponse.json();
-      console.log("imconnector.list result:", JSON.stringify(listResult));
-      
-      if (listResult.result) {
-        // Find all connectors with "thoth" or "whatsapp" in the name
-        const connectorsToRemove = Object.keys(listResult.result).filter(id => {
-          const idLower = id.toLowerCase();
-          return idLower.includes("thoth") || idLower.includes("whatsapp");
-        });
-        
-        console.log("Connectors to remove:", connectorsToRemove);
-        
-        // Remove each one before registering the new one
-        for (const connectorIdToRemove of connectorsToRemove) {
-          console.log(`Cleaning up connector: ${connectorIdToRemove}`);
-          
-          // First deactivate on all lines (0-10)
-          for (let line = 0; line <= 10; line++) {
-            try {
-              await fetch(`${bitrixApiUrl}imconnector.deactivate?auth=${accessToken}`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ CONNECTOR: connectorIdToRemove, LINE: line })
-              });
-            } catch (e) {
-              // Ignore deactivation errors
-            }
-          }
-          
-          // Then unregister
-          try {
-            const unregisterResponse = await fetch(`${bitrixApiUrl}imconnector.unregister?auth=${accessToken}`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ ID: connectorIdToRemove }),
-            });
-            const unregisterResult = await unregisterResponse.json();
-            console.log(`Unregistered ${connectorIdToRemove}:`, JSON.stringify(unregisterResult));
-          } catch (e) {
-            console.log(`Failed to unregister ${connectorIdToRemove}:`, e);
-          }
-        }
-      }
-    } catch (e) {
-      console.log("Error listing connectors for cleanup:", e);
-    }
-    
-    // Also clean up duplicate events before binding new ones (both old webhook and events URLs)
-    console.log("=== CLEANING DUPLICATE EVENTS ===");
-    
-    try {
-      const eventsListUrl = `${bitrixApiUrl}event.get?auth=${accessToken}`;
-      const eventsResponse = await fetch(eventsListUrl);
-      const eventsResult = await eventsResponse.json();
-      
-      if (eventsResult.result) {
-        // Clean up events pointing to either old webhook or current events URL
-        const eventsToUnbind = eventsResult.result.filter((event: any) => 
-          event.handler?.includes("bitrix24-webhook") || event.handler?.includes("bitrix24-events")
-        );
-        
-        console.log(`Found ${eventsToUnbind.length} Thoth events to clean up`);
-        
-        for (const event of eventsToUnbind) {
-          try {
-            await fetch(`${bitrixApiUrl}event.unbind?auth=${accessToken}`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                event: event.event,
-                handler: event.handler
-              })
-            });
-            console.log(`Unbound event: ${event.event}`);
-          } catch (e) {
-            // Ignore unbind errors
-          }
-        }
-      }
-    } catch (e) {
-      console.log("Error cleaning up events:", e);
-    }
-    
-    console.log("=== CLEANUP COMPLETE, REGISTERING NEW CONNECTOR ===");
-
-    // 1. Register connector in Bitrix24 (this makes it appear in Contact Center)
-    // CRITICAL: Use proper icon format with COLOR, SIZE, POSITION for Marketplace compliance
-    const whatsappSvgIcon = "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSIjMjVENDY2Ij48cGF0aCBkPSJNMTcuNDcyIDYuMDA1QzE1Ljc4NCA0LjMxNSAxMy41MTIgMy4zODQgMTEuMTUgMy4zODRjLTQuOTQzIDAtOC45NjYgNC4wMjMtOC45NjYgOC45NjYgMCAxLjU4MS40MTMgMy4xMjcgMS4xOTggNC40ODlMMi40MTYgMjEuNjE2bDUuMjEyLTEuMzY4Yy4yNjEuMTQzIDQuNDcgMi41NzIgOC4wNTEuNjgxIDMuNjYxLTEuOTMzIDUuNzUxLTUuODQ1IDUuNzUxLTEwLjE3IDAtMi4zNjItLjkyLTQuNTg0LTIuNTktNi4yNTR6bS0xMS4yMjMgMTAuNjE0bC0uMDk0LS4wNDlIMy4xNDhsLjI4OS0xLjA1NS0uMTg3LS4yOTdjLS44MTQtMS4yOTQtMS4yNDQtMi43ODUtMS4yNDQtNC4zMTggMC00LjQ3NCAzLjY0LTguMTE0IDguMTE0LTguMTE0IDIuMTY2IDAgNC4yMDEuODQzIDUuNzMzIDIuMzc1IDEuNTMyIDEuNTMyIDIuMzc1IDMuNTY3IDIuMzc1IDUuNzMzIDAgNC40NzQtMy42NCA4LjExNC04LjExNCA4LjExNC0xLjQ3MyAwLTIuOTE5LS40LTQuMTc4LTEuMTUzbC0uMjk5LS4xNzctLjMxMy4wODItMi4xNjEuNTY2LjU1NC0yLjAyOHoiLz48cGF0aCBkPSJNMTUuMjk1IDE0LjY0M2MtLjI2MS0uMTMtMS41NDYtLjc2Mi0xLjc4NS0uODQ5LS4yNDEtLjA4Ny0uNDE1LS4xMzEtLjU4OS4xMy0uMTc0LjI2MS0uNjc2Ljg0OS0uODI4IDEuMDI0LS4xNTIuMTc0LS4zMDQuMTk2LS41NjUuMDY1cy0xLjEwMy0uNDA2LTIuMTAyLTEuMjk3Yy0uNzc2LS42OTItMS4zMDItMS41NDYtMS40NTQtMS44MDctLjE1Mi0uMjYxLS4wMTYtLjQwMi4xMTQtLjUzMi4xMTktLjExNy4yNjEtLjMwNC4zOTEtLjQ1Ni4xMy0uMTUyLjE3NC0uMjYxLjI2MS0uNDM1cy4wNDMtLjMyNi0uMDIyLS40NTZjLS4wNjUtLjEzLS41ODktMS40Mi0uODA2LTEuOTQ2LS4yMTMtLjUxMS0uNDI5LS40NDEtLjU4OS0uNDQ5LS4xNTItLjAwOC0uMzI2LS4wMS0uNS0uMDFzLS40NTYuMDY1LS42OTYuMzI2Yy0uMjQxLjI2LS45MTguODk3LS45MTggMi4xODhzLjk0IDIuNTM0IDEuMDcxIDIuNzA4YzEuMDMzIDEuMzc1IDIuNDcgMi4xNjIgMy41MjYgMi41NjguNDY3LjE4Ljg0MS4yODggMS4xMjkuMzY5LjQ3NC4xMzQuOTA2LjExNSAxLjI0Ny4wNy4zOC0uMDUuMTcxLS4yMDkgMS4xNDQtLjk4LjIzOS0uMTk3LjQ4NC0uMTgzLjgxMi0uMTEuMzI4LjA3NCAxLjMyMi41NTEgMS41NDguNjUxLjIyNi4xLjM3Ny4xNDguNDMzLjIzLjA1Ni4wODMuMDU2LjQ3OS0uMTI5Ljk0MXoiLz48L3N2Zz4=";
-    
-    const registerPayload = {
-      ID: finalConnectorId,
-      NAME: "Thoth WhatsApp",
-      ICON: {
-        DATA_IMAGE: `data:image/svg+xml;base64,${whatsappSvgIcon}`,
-        COLOR: "#25D366",
-        SIZE: "90%",
-        POSITION: "center"
-      },
-      // Point to dedicated PLACEMENT_HANDLER for Marketplace compliance
-      PLACEMENT_HANDLER: `${supabaseUrl}/functions/v1/bitrix24-connector-settings`,
-    };
-
-    console.log("Calling imconnector.register with:", JSON.stringify(registerPayload));
-
-    const registerUrl = `${bitrixApiUrl}imconnector.register?auth=${accessToken}`;
-
     const registerResponse = await fetch(registerUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(registerPayload),
+      body: JSON.stringify({
+        ID: finalConnectorId,
+        NAME: "Thoth WhatsApp",
+        ICON: {
+          DATA_IMAGE: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAAACXBIWXMAAAsTAAALEwEAmpwYAAADhklEQVR4nO2ZW4hNURjHf2OMMYZxGYYZMi4PDMaDiKTkRuSWSx4oL0peJC9ueJEXJZIXJZLkgSTJg9zKNS+6lMsLuYu4ZGacMWbQ5//0f9i2s/fea59zzln7R6e99t5rfWv9v/XdhzCEIQxByOIQmtCGEFqRQCeyGI0EhtKJCIYhxhBaHcE/xBkIwQsJqONYzs+wH9gNPNM97gJ7gMNIYgISaMUnAQsMNuuBfUA18A7YAngCNqJRh01CBLJ5zE1gBfAB2Ap8Bm6j0Y2OaUQjoI3xAjoBbNJn3AM6EMEWJNBVvwR0YAEPgE1AvjYeCJ6BEN+N7nUSGMSI96MT6NW0wONA0/qkRDThBNqQQxNSsJjxwC7gKXAWqNKxR8D5qAkYiV7kMQbYBTyJWQJRYyLwEqgE7gNXYhZA1BgPdAIL/Tgx/gFDEh3IBjaHsQ9wWtuOqIFlEJLDwAJgYxgBtOvYLeBqtOEnJQR0AbYDWb6PpPD8gYFKYAuwyuWg2cBGYJ8dYAvgog5yFNjiJsAJYCNwDJgNvEP6xPb9xQJuA4cSmECvq+2N7gSK4o/xOAAMRyQfkz7pD9iJTgBuBs4hkdQNqDgPBSZGpYKjSKLUiwNWuH3jGvA0bCVfBuYC9cC0oG9OASuBNj1+Hzgb8R8kxCDgKDAKmAM8cBPIbWCy9h8FxkYsgMFAL2AVMBd46CZAA1ChB4bxNYL/SILjQC/gk0eiNOhLVyKLJz+Rww6gN1AQ8aXYYKAbsBC44ibAOWC5djxBMqUeGI5MGPOwg7H2eS6+R7IvyI7twHRgWdBLVgM7gKnAfqfXnRw+D1zo78FNSD0e1AtjE+oK7PWymDrNvgFcQKdDvZrxjS9fmAbUSv8kMAc4AVQE/RNPA2OR+wdwDFgNTPHihDVID7AT2KAOXxH8pzEPeIxsAhuBYuA8cAaYj/RJ5wIfI/6TjFADlgJ7gz6yAimQw5EuvzC8QyZ0o9YPjgPfkU2nE3BcJ0qNQBGwHpgQ1Mv5uu/z0G/n9fsooA2oDjhJCbBGAjuFvI0mIO1HJVBO9JPkRxYBQ5AOYBLSD9YBj4J+t1CnU51ILDAZuKrjDqAmqJ8LlwKL/S5gCpKt1CA7EKgLaLMSOIQMyCrkJTAzYqMlxCJgE3Ir4J9wPrL70ga0ALeDPp+ElA5kWMjAkA+xPQghCAD/AF3FgPgqhI7fAAAAAElFTkSuQmCC"
+        },
+        PLACEMENT_HANDLER: `${supabaseUrl}/functions/v1/bitrix24-connector-settings`,
+      }),
     });
 
     const registerResult = await registerResponse.json();
     console.log("imconnector.register result:", JSON.stringify(registerResult));
 
-    if (registerResult.error && registerResult.error !== "CONNECTOR_ALREADY_EXISTS") {
-      console.error("Failed to register connector:", registerResult);
-      return new Response(
-        JSON.stringify({ 
-          error: `Erro ao registrar conector: ${registerResult.error_description || registerResult.error}`,
-          hint: "Verifique se o aplicativo tem as permissões: imconnector, imopenlines, im, crm, user"
-        }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+    // Even if registration fails (e.g., already exists), try to activate
+    if (registerResult.error && !registerResult.error.includes("already")) {
+      console.log("Registration error (non-duplicate):", registerResult.error);
     }
 
-    // 2. ACTIVATE connector immediately with default line (LINE: 2)
-    // This ensures "Setup concluído" in Bitrix24 Contact Center
-    // IMPORTANT: Use LINE 2 as that's where the "Thoth whatsapp" channel is configured
-    const defaultLineId = 2; // Default to LINE 2 where "Thoth whatsapp" is configured
-    
-    console.log("=== ACTIVATING CONNECTOR IMMEDIATELY ===");
-    console.log("Using connector ID:", finalConnectorId);
-    console.log("Target LINE:", defaultLineId);
-    
-    // CRITICAL: Use bitrix24-events (PUBLIC) for receiving Bitrix24 events
-    // Bitrix24 documentation states event handlers must use clean URLs
-    const cleanWebhookUrl = `${supabaseUrl}/functions/v1/bitrix24-events`;
-    
-    // Call imconnector.activate
-    const activateUrl = `${bitrixApiUrl}imconnector.activate?auth=${accessToken}`;
+    // Activate the connector on line 1
+    const activateUrl = `${clientEndpoint}imconnector.activate?auth=${accessToken}`;
     console.log("Calling imconnector.activate...");
-    console.log("  CONNECTOR:", finalConnectorId);
-    console.log("  LINE:", defaultLineId);
-    console.log("  ACTIVE:", 1);
     
     const activateResponse = await fetch(activateUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         CONNECTOR: finalConnectorId,
-        LINE: defaultLineId,
-        ACTIVE: 1
-      })
+        LINE: 1,
+        ACTIVE: 1,
+      }),
     });
+
     const activateResult = await activateResponse.json();
     console.log("imconnector.activate result:", JSON.stringify(activateResult));
+
+    // Set connector data with webhook URL
+    const eventsUrl = `${supabaseUrl}/functions/v1/bitrix24-events`;
+    const dataSetUrl = `${clientEndpoint}imconnector.connector.data.set?auth=${accessToken}`;
     
-    // 3. Set connector data with CLEAN URLs (no query params)
-    console.log("Setting connector data with clean webhook URL...");
-    const dataSetUrl = `${bitrixApiUrl}imconnector.connector.data.set?auth=${accessToken}`;
+    console.log("Calling imconnector.connector.data.set...");
     
     const dataSetResponse = await fetch(dataSetUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         CONNECTOR: finalConnectorId,
-        LINE: defaultLineId,
+        LINE: 1,
         DATA: {
-          id: `${finalConnectorId}_line_${defaultLineId}`,
-          url: cleanWebhookUrl,
-          url_im: cleanWebhookUrl,
-          name: "Thoth WhatsApp"
-        }
-      })
+          id: `${finalConnectorId}_line_1`,
+          url: eventsUrl,
+          url_im: eventsUrl,
+          name: "Thoth WhatsApp",
+        },
+      }),
     });
+
     const dataSetResult = await dataSetResponse.json();
     console.log("imconnector.connector.data.set result:", JSON.stringify(dataSetResult));
 
-    // 3a. Verify activation via imopenlines.config.list.get
-    console.log("=== VERIFYING ACTIVATION STATUS ===");
-    const configListUrl = `${bitrixApiUrl}imopenlines.config.list.get?auth=${accessToken}`;
-    
-    let connectorActive = false;
-    try {
-      const configListResponse = await fetch(configListUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({})
-      });
-      const configListResult = await configListResponse.json();
-      console.log("imopenlines.config.list.get result:", JSON.stringify(configListResult));
-
-      // Find our line in the results
-      if (configListResult.result && Array.isArray(configListResult.result)) {
-        const ourLine = configListResult.result.find((line: any) => 
-          String(line.ID) === String(defaultLineId)
-        );
-        
-        if (ourLine) {
-          // Check both ACTIVE field and connector_active field
-          // Note: connector_active may be boolean true, string "true", or number 1
-          connectorActive = ourLine.ACTIVE === "Y" || 
-                           ourLine.connector_active === true || 
-                           ourLine.connector_active === "true" ||
-                           ourLine.connector_active === 1;
-          console.log(`Line ${defaultLineId} verification:`);
-          console.log(`  ACTIVE field: ${ourLine.ACTIVE}`);
-          console.log(`  connector_active field: ${ourLine.connector_active}`);
-          console.log(`  Final status: ${connectorActive ? "ACTIVE" : "INACTIVE"}`);
-        } else {
-          console.log(`Line ${defaultLineId} not found in config list - may need manual activation`);
-        }
-      }
-    } catch (verifyError) {
-      console.error("Error verifying connector status:", verifyError);
-    }
-
-    // 4. Bind events to receive messages from Bitrix24 operators
-    // CRITICAL: Use CLEAN URL without query parameters
-    console.log("Binding events with CLEAN webhook URL:", cleanWebhookUrl);
-    
+    // Bind events
     const events = [
-      "OnImConnectorMessageAdd",      // When operator sends message
-      "OnImConnectorDialogStart",     // When dialog starts
-      "OnImConnectorDialogFinish",    // When dialog finishes
-      "OnImConnectorStatusDelete",    // When connector is removed
+      "OnImConnectorMessageAdd",
+      "OnImConnectorDialogStart", 
+      "OnImConnectorDialogFinish",
     ];
 
-    for (const event of events) {
-      const bindUrl = `${bitrixApiUrl}event.bind?auth=${accessToken}`;
-
-      const bindResponse = await fetch(bindUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          event: event,
-          handler: cleanWebhookUrl, // CLEAN URL - no query params
-        }),
-      });
-      const bindResult = await bindResponse.json();
-      console.log(`event.bind ${event} result:`, JSON.stringify(bindResult));
+    for (const eventName of events) {
+      try {
+        await fetch(`${clientEndpoint}event.bind?auth=${accessToken}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            event: eventName,
+            handler: eventsUrl,
+          }),
+        });
+        console.log(`Event ${eventName} bound`);
+      } catch (e) {
+        console.error(`Error binding ${eventName}:`, e);
+      }
     }
 
-    // 5. Update integration in database with registration details
-    const activated = !activateResult.error && connectorActive;
-    const configUpdate = {
+    // Update integration config
+    const updatedConfig = {
+      ...integration.config,
       connector_id: finalConnectorId,
-      instance_id: instance_id || null,
+      instance_id: instance_id || integration.config.instance_id,
       registered: true,
-      activated: activated,
-      activated_line_id: activated ? defaultLineId : null,
-      connector_active: connectorActive,
-      events_url: cleanWebhookUrl,
-      line_id: String(defaultLineId),
-      activation_verified: true,
-      last_activation_check: new Date().toISOString(),
+      registered_at: new Date().toISOString(),
+      activated: !activateResult.error,
+      activated_line_id: 1,
     };
 
-    if (integration_id || integration?.id) {
-      const idToUpdate = integration_id || integration.id;
-      const { data: currentIntegration } = await supabase
-        .from("integrations")
-        .select("config")
-        .eq("id", idToUpdate)
-        .single();
-
-      await supabase
-        .from("integrations")
-        .update({ 
-          config: { ...currentIntegration?.config, ...configUpdate }, 
-          is_active: true 
-        })
-        .eq("id", idToUpdate);
-    } else if (workspace_id) {
-      await supabase.from("integrations").insert({
-        workspace_id,
-        type: "bitrix24",
-        name: "Bitrix24",
-        config: configUpdate,
-        is_active: true,
-      });
-    }
+    await supabase
+      .from("integrations")
+      .update({
+        config: updatedConfig,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", integration.id);
 
     return new Response(
       JSON.stringify({ 
         success: true, 
-        message: activated 
-          ? "Conector registrado E ATIVADO com sucesso no Contact Center!" 
-          : "Conector registrado mas ativação pendente. Use 'Ativar Manualmente' na interface.",
+        message: "Conector registrado e ativado via Marketplace OAuth",
         connector_id: finalConnectorId,
-        events_url: cleanWebhookUrl,
-        mode: "oauth",
-        activated: activated,
-        connector_active: connectorActive,
-        line_id: defaultLineId,
-        activate_result: activateResult,
-        data_set_result: dataSetResult,
-        status_verification: connectorActive ? "VERIFIED_ACTIVE" : "PENDING_MANUAL_ACTIVATION",
-        next_steps: activated 
-          ? "O conector está ativo na LINE 2! Teste enviando uma mensagem pelo WhatsApp."
-          : "Vá em Contact Center → Thoth WhatsApp → Continuar para finalizar a configuração",
+        registered: !registerResult.error || registerResult.error.includes("already"),
+        activated: !activateResult.error,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
+
   } catch (error) {
     console.error("Bitrix24 register error:", error);
     const errorMessage = error instanceof Error ? error.message : "Unknown error";

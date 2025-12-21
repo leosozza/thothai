@@ -32,10 +32,8 @@ async function refreshBitrixToken(integration: any, supabase: any): Promise<stri
     const data = await response.json();
 
     if (data.access_token) {
-      // Calculate new expiration (Bitrix24 tokens typically last 1 hour)
       const expiresAt = new Date(Date.now() + (data.expires_in || 3600) * 1000).toISOString();
 
-      // Update integration with new tokens
       await supabase
         .from("integrations")
         .update({
@@ -67,10 +65,10 @@ serve(async (req) => {
 
   try {
     const {
-      type, // "delivery" | "reading" | "typing"
+      type,
       integration_id,
       contact_phone,
-      message_ids, // Array of Bitrix24 message IDs
+      message_ids,
       instance_id,
     } = await req.json();
 
@@ -90,7 +88,6 @@ serve(async (req) => {
         .single();
       integration = data;
     } else if (instance_id) {
-      // Find integration by instance
       const { data: instance } = await supabase
         .from("instances")
         .select("workspace_id")
@@ -119,49 +116,36 @@ serve(async (req) => {
 
     const config = integration.config as Record<string, unknown>;
     
-    // Determine API endpoint
-    let apiEndpoint: string;
-    let accessToken: string | null = null;
-
-    if (config.client_endpoint && config.access_token) {
-      // OAuth mode
-      accessToken = await refreshBitrixToken(integration, supabase);
-      if (!accessToken) {
-        return new Response(
-          JSON.stringify({ success: false, error: "Failed to get valid access token" }),
-          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-      apiEndpoint = config.client_endpoint as string;
-    } else if (config.webhook_url) {
-      // Webhook mode
-      apiEndpoint = config.webhook_url as string;
-    } else {
-      console.error("No valid Bitrix24 API endpoint configured");
+    // OAuth mode only
+    if (!config.client_endpoint || !config.access_token) {
+      console.error("No OAuth configuration found");
       return new Response(
-        JSON.stringify({ success: false, error: "No valid API endpoint" }),
+        JSON.stringify({ success: false, error: "No valid OAuth configuration" }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
+    const accessToken = await refreshBitrixToken(integration, supabase);
+    if (!accessToken) {
+      return new Response(
+        JSON.stringify({ success: false, error: "Failed to get valid access token" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+    
+    const apiEndpoint = config.client_endpoint as string;
     const connectorId = config.connector_id || "thoth_whatsapp";
     const lineId = config.line_id || "1";
 
-    // Build the URL with auth if using OAuth
     const buildUrl = (method: string) => {
       const baseUrl = apiEndpoint.endsWith("/") ? apiEndpoint : `${apiEndpoint}/`;
-      if (accessToken) {
-        return `${baseUrl}${method}?auth=${accessToken}`;
-      }
-      return `${baseUrl}${method}`;
+      return `${baseUrl}${method}?auth=${accessToken}`;
     };
 
     let result;
 
     switch (type) {
       case "delivery": {
-        // Send delivery status for messages
-        // imconnector.send.status.delivery
         console.log("Sending delivery status to Bitrix24");
 
         const url = buildUrl("imconnector.send.status.delivery");
@@ -183,8 +167,6 @@ serve(async (req) => {
       }
 
       case "reading": {
-        // Send read status for messages
-        // imconnector.send.status.reading
         console.log("Sending reading status to Bitrix24");
 
         const url = buildUrl("imconnector.send.status.reading");
@@ -206,9 +188,7 @@ serve(async (req) => {
       }
 
       case "typing": {
-        // Send typing indicator
-        // No standard Bitrix24 method for this, but we log it
-        console.log("Typing indicator from WhatsApp - no Bitrix24 equivalent");
+        console.log("Typing indicator - no Bitrix24 equivalent");
         result = { success: true, message: "Typing indicator not supported" };
         break;
       }

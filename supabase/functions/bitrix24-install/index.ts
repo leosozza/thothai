@@ -33,7 +33,7 @@ serve(async (req) => {
         
         const domain = oauthState;
 
-        // Find integration with OAuth credentials (two sequential queries for JSONB)
+        // Find integration with OAuth credentials
         let integration = null;
         const { data: byMemberId1 } = await supabase
           .from("integrations")
@@ -138,7 +138,7 @@ serve(async (req) => {
       const searchValue = queryMemberId || queryDomain;
 
       if (searchValue) {
-        // Try to find integration by member_id or domain (two sequential queries for JSONB)
+        // Try to find integration by member_id or domain
         let integration = null;
         const { data: byMemberId2 } = await supabase
           .from("integrations")
@@ -183,11 +183,9 @@ serve(async (req) => {
               workspace_id: integration.workspace_id,
               instances: instances,
               has_access_token: !!integration.config?.access_token,
-              // OAuth config status
               has_oauth_config: !!(integration.config?.client_id && integration.config?.client_secret),
               client_id: integration.config?.client_id || null,
               oauth_pending: integration.config?.oauth_pending || false,
-              // Auto setup status - CRITICAL for frontend to detect connected state
               auto_setup_complete: integration.config?.auto_setup_completed || false,
               connector_active: integration.config?.activated || false,
             }),
@@ -201,7 +199,7 @@ serve(async (req) => {
           JSON.stringify({ 
             found: false,
             requires_token: true,
-            instances: [], // No instances until token is validated
+            instances: [],
           }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
@@ -235,340 +233,13 @@ serve(async (req) => {
 
     console.log("Bitrix24 POST received:", JSON.stringify(body));
 
-    // ✅ HANDLE SAVE WEBHOOK (for local apps)
-    if (body.action === "save_webhook") {
-      const webhookUrl = body.webhook_url;
-      const memberId = body.member_id;
-      const domain = body.domain;
-
-      console.log("Saving webhook URL for local app:", webhookUrl, "member_id:", memberId, "domain:", domain);
-
-      if (!webhookUrl) {
-        return new Response(
-          JSON.stringify({ error: "URL do webhook é obrigatória" }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      // Extract domain from webhook URL if not provided
-      const urlDomain = domain || webhookUrl.match(/https?:\/\/([^\/]+)/)?.[1] || null;
-      const identifier = memberId || urlDomain;
-
-      if (!identifier) {
-        return new Response(
-          JSON.stringify({ error: "Não foi possível identificar o portal Bitrix24" }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      // Check if integration already exists (two sequential queries for JSONB)
-      let existingIntegration = null;
-      const { data: byMemberId3 } = await supabase
-        .from("integrations")
-        .select("*")
-        .eq("type", "bitrix24")
-        .eq("config->>member_id", identifier)
-        .maybeSingle();
-      
-      if (byMemberId3) {
-        existingIntegration = byMemberId3;
-      } else {
-        const { data: byDomain3 } = await supabase
-          .from("integrations")
-          .select("*")
-          .eq("type", "bitrix24")
-          .eq("config->>domain", urlDomain)
-          .maybeSingle();
-        existingIntegration = byDomain3;
-      }
-
-      const configData = {
-        member_id: memberId || urlDomain,
-        domain: urlDomain,
-        webhook_url: webhookUrl,
-        is_local_app: true,
-        installed: true,
-        installed_at: new Date().toISOString(),
-        registered: false,
-      };
-
-      if (existingIntegration) {
-        // Update existing integration
-        const { error: updateError } = await supabase
-          .from("integrations")
-          .update({
-            config: { ...existingIntegration.config, ...configData },
-            is_active: true,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", existingIntegration.id);
-
-        if (updateError) {
-          console.error("Error updating integration with webhook:", updateError);
-          return new Response(
-            JSON.stringify({ error: "Erro ao atualizar integração" }),
-            { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-          );
-        }
-
-        console.log("Updated existing integration with webhook URL");
-      } else {
-        // Create new integration (without workspace_id - will be linked via token)
-        const { error: insertError } = await supabase
-          .from("integrations")
-          .insert({
-            type: "bitrix24",
-            name: `Bitrix24 Local - ${urlDomain}`,
-            config: configData,
-            is_active: true,
-          });
-
-        if (insertError) {
-          console.error("Error creating integration with webhook:", insertError);
-          return new Response(
-            JSON.stringify({ error: "Erro ao criar integração" }),
-            { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-          );
-        }
-
-        console.log("Created new integration with webhook URL");
-      }
-
-      return new Response(
-        JSON.stringify({
-          success: true,
-          message: "Webhook salvo com sucesso",
-          domain: urlDomain,
-        }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // ✅ HANDLE OAUTH EXCHANGE (manual OAuth setup)
-    if (body.action === "oauth_exchange") {
-      const clientId = body.client_id;
-      const clientSecret = body.client_secret;
-      const keepExistingSecret = body.keep_existing_secret === "true";
-      const memberId = body.member_id;
-      const domain = body.domain;
-
-      console.log("OAuth exchange request:", { clientId, hasDomain: !!domain, memberId, keepExistingSecret });
-
-      if (!clientId) {
-        return new Response(
-          JSON.stringify({ error: "Client ID é obrigatório" }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      // Extract domain from memberId if needed
-      const bitrixDomain = domain || memberId;
-      if (!bitrixDomain) {
-        return new Response(
-          JSON.stringify({ error: "Domínio do Bitrix24 não identificado" }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      // Normalize domain
-      const normalizedDomain = bitrixDomain.replace(/^https?:\/\//, "").replace(/\/$/, "");
-
-      // Save OAuth credentials and create/update integration (two sequential queries for JSONB)
-      let existingIntegration = null;
-      const { data: byMemberId4 } = await supabase
-        .from("integrations")
-        .select("*")
-        .eq("type", "bitrix24")
-        .eq("config->>member_id", memberId || normalizedDomain)
-        .maybeSingle();
-      
-      if (byMemberId4) {
-        existingIntegration = byMemberId4;
-      } else {
-        const { data: byDomain4 } = await supabase
-          .from("integrations")
-          .select("*")
-          .eq("type", "bitrix24")
-          .eq("config->>domain", normalizedDomain)
-          .maybeSingle();
-        existingIntegration = byDomain4;
-      }
-
-      // Determine the client_secret to use
-      let effectiveClientSecret = clientSecret;
-      if (!clientSecret && keepExistingSecret && existingIntegration?.config?.client_secret) {
-        effectiveClientSecret = existingIntegration.config.client_secret;
-        console.log("Using existing client_secret from database");
-      }
-
-      if (!effectiveClientSecret) {
-        return new Response(
-          JSON.stringify({ error: "Client Secret é obrigatório" }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      const oauthConfig = {
-        member_id: memberId || normalizedDomain,
-        domain: normalizedDomain,
-        client_id: clientId,
-        client_secret: effectiveClientSecret,
-        oauth_pending: true,
-        installed: true,
-        installed_at: new Date().toISOString(),
-      };
-
-      if (existingIntegration) {
-        await supabase
-          .from("integrations")
-          .update({
-            config: { ...existingIntegration.config, ...oauthConfig },
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", existingIntegration.id);
-      } else {
-        await supabase
-          .from("integrations")
-          .insert({
-            type: "bitrix24",
-            name: `Bitrix24 OAuth - ${normalizedDomain}`,
-            config: oauthConfig,
-            is_active: true,
-          });
-      }
-
-      // Generate OAuth authorization URL
-      const redirectUri = `${supabaseUrl}/functions/v1/bitrix24-install`;
-      const authUrl = `https://${normalizedDomain}/oauth/authorize/?client_id=${clientId}&response_type=code&redirect_uri=${encodeURIComponent(redirectUri)}&state=${encodeURIComponent(normalizedDomain)}`;
-
-      console.log("OAuth auth URL generated:", authUrl);
-
-      return new Response(
-        JSON.stringify({
-          success: true,
-          auth_url: authUrl,
-          message: "Redirecionando para autorização OAuth",
-        }),
-        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // ✅ HANDLE OAUTH CALLBACK (authorization code exchange)
-    if (body.code || (req.method === "GET" && new URL(req.url).searchParams.has("code"))) {
-      const url = new URL(req.url);
-      const code = body.code || url.searchParams.get("code");
-      const state = body.state || url.searchParams.get("state"); // state contains domain
-
-      console.log("OAuth callback received:", { hasCode: !!code, state });
-
-      if (!code || !state) {
-        return new Response(
-          JSON.stringify({ error: "Código de autorização ou estado inválido" }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      const domain = state;
-
-      // Find integration with OAuth credentials (two sequential queries for JSONB)
-      let integration = null;
-      const { data: byMemberId5 } = await supabase
-        .from("integrations")
-        .select("*")
-        .eq("type", "bitrix24")
-        .eq("config->>member_id", domain)
-        .maybeSingle();
-      
-      if (byMemberId5) {
-        integration = byMemberId5;
-      } else {
-        const { data: byDomain5 } = await supabase
-          .from("integrations")
-          .select("*")
-          .eq("type", "bitrix24")
-          .eq("config->>domain", domain)
-          .maybeSingle();
-        integration = byDomain5;
-      }
-
-      if (!integration || !integration.config?.client_id || !integration.config?.client_secret) {
-        return new Response(
-          JSON.stringify({ error: "Integração OAuth não encontrada" }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      const clientId = integration.config.client_id;
-      const clientSecret = integration.config.client_secret;
-
-      // Exchange code for tokens
-      const tokenUrl = `https://${domain}/oauth/token/`;
-      const tokenResponse = await fetch(tokenUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          grant_type: "authorization_code",
-          client_id: clientId,
-          client_secret: clientSecret,
-          code: code,
-        }),
-      });
-
-      const tokenData = await tokenResponse.json();
-      console.log("OAuth token response:", { hasAccessToken: !!tokenData.access_token, error: tokenData.error });
-
-      if (!tokenData.access_token) {
-        return new Response(
-          JSON.stringify({ error: "Falha ao obter token de acesso", details: tokenData.error_description || tokenData.error }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      // Calculate expiration
-      const expiresIn = parseInt(tokenData.expires_in || "3600", 10);
-      const tokenExpiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
-
-      // Update integration with tokens
-      const updatedConfig = {
-        ...integration.config,
-        access_token: tokenData.access_token,
-        refresh_token: tokenData.refresh_token,
-        token_expires_at: tokenExpiresAt,
-        member_id: tokenData.member_id || integration.config.member_id,
-        client_endpoint: tokenData.client_endpoint || `https://${domain}/rest/`,
-        oauth_pending: false,
-      };
-
-      await supabase
-        .from("integrations")
-        .update({
-          config: updatedConfig,
-          is_active: true,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", integration.id);
-
-      console.log("OAuth tokens saved successfully for:", domain);
-
-      // Redirect back to setup page
-      const setupUrl = `https://chat.thoth24.com/bitrix24-setup?member_id=${encodeURIComponent(tokenData.member_id || domain)}&oauth=success`;
-      
-      return new Response(null, {
-        status: 302,
-        headers: {
-          ...corsHeaders,
-          "Location": setupUrl,
-        },
-      });
-    }
-
-    // ✅ HANDLE TOKEN VALIDATION
+    // ✅ HANDLE VALIDATE TOKEN (for linking workspace)
     if (body.action === "validate_token") {
       const token = body.token;
       const memberId = body.member_id;
       const domain = body.domain;
 
-      console.log("Validating token:", token, "for member_id:", memberId, "domain:", domain);
+      console.log("Validating token for linking:", { token, memberId, domain });
 
       if (!token) {
         return new Response(
@@ -577,96 +248,78 @@ serve(async (req) => {
         );
       }
 
-      // Find the token
+      // Find valid token
       const { data: tokenData, error: tokenError } = await supabase
         .from("workspace_tokens")
         .select("*")
-        .eq("token", token)
+        .eq("token", token.toUpperCase())
         .eq("token_type", "bitrix24")
         .eq("is_used", false)
         .gt("expires_at", new Date().toISOString())
         .maybeSingle();
 
-      if (tokenError) {
-        console.error("Token query error:", tokenError);
+      if (tokenError || !tokenData) {
+        console.error("Token not found or expired:", tokenError);
         return new Response(
-          JSON.stringify({ error: "Erro ao validar token" }),
-          { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      if (!tokenData) {
-        console.log("Token not found or expired");
-        return new Response(
-          JSON.stringify({ error: "Token inválido, expirado ou já utilizado" }),
+          JSON.stringify({ error: "Token inválido ou expirado" }),
           { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
 
-      const workspaceId = tokenData.workspace_id;
-      console.log("Token valid, workspace_id:", workspaceId);
+      console.log("Valid token found for workspace:", tokenData.workspace_id);
 
-      // Check if integration already exists (two sequential queries for JSONB)
-      let existingIntegration = null;
-      const searchMemberId = memberId || domain;
-      const searchDomain = domain || memberId;
+      // Find or create integration for this member_id/domain
+      const searchId = memberId || domain;
+      let integration = null;
       
-      const { data: byMemberId6 } = await supabase
+      const { data: byMemberId } = await supabase
         .from("integrations")
         .select("*")
         .eq("type", "bitrix24")
-        .eq("config->>member_id", searchMemberId)
+        .eq("config->>member_id", searchId)
         .maybeSingle();
       
-      if (byMemberId6) {
-        existingIntegration = byMemberId6;
+      if (byMemberId) {
+        integration = byMemberId;
       } else {
-        const { data: byDomain6 } = await supabase
+        const { data: byDomain } = await supabase
           .from("integrations")
           .select("*")
           .eq("type", "bitrix24")
-          .eq("config->>domain", searchDomain)
+          .eq("config->>domain", searchId)
           .maybeSingle();
-        existingIntegration = byDomain6;
+        integration = byDomain;
       }
 
-      if (existingIntegration) {
+      if (integration) {
         // Update existing integration with workspace_id
-        const { error: updateError } = await supabase
+        await supabase
           .from("integrations")
           .update({
-            workspace_id: workspaceId,
-            is_active: true,
+            workspace_id: tokenData.workspace_id,
             updated_at: new Date().toISOString(),
           })
-          .eq("id", existingIntegration.id);
-
-        if (updateError) {
-          console.error("Error updating integration:", updateError);
-          return new Response(
-            JSON.stringify({ error: "Erro ao atualizar integração" }),
-            { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-          );
-        }
-
-        console.log("Updated existing integration with workspace_id");
+          .eq("id", integration.id);
+        
+        console.log("Updated integration with workspace_id:", tokenData.workspace_id);
       } else {
         // Create new integration
-        const { error: insertError } = await supabase
+        const { data: newIntegration, error: insertError } = await supabase
           .from("integrations")
           .insert({
-            workspace_id: workspaceId,
+            workspace_id: tokenData.workspace_id,
             type: "bitrix24",
-            name: "Bitrix24",
+            name: `Bitrix24 - ${domain || memberId}`,
             config: {
               member_id: memberId,
               domain: domain,
               installed: true,
               installed_at: new Date().toISOString(),
-              registered: false,
             },
             is_active: true,
-          });
+          })
+          .select()
+          .single();
 
         if (insertError) {
           console.error("Error creating integration:", insertError);
@@ -676,11 +329,12 @@ serve(async (req) => {
           );
         }
 
-        console.log("Created new integration");
+        integration = newIntegration;
+        console.log("Created new integration:", integration.id);
       }
 
-      // Mark token as used ONLY AFTER integration is successfully created/updated
-      const { error: tokenUpdateError } = await supabase
+      // Mark token as used
+      await supabase
         .from("workspace_tokens")
         .update({
           is_used: true,
@@ -689,475 +343,242 @@ serve(async (req) => {
         })
         .eq("id", tokenData.id);
 
-      if (tokenUpdateError) {
-        console.error("Error marking token as used:", tokenUpdateError);
-        // Don't fail here - integration was already created successfully
-      }
-
-      // Fetch instances from the linked workspace
+      // Fetch instances for this workspace
       const { data: instances } = await supabase
         .from("instances")
         .select("id, name, phone_number, status")
-        .eq("workspace_id", workspaceId)
+        .eq("workspace_id", tokenData.workspace_id)
         .eq("status", "connected");
-
-      console.log("Returning instances for workspace:", instances?.length || 0);
-
-      // Get the integration ID for auto_setup
-      let integrationIdForSetup = existingIntegration?.id;
-      if (!integrationIdForSetup) {
-        const { data: newIntegration } = await supabase
-          .from("integrations")
-          .select("id")
-          .eq("type", "bitrix24")
-          .eq("workspace_id", workspaceId)
-          .maybeSingle();
-        integrationIdForSetup = newIntegration?.id;
-      }
 
       return new Response(
         JSON.stringify({
           success: true,
-          message: "Token validado com sucesso",
-          workspace_id: workspaceId,
+          message: "Workspace vinculado com sucesso!",
+          workspace_id: tokenData.workspace_id,
+          integration_id: integration.id,
           instances: instances || [],
-          integration_id: integrationIdForSetup, // Return integration_id for auto_setup
         }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    // ✅ HANDLE BITRIX24 EVENTS
-    const event = body.event?.toUpperCase();
+    // ✅ HANDLE BITRIX24 EVENTS (ONAPPINSTALL, ONAPPUNINSTALL, PLACEMENT, etc.)
+    const event = body.event || body.EVENT;
     const auth = body.auth || {};
+    const memberId = auth.member_id || body.member_id || auth.MEMBER_ID;
+    const domain = auth.domain || body.DOMAIN || body.domain;
 
-    console.log("=== BITRIX24 EVENT DEBUG ===");
-    console.log("Event:", event);
-    console.log("Full body:", JSON.stringify(body, null, 2));
-    console.log("Auth object:", JSON.stringify(auth, null, 2));
+    console.log("Processing Bitrix24 event:", event, "member_id:", memberId, "domain:", domain);
 
-    // ✅ SUPPORT BOTH LOCAL APPS AND MARKETPLACE APPS
-    // Marketplace apps send AUTH_ID, REFRESH_ID directly in body
-    // Local apps send access_token, refresh_token in body.auth
-    const accessToken = auth.access_token || body.AUTH_ID;
-    const refreshToken = auth.refresh_token || body.REFRESH_ID;
-    const memberId = auth.member_id || body.member_id;
-    
-    // Extract domain from SERVER_ENDPOINT for Marketplace apps
-    // Format: https://oauth.bitrix.info/rest/ -> we need to get it from another field
-    // For Marketplace, we'll need to call an API to get the actual portal domain
-    let domain = auth.domain;
-    if (!domain && body.SERVER_ENDPOINT) {
-      // Marketplace apps don't directly provide domain, but we can get it via API call
-      // For now, we'll use member_id as identifier and fetch domain later
-      domain = null; // Will be resolved below
-    }
-    
-    const clientEndpoint = auth.client_endpoint || body.SERVER_ENDPOINT;
-    const applicationToken = body.application_token || auth.application_token;
-    const expiresIn = parseInt(auth.expires_in || body.AUTH_EXPIRES || "3600", 10);
-    const placement = body.PLACEMENT;
-
-    console.log("Extracted auth data (supporting both formats):", {
-      hasAccessToken: !!accessToken,
-      hasRefreshToken: !!refreshToken,
-      domain,
-      memberId,
-      clientEndpoint,
-      hasApplicationToken: !!applicationToken,
-      expiresIn,
-      placement,
-      isMarketplaceFormat: !!body.AUTH_ID,
-    });
-
-    // ✅ HANDLE PLACEMENT: "DEFAULT" - App opened in Bitrix24 (Marketplace apps)
-    // When user opens the app, Bitrix24 sends PLACEMENT: "DEFAULT" with fresh tokens
-    if (placement === "DEFAULT" && accessToken && memberId) {
-      console.log("=== PLACEMENT DEFAULT - App opened in Bitrix24 ===");
-      
-      // Try to get portal domain via API call using the fresh tokens
-      let portalDomain = domain;
-      let portalInfo: any = {};
-      
-      if (accessToken && clientEndpoint) {
-        try {
-          // Call profile API to get portal info
-          const profileUrl = clientEndpoint.replace('/rest/', '') + '/rest/profile';
-          console.log("Fetching profile from:", profileUrl);
-          
-          const profileResponse = await fetch(`${profileUrl}?auth=${accessToken}`);
-          const profileData = await profileResponse.json();
-          console.log("Profile response:", profileData);
-          
-          if (profileData.result?.ADMIN_MODE !== undefined) {
-            portalInfo = profileData.result;
-          }
-        } catch (e) {
-          console.log("Could not fetch profile:", e);
-        }
-        
-        // Also try to get app info
-        try {
-          const appInfoUrl = `https://oauth.bitrix.info/rest/app.info?auth=${accessToken}`;
-          const appResponse = await fetch(appInfoUrl);
-          const appData = await appResponse.json();
-          console.log("App info response:", appData);
-          
-          if (appData.result?.install?.client_endpoint) {
-            const endpoint = appData.result.install.client_endpoint;
-            // Extract domain from client_endpoint: https://domain.bitrix24.com/rest/ -> domain.bitrix24.com
-            const match = endpoint.match(/https?:\/\/([^\/]+)/);
-            if (match) {
-              portalDomain = match[1];
-              console.log("Extracted domain from client_endpoint:", portalDomain);
-            }
-          }
-        } catch (e) {
-          console.log("Could not fetch app info:", e);
-        }
-      }
-
-      // Calculate token expiration
-      const tokenExpiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
-
-      // Check if integration already exists for this member_id
-      const { data: existing } = await supabase
-        .from("integrations")
-        .select("*")
-        .eq("type", "bitrix24")
-        .filter("config->>member_id", "eq", memberId)
-        .maybeSingle();
-
-      const configData = {
-        member_id: memberId,
-        domain: portalDomain || existing?.config?.domain,
-        client_endpoint: clientEndpoint || existing?.config?.client_endpoint,
-        access_token: accessToken,
-        refresh_token: refreshToken,
-        application_token: applicationToken || existing?.config?.application_token,
-        token_expires_at: tokenExpiresAt,
-        installed: true,
-        last_token_refresh: new Date().toISOString(),
-        is_marketplace_app: true,
-      };
-
-      if (existing) {
-        // Update with fresh tokens
-        console.log("Updating existing integration with fresh tokens from PLACEMENT DEFAULT");
-        await supabase
-          .from("integrations")
-          .update({
-            config: { ...existing.config, ...configData },
-            is_active: true,
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", existing.id);
-      } else {
-        // Create new integration (will be linked to workspace via token later)
-        console.log("Creating new integration from PLACEMENT DEFAULT");
-        await supabase
-          .from("integrations")
-          .insert({
-            type: "bitrix24",
-            name: `Bitrix24 Marketplace - ${portalDomain || memberId}`,
-            config: configData,
-            is_active: true,
-          });
-      }
-
-      // Return HTML page for iframe display
-      return new Response(
-        `<!DOCTYPE html>
-        <html>
-        <head>
-          <meta charset="UTF-8">
-          <title>Thoth.ai</title>
-          <script src="https://api.bitrix24.com/api/v1/"></script>
-          <style>
-            body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
-            .card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); max-width: 500px; margin: 0 auto; }
-            h2 { color: #333; margin-bottom: 10px; }
-            p { color: #666; }
-            .success { color: #4CAF50; }
-            .info { background: #e3f2fd; padding: 10px; border-radius: 4px; margin: 10px 0; }
-          </style>
-        </head>
-        <body>
-          <div class="card">
-            <h2 class="success">✓ Thoth.ai Conectado</h2>
-            <p>Aplicativo instalado com sucesso no portal ${portalDomain || memberId}.</p>
-            <div class="info">
-              <strong>Próximo passo:</strong> Vincule este portal a um workspace Thoth.ai usando um token de vinculação.
-            </div>
-            <p style="font-size: 12px; color: #999;">Member ID: ${memberId}</p>
-          </div>
-          <script>
-            if (window.BX24) {
-              BX24.init(function() {
-                BX24.installFinish();
-              });
-            }
-          </script>
-        </body>
-        </html>`,
-        { 
-          headers: { 
-            ...corsHeaders, 
-            "Content-Type": "text/html; charset=utf-8",
-            "Content-Security-Policy": "frame-ancestors 'self' https://*.bitrix24.com https://*.bitrix24.com.br https://*.bitrix24.eu https://*.bitrix24.de;",
-          } 
-        }
-      );
-    }
-
-    if (event === "ONAPPINSTALL") {
+    // ONAPPINSTALL - Marketplace app installation
+    if (event === "ONAPPINSTALL" || body.install === "true" || body.INSTALL === "Y") {
       console.log("=== ONAPPINSTALL EVENT ===");
       
-      // For Marketplace apps, domain might not be available directly
-      // We'll use memberId as primary identifier
-      if (!memberId || !accessToken) {
-        console.error("Missing required auth data for ONAPPINSTALL:", {
-          hasDomain: !!domain,
-          hasMemberId: !!memberId,
-          hasAccessToken: !!accessToken,
-        });
-        return new Response(
-          JSON.stringify({ error: "Missing required auth data" }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-
-      console.log(`Installing Bitrix24 app for domain: ${domain || 'unknown'}, member_id: ${memberId}`);
-
-      // Calculate token expiration time
+      const accessToken = auth.access_token || body.AUTH_ID;
+      const refreshToken = auth.refresh_token;
+      const clientEndpoint = auth.client_endpoint || `https://${domain}/rest/`;
+      const expiresIn = parseInt(auth.expires_in || "3600", 10);
       const tokenExpiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
 
-      // Check if integration already exists for this member_id
-      const { data: existing, error: existingError } = await supabase
-        .from("integrations")
-        .select("*")
-        .eq("type", "bitrix24")
-        .filter("config->>member_id", "eq", memberId)
-        .maybeSingle();
-
-      if (existingError) {
-        console.error("Error checking existing integration:", existingError);
+      // Find existing integration or create new one
+      let integration = null;
+      
+      if (memberId) {
+        const { data: byMemberId } = await supabase
+          .from("integrations")
+          .select("*")
+          .eq("type", "bitrix24")
+          .eq("config->>member_id", memberId)
+          .maybeSingle();
+        integration = byMemberId;
       }
-
-      console.log("Existing integration:", existing ? existing.id : "none");
+      
+      if (!integration && domain) {
+        const { data: byDomain } = await supabase
+          .from("integrations")
+          .select("*")
+          .eq("type", "bitrix24")
+          .eq("config->>domain", domain)
+          .maybeSingle();
+        integration = byDomain;
+      }
 
       const configData = {
         member_id: memberId,
-        domain: domain || existing?.config?.domain,
-        client_endpoint: clientEndpoint || `https://${domain || 'oauth.bitrix.info'}/rest/`,
+        domain: domain,
         access_token: accessToken,
         refresh_token: refreshToken,
-        application_token: applicationToken,
         token_expires_at: tokenExpiresAt,
+        client_endpoint: clientEndpoint,
         installed: true,
         installed_at: new Date().toISOString(),
-        registered: false,
-        connector_id: null,
-        line_id: null,
-        instance_id: null,
-        is_marketplace_app: !!body.AUTH_ID, // Flag to identify Marketplace apps
+        app_sid: auth.application_token || body.APP_SID,
       };
 
-      if (existing) {
-        // Update existing integration (preserve workspace_id if exists)
-        const { error: updateError } = await supabase
+      if (integration) {
+        await supabase
           .from("integrations")
           .update({
-            config: { ...existing.config, ...configData },
+            config: { ...integration.config, ...configData },
             is_active: true,
             updated_at: new Date().toISOString(),
           })
-          .eq("id", existing.id);
-
-        if (updateError) {
-          console.error("Error updating integration:", updateError);
-        } else {
-          console.log(`Updated existing Bitrix24 integration: ${existing.id}`);
-        }
-      } else {
-        // ✅ FIX: Create a new integration record even without workspace_id
-        // The workspace will be linked later via token validation
-        console.log("Creating new Bitrix24 integration (will be linked to workspace later)");
+          .eq("id", integration.id);
         
-        const { data: newIntegration, error: insertError } = await supabase
+        console.log("Updated existing integration for ONAPPINSTALL:", integration.id);
+      } else {
+        const { data: newInt, error: insertError } = await supabase
           .from("integrations")
           .insert({
             type: "bitrix24",
             name: `Bitrix24 - ${domain || memberId}`,
             config: configData,
             is_active: true,
-            // workspace_id will be null until token validation
           })
           .select()
           .single();
 
         if (insertError) {
-          console.error("Error creating new integration:", insertError);
-          // Return success anyway - Bitrix24 expects 200
+          console.error("Error creating integration:", insertError);
         } else {
-          console.log(`Created new Bitrix24 integration: ${newIntegration?.id}`);
+          integration = newInt;
+          console.log("Created new integration for ONAPPINSTALL:", integration?.id);
         }
       }
 
-      // ✅ Register placements after successful install (only if we have domain)
-      if (domain && clientEndpoint) {
-        console.log("=== REGISTERING PLACEMENTS ===");
-        const apiUrl = clientEndpoint || `https://${domain}/rest/`;
-        const eventsUrl = `${supabaseUrl}/functions/v1/bitrix24-events`;
-        
+      // Register placement for settings
+      if (accessToken) {
+        const placementUrl = `${clientEndpoint}placement.bind?auth=${accessToken}`;
         try {
-          // 1. Bind SETTING_CONNECTOR placement - Contact Center connector settings
-          const settingConnectorResult = await fetch(`${apiUrl}placement.bind`, {
+          await fetch(placementUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              auth: accessToken,
               PLACEMENT: "SETTING_CONNECTOR",
               HANDLER: `${supabaseUrl}/functions/v1/bitrix24-connector-settings`,
-              TITLE: "Thoth WhatsApp"
-            })
+              TITLE: "Thoth WhatsApp",
+              DESCRIPTION: "Configurar conector WhatsApp",
+            }),
           });
-          const settingConnectorData = await settingConnectorResult.json();
-          console.log("SETTING_CONNECTOR placement result:", settingConnectorData);
+          console.log("Placement registered successfully");
+        } catch (e) {
+          console.error("Error registering placement:", e);
+        }
 
-          // 2. Bind events to the public bitrix24-events endpoint
-          const events = [
-            // Message events (essential)
-            "ONIMCONNECTORMESSAGEADD",       // Operator sends message
-            "ONIMCONNECTORMESSAGERECEIVE",   // Client receives message from operator
-            "ONIMCONNECTORMESSAGEUPDATE",    // Message updated
-            "ONIMCONNECTORMESSAGEDELETE",    // Message deleted
-            
-            // Dialog events
-            "ONIMCONNECTORDIALOGSTART",      // Dialog started
-            "ONIMCONNECTORDIALOGFINISH",     // Dialog finished
-            
-            // Status events
-            "ONIMCONNECTORSTATUSDELETE",     // Status deleted
-            "ONIMCONNECTORLINEDELETE",       // Line deleted
-            
-            // App events
-            "ONAPPUPDATE"                    // App updated
-          ];
+        // Bind essential events
+        const events = [
+          "OnImConnectorMessageAdd",
+          "OnImConnectorDialogStart",
+          "OnImConnectorDialogFinish",
+        ];
 
-          for (const eventName of events) {
-            await fetch(`${apiUrl}event.bind`, {
+        const eventsUrl = `${supabaseUrl}/functions/v1/bitrix24-events`;
+        
+        for (const eventName of events) {
+          try {
+            await fetch(`${clientEndpoint}event.bind?auth=${accessToken}`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
-                auth: accessToken,
                 event: eventName,
-                handler: eventsUrl
-              })
+                handler: eventsUrl,
+              }),
             });
+            console.log(`Event ${eventName} bound successfully`);
+          } catch (e) {
+            console.error(`Error binding event ${eventName}:`, e);
           }
-          console.log("Events bound to:", eventsUrl);
-
-        } catch (placementError) {
-          console.error("Error registering placements:", placementError);
-          // Don't fail the install - placements can be added later
         }
-      } else {
-        console.log("Skipping placement registration - domain not available (Marketplace app)");
-        console.log("Placements will be registered when domain is resolved");
+      }
+
+      // Return HTML for marketplace installation
+      return new Response(
+        `<!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <title>Thoth WhatsApp - Instalação</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 20px; text-align: center; }
+            .success { color: #22c55e; }
+            h1 { margin-bottom: 10px; }
+            p { color: #666; }
+          </style>
+        </head>
+        <body>
+          <h1 class="success">✅ Instalado com Sucesso!</h1>
+          <p>O aplicativo Thoth WhatsApp foi instalado.</p>
+          <p>Configure o conector em: Contact Center → Canais → Thoth WhatsApp</p>
+        </body>
+        </html>`,
+        { headers: { ...corsHeaders, "Content-Type": "text/html" } }
+      );
+    }
+
+    // ONAPPUNINSTALL - App uninstallation
+    if (event === "ONAPPUNINSTALL") {
+      console.log("=== ONAPPUNINSTALL EVENT ===");
+      
+      if (memberId || domain) {
+        const searchId = memberId || domain;
+        
+        const { data: integration } = await supabase
+          .from("integrations")
+          .select("*")
+          .eq("type", "bitrix24")
+          .or(`config->>member_id.eq.${searchId},config->>domain.eq.${searchId}`)
+          .maybeSingle();
+
+        if (integration) {
+          await supabase
+            .from("integrations")
+            .update({
+              is_active: false,
+              config: {
+                ...integration.config,
+                uninstalled: true,
+                uninstalled_at: new Date().toISOString(),
+              },
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", integration.id);
+          
+          console.log("Integration deactivated:", integration.id);
+        }
       }
 
       return new Response(
-        JSON.stringify({ 
-          success: true, 
-          message: "App installed successfully",
-          member_id: memberId,
-          domain: domain || null,
-        }),
+        JSON.stringify({ success: true }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    if (event === "ONAPPUNINSTALL") {
-      console.log("=== ONAPPUNINSTALL EVENT (Marketplace compliance) ===");
-      console.log(`Uninstalling Bitrix24 app for member_id: ${memberId}`);
-
-      if (memberId) {
-        // Find the integration
-        const { data: existing } = await supabase
-          .from("integrations")
-          .select("id, config, workspace_id")
-          .eq("type", "bitrix24")
-          .filter("config->>member_id", "eq", memberId)
-          .maybeSingle();
-
-        if (existing) {
-          console.log("Found integration to uninstall:", existing.id);
-
-          // 1. Delete channel mappings for this integration
-          const { error: mappingError } = await supabase
-            .from("bitrix_channel_mappings")
-            .delete()
-            .eq("integration_id", existing.id);
-          
-          if (mappingError) {
-            console.error("Error deleting channel mappings:", mappingError);
-          } else {
-            console.log("Deleted channel mappings for integration:", existing.id);
-          }
-
-          // 2. Clear sensitive tokens from config (GDPR/security compliance)
-          const sanitizedConfig = {
-            member_id: existing.config?.member_id,
-            domain: existing.config?.domain,
-            uninstalled_at: new Date().toISOString(),
-            uninstall_reason: "ONAPPUNINSTALL event",
-            // Remove sensitive data
-            access_token: null,
-            refresh_token: null,
-            client_secret: null,
-            application_token: null,
-          };
-
-          // 3. Mark integration as inactive with sanitized config
-          await supabase
-            .from("integrations")
-            .update({ 
-              is_active: false,
-              config: sanitizedConfig,
-              updated_at: new Date().toISOString(),
-            })
-            .eq("id", existing.id);
-
-          console.log("Integration marked as uninstalled, tokens cleared");
-
-          // 4. Optionally revoke OAuth token at Bitrix24 (best effort)
-          if (existing.config?.access_token && existing.config?.domain) {
-            try {
-              const revokeUrl = `https://${existing.config.domain}/oauth/revoke/`;
-              await fetch(revokeUrl, {
-                method: "POST",
-                headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                body: new URLSearchParams({
-                  token: existing.config.access_token,
-                }),
-              });
-              console.log("OAuth token revoked at Bitrix24");
-            } catch (revokeError) {
-              console.log("Could not revoke OAuth token (best effort):", revokeError);
-            }
-          }
-        }
-      }
-
+    // ONAPPTEST - Test event from Bitrix24
+    if (event === "ONAPPTEST") {
+      console.log("=== ONAPPTEST EVENT ===");
       return new Response(
-        JSON.stringify({ success: true, message: "App uninstalled, user data cleaned" }),
+        JSON.stringify({ success: true, message: "Test successful" }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
+    }
+
+    // PLACEMENT events (SETTING_CONNECTOR, etc.)
+    if (body.PLACEMENT) {
+      console.log("=== PLACEMENT EVENT ===");
+      console.log("Placement type:", body.PLACEMENT);
+      
+      // Redirect to connector settings function
+      return new Response(null, {
+        status: 302,
+        headers: {
+          ...corsHeaders,
+          "Location": `${supabaseUrl}/functions/v1/bitrix24-connector-settings?${new URLSearchParams(body as any).toString()}`,
+        },
+      });
     }
 
     // Default response for unhandled events
-    console.log("Unhandled Bitrix24 event:", event);
+    console.log("Unhandled event/action:", event || body.action);
     return new Response(
       JSON.stringify({ success: true, message: "Event received" }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
