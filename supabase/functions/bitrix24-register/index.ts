@@ -669,7 +669,11 @@ serve(async (req) => {
         
         if (ourLine) {
           // Check both ACTIVE field and connector_active field
-          connectorActive = ourLine.ACTIVE === "Y" || ourLine.connector_active === true;
+          // Note: connector_active may be boolean true, string "true", or number 1
+          connectorActive = ourLine.ACTIVE === "Y" || 
+                           ourLine.connector_active === true || 
+                           ourLine.connector_active === "true" ||
+                           ourLine.connector_active === 1;
           console.log(`Line ${defaultLineId} verification:`);
           console.log(`  ACTIVE field: ${ourLine.ACTIVE}`);
           console.log(`  connector_active field: ${ourLine.connector_active}`);

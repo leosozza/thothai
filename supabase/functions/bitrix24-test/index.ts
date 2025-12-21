@@ -311,7 +311,11 @@ serve(async (req) => {
           );
           
           if (ourLineConfig) {
-            connectorActive = ourLineConfig.ACTIVE === "Y" || ourLineConfig.connector_active === true;
+            // Note: API may return boolean true, string "true", or number 1
+            connectorActive = ourLineConfig.ACTIVE === "Y" || 
+                             ourLineConfig.connector_active === true || 
+                             ourLineConfig.connector_active === "true" ||
+                             ourLineConfig.connector_active === 1;
             console.log(`Line ${lineId} found:`);
             console.log(`  ACTIVE: ${ourLineConfig.ACTIVE}`);
             console.log(`  connector_active: ${ourLineConfig.connector_active}`);

@@ -9,6 +9,11 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
  * Usage:
  * - GET: Returns test HTML page with iframe embedding information
  * - Can be embedded in Bitrix24 iframe to test header handling
+ * 
+ * Security Note:
+ * - External script (api.bitrix24.com/api/v1/) is loaded without SRI for compatibility
+ * - This is required for BX24.js API which is provided by Bitrix24
+ * - Script is loaded from official Bitrix24 CDN (trusted source)
  */
 
 const corsHeaders = {
@@ -18,6 +23,7 @@ const corsHeaders = {
 };
 
 // CSP configuration for Bitrix24 iframe embedding
+// Note: Wildcards (*.bitrix24.*) allow all Bitrix24 cloud customer portals
 const cspValue = [
   "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:",
   "script-src * 'unsafe-inline' 'unsafe-eval'",

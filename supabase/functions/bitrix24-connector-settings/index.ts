@@ -25,6 +25,12 @@ const corsHeaders = {
 // 1. Content-Security-Policy with frame-ancestors for allowed origins
 // 2. X-Frame-Options is deprecated but some proxies still check it
 // 3. Meta CSP tags in HTML as fallback for CDN/proxy overrides
+//
+// Note on frame-ancestors wildcards:
+// - *.bitrix24.com allows all Bitrix24 cloud subdomains (e.g., company.bitrix24.com)
+// - Regional domains (.com.br, .eu, .es, .de) support Bitrix24's global presence
+// - Wildcards are intentional to support all Bitrix24 customer portals
+// - Alternative: restrict to specific domains if self-hosted or private deployment
 const cspValue = [
   "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:",
   "script-src * 'unsafe-inline' 'unsafe-eval'",
@@ -420,7 +426,11 @@ serve(async (req) => {
             );
             if (ourLine) {
               // Check both ACTIVE field and connector_active field
-              connectorActive = ourLine.ACTIVE === "Y" || ourLine.connector_active === true;
+              // Note: API may return boolean true, string "true", or number 1
+              connectorActive = ourLine.ACTIVE === "Y" || 
+                               ourLine.connector_active === true || 
+                               ourLine.connector_active === "true" ||
+                               ourLine.connector_active === 1;
               console.log(`Line ${lineId} found - ACTIVE: ${ourLine.ACTIVE}, connector_active: ${ourLine.connector_active}`);
             } else {
               console.log(`Line ${lineId} not found in config list`);
