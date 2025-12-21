@@ -2363,7 +2363,9 @@ async function handleAutoSetup(supabase: any, payload: any, supabaseUrl: string)
   const connectorId = "thoth_whatsapp";
   
   // CRITICAL: Use bitrix24-events (PUBLIC) for receiving Bitrix24 events
-  const webhookUrl = `${supabaseUrl}/functions/v1/bitrix24-events`;
+  // PLACEMENT_HANDLER for UI settings, but event.bind and connector.data.set use events URL
+  const eventsUrl = `${supabaseUrl}/functions/v1/bitrix24-events`;
+  const placementHandlerUrl = `${supabaseUrl}/functions/v1/bitrix24-connector-settings`;
   const effectiveInstanceId = instance_id || config.instance_id;
 
   const results = {
@@ -2488,13 +2490,12 @@ async function handleAutoSetup(supabase: any, payload: any, supabaseUrl: string)
     }
 
     // 1. Register connector if not already registered with Marketplace-compliant icons
-    console.log("Step 1: Registering connector with PLACEMENT_HANDLER pointing to webhook...");
+    // IMPORTANT: PLACEMENT_HANDLER is for the UI settings page, NOT for receiving events
+    console.log("Step 1: Registering connector with PLACEMENT_HANDLER pointing to settings UI...");
     
-    // WhatsApp filled SVG icon for better visibility in Contact Center
-    const whatsappSvgIcon = "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSIjMjVENDY2Ij48cGF0aCBkPSJNMTcuNDcyIDYuMDA1QzE1Ljc4NCA0LjMxNSAxMy41MTIgMy4zODQgMTEuMTUgMy4zODRjLTQuOTQzIDAtOC45NjYgNC4wMjMtOC45NjYgOC45NjYgMCAxLjU4MS40MTMgMy4xMjcgMS4xOTggNC40ODlMMi40MTYgMjEuNjE2bDUuMjEyLTEuMzY4Yy4yNjEuMTQzIDQuNDcgMi41NzIgOC4wNTEuNjgxIDMuNjYxLTEuOTMzIDUuNzUxLTUuODQ1IDUuNzUxLTEwLjE3IDAtMi4zNjItLjkyLTQuNTg0LTIuNTktNi4yNTR6Ii8+PC9zdmc+";
-    
-    // Disabled icon (gray version)
-    const whatsappSvgIconDisabled = "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSIjOTk5OTk5Ij48cGF0aCBkPSJNMTcuNDcyIDYuMDA1QzE1Ljc4NCA0LjMxNSAxMy41MTIgMy4zODQgMTEuMTUgMy4zODRjLTQuOTQzIDAtOC45NjYgNC4wMjMtOC45NjYgOC45NjYgMCAxLjU4MS40MTMgMy4xMjcgMS4xOTggNC40ODlMMi40MTYgMjEuNjE2bDUuMjEyLTEuMzY4Yy4yNjEuMTQzIDQuNDcgMi41NzIgOC4wNTEuNjgxIDMuNjYxLTEuOTMzIDUuNzUxLTUuODQ1IDUuNzUxLTEwLjE3IDAtMi4zNjItLjkyLTQuNTg0LTIuNTktNi4yNTR6Ii8+PC9zdmc+";
+    // Thoth Ibis icon
+    const thothIbisSvg = "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0OCIgaGVpZ2h0PSI0OCIgdmlld0JveD0iMCAwIDQ4IDQ4Ij48cmVjdCB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIHJ4PSIxMiIgZmlsbD0iIzI1RDM2NiIvPjxwYXRoIGQ9Ik0zNCAyOGMtMS41IDItNCAxLTYgMHMtMy41LTMtNS01Yy0xLTEuNS0xLjUtMy41LTEtNS41LjUtMiAyLTMuNSA0LTRzNC0uNSA1LjUuNWMxLjUgMSAyLjUgMi41IDIuNSA0LjUgMCAxLjUtLjUgMy0xLjUgNC41TDMyIDI0bDItNHoiIGZpbGw9IiNmZmYiLz48Y2lyY2xlIGN4PSIzMCIgY3k9IjE2IiByPSIyIiBmaWxsPSIjMjVEMzY2Ii8+PHBhdGggZD0iTTE4IDM0Yy0yIDAtNC0xLTUtMy0xLTIgMC00IDItNWwyLTFjMSAwIDIgMSAyIDJ2M2MwIDEtLjUgMi0xIDIuNXMtMS41LjUtMiAuNXoiIGZpbGw9IiNmZmYiLz48L3N2Zz4=";
+    const thothIbisSvgDisabled = "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0OCIgaGVpZ2h0PSI0OCIgdmlld0JveD0iMCAwIDQ4IDQ4Ij48cmVjdCB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIHJ4PSIxMiIgZmlsbD0iIzk5OTk5OSIvPjxwYXRoIGQ9Ik0zNCAyOGMtMS41IDItNCAxLTYgMHMtMy41LTMtNS01Yy0xLTEuNS0xLjUtMy41LTEtNS41LjUtMiAyLTMuNSA0LTRzNC0uNSA1LjUuNWMxLjUgMSAyLjUgMi41IDIuNSA0LjUgMCAxLjUtLjUgMy0xLjUgNC41TDMyIDI0bDItNHoiIGZpbGw9IiNmZmYiLz48Y2lyY2xlIGN4PSIzMCIgY3k9IjE2IiByPSIyIiBmaWxsPSIjOTk5OTk5Ii8+PHBhdGggZD0iTTE4IDM0Yy0yIDAtNC0xLTUtMy0xLTIgMC00IDItNWwyLTFjMSAwIDIgMSAyIDJ2M2MwIDEtLjUgMi0xIDIuNXMtMS41LjUtMiAuNXoiIGZpbGw9IiNmZmYiLz48L3N2Zz4=";
     
     try {
       const registerResponse = await fetch(`${clientEndpoint}imconnector.register`, {
@@ -2505,19 +2506,19 @@ async function handleAutoSetup(supabase: any, payload: any, supabaseUrl: string)
           ID: connectorId,
           NAME: "Thoth WhatsApp",
           ICON: {
-            DATA_IMAGE: `data:image/svg+xml;base64,${whatsappSvgIcon}`,
+            DATA_IMAGE: `data:image/svg+xml;base64,${thothIbisSvg}`,
             COLOR: "#25D366",
             SIZE: "90%",
             POSITION: "center"
           },
           ICON_DISABLED: {
-            DATA_IMAGE: `data:image/svg+xml;base64,${whatsappSvgIconDisabled}`,
+            DATA_IMAGE: `data:image/svg+xml;base64,${thothIbisSvgDisabled}`,
             COLOR: "#999999",
             SIZE: "90%",
             POSITION: "center"
           },
-          // CRITICAL: PLACEMENT_HANDLER must point to our webhook to receive SETTING_CONNECTOR calls
-          PLACEMENT_HANDLER: webhookUrl,
+          // PLACEMENT_HANDLER is for UI settings page (when user clicks connector in Contact Center)
+          PLACEMENT_HANDLER: placementHandlerUrl,
           // Indicate this is not for group chats
           CHAT_GROUP: "N"
         })
@@ -2574,7 +2575,7 @@ async function handleAutoSetup(supabase: any, payload: any, supabaseUrl: string)
           if (activateResult.result || !activateResult.error) {
             results.lines_activated++;
 
-            // Set connector data
+            // Set connector data - CRITICAL: use eventsUrl for receiving messages
             await fetch(`${clientEndpoint}imconnector.connector.data.set`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -2584,8 +2585,8 @@ async function handleAutoSetup(supabase: any, payload: any, supabaseUrl: string)
                 LINE: lineId,
                 DATA: {
                   id: `${connectorId}_line_${lineId}`,
-                  url: webhookUrl,
-                  url_im: webhookUrl,
+                  url: eventsUrl,
+                  url_im: eventsUrl,
                   name: "Thoth WhatsApp"
                 }
               })
@@ -2632,7 +2633,7 @@ async function handleAutoSetup(supabase: any, payload: any, supabaseUrl: string)
           TYPE: "SMS",
           NAME: "Thoth WhatsApp",
           DESCRIPTION: "Envio de mensagens WhatsApp via Thoth.ai",
-          HANDLER: webhookUrl,
+          HANDLER: eventsUrl,
           CRM_SETTINGS: {
             CONTACT: "Y",
             COMPANY: "Y",
@@ -2664,7 +2665,7 @@ async function handleAutoSetup(supabase: any, payload: any, supabaseUrl: string)
         body: JSON.stringify({
           auth: accessToken,
           CODE: robotCode,
-          HANDLER: webhookUrl,
+          HANDLER: eventsUrl,
           AUTH_USER_ID: 1,
           USE_SUBSCRIPTION: "Y",
           NAME: { pt: "Thoth WhatsApp - Enviar Mensagem", en: "Thoth WhatsApp - Send Message" },
@@ -2724,7 +2725,7 @@ async function handleAutoSetup(supabase: any, payload: any, supabaseUrl: string)
           body: JSON.stringify({
             auth: accessToken,
             event: eventName,
-            handler: webhookUrl
+            handler: eventsUrl
           })
         });
         console.log(`Unbind ${eventName}:`, await unbindResponse.json());
@@ -2736,7 +2737,7 @@ async function handleAutoSetup(supabase: any, payload: any, supabaseUrl: string)
           body: JSON.stringify({
             auth: accessToken,
             event: eventName,
-            handler: webhookUrl
+            handler: eventsUrl
           })
         });
         const bindResult = await bindResponse.json();
@@ -2823,8 +2824,8 @@ async function handleAutoSetup(supabase: any, payload: any, supabaseUrl: string)
                   LINE: lineId,
                   DATA: {
                     id: `${connectorId}_line_${lineId}`,
-                    url: webhookUrl,
-                    url_im: webhookUrl,
+                    url: eventsUrl,
+                    url_im: eventsUrl,
                     name: "Thoth WhatsApp"
                   }
                 })
@@ -2864,7 +2865,7 @@ async function handleAutoSetup(supabase: any, payload: any, supabaseUrl: string)
           auto_setup_completed: true,
           auto_setup_at: new Date().toISOString(),
           lines_activated: results.lines_activated,
-          events_url: webhookUrl,
+          events_url: eventsUrl,
           events_bound: eventsBound,
           line_verification: verificationResults,
         },
@@ -2897,7 +2898,7 @@ async function handleAutoSetup(supabase: any, payload: any, supabaseUrl: string)
           events_bound: eventsBound,
           line_verification: verificationResults,
         },
-        webhook_url: webhookUrl,
+        webhook_url: eventsUrl,
         critical_info: {
           message: "Para receber mensagens do operador, o evento OnImConnectorMessageAdd DEVE estar vinculado.",
           events_bound: eventsBound,

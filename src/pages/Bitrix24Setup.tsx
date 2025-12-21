@@ -50,6 +50,7 @@ export default function Bitrix24Setup() {
   
   // Connection states
   const [connecting, setConnecting] = useState(false);
+  const installFinishCalled = useRef(false);
   const [reconnecting, setReconnecting] = useState(false);
 
   // Initialize from URL params and Bitrix24 SDK
@@ -74,6 +75,8 @@ export default function Bitrix24Setup() {
         // @ts-ignore
         window.BX24.init(() => {
           // @ts-ignore
+          window.BX24.fitWindow();
+          // @ts-ignore
           window.BX24.callMethod("app.info", {}, (result: any) => {
             const appInfo = result.data();
             if (appInfo?.member_id) setMemberId(appInfo.member_id);
@@ -85,6 +88,24 @@ export default function Bitrix24Setup() {
       console.log("Bitrix24 SDK not available");
     }
   };
+
+  // CRITICAL: Notify Bitrix24 that installation is complete
+  // Without this, Bitrix24 will NOT send events to our handlers
+  const notifyInstallFinish = useCallback(() => {
+    if (installFinishCalled.current) return;
+    
+    try {
+      // @ts-ignore - Bitrix24 JS SDK
+      if (window.BX24) {
+        // @ts-ignore
+        window.BX24.installFinish();
+        installFinishCalled.current = true;
+        console.log("BX24.installFinish() called successfully");
+      }
+    } catch (e) {
+      console.log("BX24.installFinish() not available:", e);
+    }
+  }, []);
 
   // Load data when memberId is available
   useEffect(() => {
@@ -125,6 +146,8 @@ export default function Bitrix24Setup() {
       // Accept as connected if auto_setup_complete is true and has instance_id
       // (even if connector_active is false - it may take time to sync)
       if (data.auto_setup_complete && data.instance_id) {
+        // CRITICAL: Notify Bitrix24 installation is complete when already connected
+        notifyInstallFinish();
         setStep("connected");
       } else if (data.workspace_id && data.instances?.length) {
         // Has workspace but not fully connected
@@ -234,11 +257,15 @@ export default function Bitrix24Setup() {
       // Accept partial success if auto_setup_completed is true
       if (data?.success) {
         toast.success("Conectado com sucesso!");
+        // CRITICAL: Notify Bitrix24 installation is complete to enable events
+        notifyInstallFinish();
         setStep("connected");
         await loadData();
       } else if (data?.results?.connector_registered && data?.results?.events_bound > 0) {
         // Partial success - connector registered and events bound, but line may not verify as active immediately
         toast.success("Conectado! A ativação pode levar alguns segundos.");
+        // CRITICAL: Notify Bitrix24 installation is complete to enable events
+        notifyInstallFinish();
         setStep("connected");
         await loadData();
       } else {
