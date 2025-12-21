@@ -2323,10 +2323,13 @@ async function handleAutoSetup(supabase: any, payload: any, supabaseUrl: string)
     }
 
     // 1. Register connector if not already registered with Marketplace-compliant icons
-    console.log("Step 1: Registering connector with Marketplace-compliant icons...");
+    console.log("Step 1: Registering connector with PLACEMENT_HANDLER pointing to webhook...");
     
     // WhatsApp filled SVG icon for better visibility in Contact Center
     const whatsappSvgIcon = "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSIjMjVENDY2Ij48cGF0aCBkPSJNMTcuNDcyIDYuMDA1QzE1Ljc4NCA0LjMxNSAxMy41MTIgMy4zODQgMTEuMTUgMy4zODRjLTQuOTQzIDAtOC45NjYgNC4wMjMtOC45NjYgOC45NjYgMCAxLjU4MS40MTMgMy4xMjcgMS4xOTggNC40ODlMMi40MTYgMjEuNjE2bDUuMjEyLTEuMzY4Yy4yNjEuMTQzIDQuNDcgMi41NzIgOC4wNTEuNjgxIDMuNjYxLTEuOTMzIDUuNzUxLTUuODQ1IDUuNzUxLTEwLjE3IDAtMi4zNjItLjkyLTQuNTg0LTIuNTktNi4yNTR6Ii8+PC9zdmc+";
+    
+    // Disabled icon (gray version)
+    const whatsappSvgIconDisabled = "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSIjOTk5OTk5Ij48cGF0aCBkPSJNMTcuNDcyIDYuMDA1QzE1Ljc4NCA0LjMxNSAxMy41MTIgMy4zODQgMTEuMTUgMy4zODRjLTQuOTQzIDAtOC45NjYgNC4wMjMtOC45NjYgOC45NjYgMCAxLjU4MS40MTMgMy4xMjcgMS4xOTggNC40ODlMMi40MTYgMjEuNjE2bDUuMjEyLTEuMzY4Yy4yNjEuMTQzIDQuNDcgMi41NzIgOC4wNTEuNjgxIDMuNjYxLTEuOTMzIDUuNzUxLTUuODQ1IDUuNzUxLTEwLjE3IDAtMi4zNjItLjkyLTQuNTg0LTIuNTktNi4yNTR6Ii8+PC9zdmc+";
     
     try {
       const registerResponse = await fetch(`${clientEndpoint}imconnector.register`, {
@@ -2342,8 +2345,16 @@ async function handleAutoSetup(supabase: any, payload: any, supabaseUrl: string)
             SIZE: "90%",
             POSITION: "center"
           },
-          // Point to dedicated PLACEMENT_HANDLER for Marketplace compliance
-          PLACEMENT_HANDLER: `${supabaseUrl}/functions/v1/bitrix24-connector-settings`
+          ICON_DISABLED: {
+            DATA_IMAGE: `data:image/svg+xml;base64,${whatsappSvgIconDisabled}`,
+            COLOR: "#999999",
+            SIZE: "90%",
+            POSITION: "center"
+          },
+          // CRITICAL: PLACEMENT_HANDLER must point to our webhook to receive SETTING_CONNECTOR calls
+          PLACEMENT_HANDLER: webhookUrl,
+          // Indicate this is not for group chats
+          CHAT_GROUP: "N"
         })
       });
       const registerResult = await registerResponse.json();
@@ -2737,6 +2748,212 @@ async function handleAutoSetup(supabase: any, payload: any, supabaseUrl: string)
     return new Response(
       JSON.stringify({ 
         error: error instanceof Error ? error.message : "Erro na configuração automática",
+        results 
+      }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+}
+
+// Handle force_activate action - Force activate connector for a specific line
+// This is the definitive fix based on Bitrix24 documentation
+async function handleForceActivate(supabase: any, payload: any, supabaseUrl: string) {
+  console.log("=== FORCE ACTIVATE CONNECTOR ===");
+  console.log("Payload:", JSON.stringify(payload, null, 2));
+  
+  const { integration_id, line_id } = payload;
+
+  if (!integration_id || !line_id) {
+    return new Response(
+      JSON.stringify({ error: "integration_id e line_id são obrigatórios" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const { data: integration, error: integrationError } = await supabase
+    .from("integrations")
+    .select("*")
+    .eq("id", integration_id)
+    .single();
+
+  if (integrationError || !integration) {
+    console.error("Integration not found:", integrationError);
+    return new Response(
+      JSON.stringify({ error: "Integração não encontrada" }),
+      { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const accessToken = await refreshBitrixToken(integration, supabase);
+  if (!accessToken) {
+    return new Response(
+      JSON.stringify({ error: "Token de acesso não disponível" }),
+      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const config = integration.config;
+  const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
+  const connectorId = config.connector_id || "thoth_whatsapp";
+  const webhookUrl = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
+
+  console.log("Force activating connector:", connectorId, "for line:", line_id);
+  console.log("Using endpoint:", clientEndpoint);
+  console.log("Webhook URL:", webhookUrl);
+
+  const results = {
+    activate: { success: false, result: null as any, error: null as any },
+    dataSet: { success: false, result: null as any, error: null as any },
+    status: { success: false, result: null as any, active: false },
+  };
+
+  try {
+    // Step 1: Activate the connector for this line
+    console.log("Step 1: Calling imconnector.activate...");
+    const activateResponse = await fetch(`${clientEndpoint}imconnector.activate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        auth: accessToken,
+        CONNECTOR: connectorId,
+        LINE: parseInt(line_id),
+        ACTIVE: 1
+      })
+    });
+    const activateResult = await activateResponse.json();
+    console.log("imconnector.activate result:", JSON.stringify(activateResult, null, 2));
+    
+    results.activate.result = activateResult;
+    results.activate.success = !!activateResult.result || !activateResult.error;
+    if (activateResult.error) {
+      results.activate.error = activateResult.error_description || activateResult.error;
+    }
+
+    // Step 2: CRITICAL - Set connector data (required by Bitrix24 documentation)
+    console.log("Step 2: Calling imconnector.connector.data.set...");
+    const dataSetResponse = await fetch(`${clientEndpoint}imconnector.connector.data.set`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        auth: accessToken,
+        CONNECTOR: connectorId,
+        LINE: parseInt(line_id),
+        DATA: {
+          id: `${connectorId}_line_${line_id}`,
+          url: webhookUrl,
+          url_im: webhookUrl,
+          name: "Thoth WhatsApp"
+        }
+      })
+    });
+    const dataSetResult = await dataSetResponse.json();
+    console.log("imconnector.connector.data.set result:", JSON.stringify(dataSetResult, null, 2));
+    
+    results.dataSet.result = dataSetResult;
+    results.dataSet.success = !!dataSetResult.result || !dataSetResult.error;
+    if (dataSetResult.error) {
+      results.dataSet.error = dataSetResult.error_description || dataSetResult.error;
+    }
+
+    // Wait for Bitrix24 to process
+    await new Promise(resolve => setTimeout(resolve, 1500));
+
+    // Step 3: Verify the status
+    console.log("Step 3: Verifying with imconnector.status...");
+    const statusResponse = await fetch(`${clientEndpoint}imconnector.status`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        auth: accessToken,
+        CONNECTOR: connectorId,
+        LINE: parseInt(line_id)
+      })
+    });
+    const statusResult = await statusResponse.json();
+    console.log("imconnector.status result:", JSON.stringify(statusResult, null, 2));
+    
+    results.status.result = statusResult;
+    results.status.success = !statusResult.error;
+    results.status.active = statusResult.result?.active === true || 
+                            statusResult.result?.ACTIVE === "Y" ||
+                            statusResult.result?.connection === true;
+
+    // If still not active, try one more time with a delay
+    if (!results.status.active) {
+      console.log("Connector still not active, retrying activation...");
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      await fetch(`${clientEndpoint}imconnector.activate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          auth: accessToken,
+          CONNECTOR: connectorId,
+          LINE: parseInt(line_id),
+          ACTIVE: 1
+        })
+      });
+
+      await fetch(`${clientEndpoint}imconnector.connector.data.set`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          auth: accessToken,
+          CONNECTOR: connectorId,
+          LINE: parseInt(line_id),
+          DATA: {
+            id: `${connectorId}_line_${line_id}`,
+            url: webhookUrl,
+            url_im: webhookUrl,
+            name: "Thoth WhatsApp"
+          }
+        })
+      });
+
+      // Check status again
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      const finalStatusResponse = await fetch(`${clientEndpoint}imconnector.status`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          auth: accessToken,
+          CONNECTOR: connectorId,
+          LINE: parseInt(line_id)
+        })
+      });
+      const finalStatusResult = await finalStatusResponse.json();
+      console.log("Final status check:", JSON.stringify(finalStatusResult, null, 2));
+      
+      results.status.result = finalStatusResult;
+      results.status.active = finalStatusResult.result?.active === true || 
+                              finalStatusResult.result?.ACTIVE === "Y" ||
+                              finalStatusResult.result?.connection === true;
+    }
+
+    const success = results.activate.success && results.dataSet.success;
+    
+    console.log("Force activate complete:", { success, active: results.status.active });
+
+    return new Response(
+      JSON.stringify({
+        success,
+        active: results.status.active,
+        message: success 
+          ? (results.status.active 
+            ? "Conector ativado com sucesso!" 
+            : "Comandos enviados. A ativação pode levar alguns segundos para refletir.")
+          : "Erro na ativação",
+        results,
+        line_id: parseInt(line_id),
+        connector_id: connectorId
+      }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  } catch (error) {
+    console.error("Force activate error:", error);
+    return new Response(
+      JSON.stringify({ 
+        error: error instanceof Error ? error.message : "Erro ao forçar ativação",
         results 
       }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -3447,6 +3664,11 @@ serve(async (req) => {
     // Handle verify_integration action (full verification)
     if (action === "verify_integration" || payload.action === "verify_integration") {
       return await handleVerifyIntegration(supabase, payload, supabaseUrl);
+    }
+
+    // Handle force_activate action - manually force connector activation for a specific line
+    if (action === "force_activate" || payload.action === "force_activate") {
+      return await handleForceActivate(supabase, payload, supabaseUrl);
     }
 
     // Handle clean connectors (remove duplicates)
