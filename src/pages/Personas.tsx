@@ -16,15 +16,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useWorkspace } from "@/hooks/useWorkspace";
@@ -37,6 +29,7 @@ import {
   Volume2,
   Loader2,
   Sparkles,
+  MessageSquare,
 } from "lucide-react";
 
 interface Persona {
@@ -53,12 +46,26 @@ interface Persona {
   department_id: string | null;
 }
 
+interface BotStatus {
+  enabled: boolean;
+  personaId: string | null;
+  personaName: string | null;
+  integrationId: string | null;
+}
+
 export default function Personas() {
   const [personas, setPersonas] = useState<Persona[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingPersona, setEditingPersona] = useState<Persona | null>(null);
   const [saving, setSaving] = useState(false);
+  const [botStatus, setBotStatus] = useState<BotStatus>({
+    enabled: false,
+    personaId: null,
+    personaName: null,
+    integrationId: null,
+  });
+  const [togglingBot, setTogglingBot] = useState(false);
   const { workspace } = useWorkspace();
 
   // Form states
@@ -73,6 +80,7 @@ export default function Personas() {
   useEffect(() => {
     if (workspace) {
       fetchPersonas();
+      fetchBotStatus();
     }
   }, [workspace]);
 
@@ -90,6 +98,69 @@ export default function Personas() {
       console.error("Error fetching personas:", error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchBotStatus = async () => {
+    try {
+      const { data: integration } = await supabase
+        .from("integrations")
+        .select("id, config")
+        .eq("workspace_id", workspace?.id)
+        .eq("type", "bitrix24")
+        .single();
+
+      if (integration) {
+        const config = integration.config as Record<string, unknown> | null;
+        const personaId = config?.bot_persona_id as string | null;
+        let personaName = null;
+
+        if (personaId) {
+          const { data: persona } = await supabase
+            .from("personas")
+            .select("name")
+            .eq("id", personaId)
+            .single();
+          personaName = persona?.name || null;
+        }
+
+        setBotStatus({
+          enabled: Boolean(config?.bot_enabled),
+          personaId,
+          personaName,
+          integrationId: integration.id,
+        });
+      }
+    } catch (error) {
+      console.error("Error fetching bot status:", error);
+    }
+  };
+
+  const handleToggleBot = async (enabled: boolean) => {
+    if (!botStatus.integrationId) {
+      toast.error("Nenhuma integração Bitrix24 encontrada");
+      return;
+    }
+
+    setTogglingBot(true);
+    try {
+      const response = await supabase.functions.invoke("bitrix24-webhook", {
+        body: {
+          action: "update_bot_config",
+          integration_id: botStatus.integrationId,
+          bot_enabled: enabled,
+        },
+      });
+
+      if (response.error) throw response.error;
+
+      setBotStatus((prev) => ({ ...prev, enabled }));
+      toast.success(enabled ? "Bot ativado!" : "Bot desativado");
+    } catch (error) {
+      console.error("Error toggling bot:", error);
+      toast.error("Erro ao alterar status do bot");
+    } finally {
+      setTogglingBot(false);
     }
   };
 
@@ -194,7 +265,36 @@ export default function Personas() {
         .eq("id", persona.id);
 
       if (error) throw error;
-      toast.success(`${persona.name} é agora a persona padrão`);
+
+      // Check for Bitrix24 integration and activate bot
+      if (botStatus.integrationId) {
+        try {
+          await supabase.functions.invoke("bitrix24-webhook", {
+            body: {
+              action: "update_bot_config",
+              integration_id: botStatus.integrationId,
+              bot_enabled: true,
+              bot_persona_id: persona.id,
+              bot_welcome_message: persona.welcome_message,
+            },
+          });
+
+          setBotStatus((prev) => ({
+            ...prev,
+            enabled: true,
+            personaId: persona.id,
+            personaName: persona.name,
+          }));
+
+          toast.success(`Bot Bitrix24 ativado com a persona "${persona.name}"`);
+        } catch (botError) {
+          console.error("Error activating bot:", botError);
+          toast.success(`${persona.name} é agora a persona padrão`);
+        }
+      } else {
+        toast.success(`${persona.name} é agora a persona padrão`);
+      }
+
       fetchPersonas();
     } catch (error) {
       console.error("Error setting default:", error);
@@ -221,6 +321,39 @@ export default function Personas() {
             Nova Persona
           </Button>
         </div>
+
+        {/* Bot Status Card */}
+        {botStatus.integrationId && (
+          <Card className="border-primary/20">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-lg bg-primary/10">
+                    <MessageSquare className="h-5 w-5 text-primary" />
+                  </div>
+                  <div>
+                    <CardTitle className="text-base">Bot Bitrix24</CardTitle>
+                    <CardDescription>
+                      {botStatus.enabled
+                        ? `Usando: ${botStatus.personaName || "Persona não definida"}`
+                        : "Chatbot AI desativado"}
+                    </CardDescription>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  <Badge variant={botStatus.enabled ? "default" : "secondary"}>
+                    {botStatus.enabled ? "Ativo" : "Inativo"}
+                  </Badge>
+                  <Switch
+                    checked={botStatus.enabled}
+                    onCheckedChange={handleToggleBot}
+                    disabled={togglingBot}
+                  />
+                </div>
+              </div>
+            </CardHeader>
+          </Card>
+        )}
 
         {/* Personas Grid */}
         {loading ? (
