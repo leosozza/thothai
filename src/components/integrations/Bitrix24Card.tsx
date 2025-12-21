@@ -1,20 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { Separator } from "@/components/ui/separator";
 import {
   Building2,
   CheckCircle2,
   Loader2,
-  Key,
-  Copy,
   RefreshCw,
   ExternalLink,
   Phone,
@@ -23,8 +17,6 @@ import {
   XCircle,
   RotateCcw,
   ShoppingCart,
-  ChevronDown,
-  Wrench,
 } from "lucide-react";
 
 interface Integration {
@@ -73,8 +65,6 @@ interface VerificationResult {
 }
 
 export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }: Bitrix24CardProps) {
-  const [linkingToken, setLinkingToken] = useState<string | null>(null);
-  const [generatingToken, setGeneratingToken] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [reconfiguring, setReconfiguring] = useState(false);
   const [verification, setVerification] = useState<VerificationResult | null>(null);
@@ -82,7 +72,6 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
   const [summary, setSummary] = useState<string>("");
   const [fixesApplied, setFixesApplied] = useState<string[]>([]);
   const autoVerifiedRef = useRef(false);
-  const [localAppExpanded, setLocalAppExpanded] = useState(false);
 
   const config = integration?.config || {};
   const isConnected = integration?.is_active && config.auto_setup_completed;
@@ -102,7 +91,7 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
         body: {
           action: "verify_integration",
           integration_id: integration.id,
-          auto_fix: true, // Always auto-fix
+          auto_fix: true,
         }
       });
 
@@ -112,7 +101,6 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
         setSummary(response.data.summary || "");
         setFixesApplied(response.data.fixes_applied || []);
         
-        // Only show toast if not silent AND there were fixes or issues
         if (!silent) {
           if (response.data.fixes_applied?.length > 0) {
             toast.success(`${response.data.fixes_applied.length} correção(ões) aplicada(s) automaticamente!`);
@@ -122,7 +110,6 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
             toast.warning(response.data.summary || "Alguns problemas não puderam ser corrigidos");
           }
         } else if (response.data.fixes_applied?.length > 0) {
-          // Show toast even in silent mode if fixes were applied
           toast.success(`Auto-correção: ${response.data.fixes_applied.length} problema(s) corrigido(s)`);
         }
       } else if (!silent) {
@@ -136,72 +123,13 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
     }
   }, [integration?.id]);
 
-  // Auto-verify and auto-fix on mount - AGGRESSIVE auto-correction
+  // Auto-verify and auto-fix on mount
   useEffect(() => {
     if (isConnected && integration?.id && !autoVerifiedRef.current) {
       autoVerifiedRef.current = true;
-      // Auto-verify AND auto-fix silently on mount
       handleVerifyAndFix(true);
     }
   }, [isConnected, integration?.id, handleVerifyAndFix]);
-
-  // Fetch existing token on mount
-  useEffect(() => {
-    fetchExistingToken();
-  }, [workspaceId]);
-
-  const fetchExistingToken = async () => {
-    if (!workspaceId) return;
-
-    try {
-      const { data } = await supabase
-        .from("workspace_tokens")
-        .select("token, expires_at, is_used")
-        .eq("workspace_id", workspaceId)
-        .eq("token_type", "bitrix24")
-        .eq("is_used", false)
-        .gt("expires_at", new Date().toISOString())
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (data) {
-        setLinkingToken(data.token);
-      }
-    } catch (error) {
-      console.error("Error fetching token:", error);
-    }
-  };
-
-  const handleGenerateToken = async () => {
-    if (!workspaceId) {
-      toast.error("Workspace não encontrado");
-      return;
-    }
-
-    setGeneratingToken(true);
-    try {
-      const token = crypto.randomUUID().replace(/-/g, "").substring(0, 8).toUpperCase();
-
-      const { error } = await supabase
-        .from("workspace_tokens")
-        .insert({
-          workspace_id: workspaceId,
-          token,
-          token_type: "bitrix24",
-        });
-
-      if (error) throw error;
-
-      setLinkingToken(token);
-      toast.success("Token gerado!");
-    } catch (error) {
-      console.error("Error generating token:", error);
-      toast.error("Erro ao gerar token");
-    } finally {
-      setGeneratingToken(false);
-    }
-  };
 
   const handleReconfigureFromZero = async () => {
     if (!integration?.id) {
@@ -234,7 +162,6 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
           toast.warning("Reconfiguração parcial - verifique o diagnóstico");
         }
         
-        // Wait and re-verify with auto-fix
         await new Promise(resolve => setTimeout(resolve, 2000));
         await handleVerifyAndFix(true);
         onRefresh();
@@ -247,11 +174,6 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
     } finally {
       setReconfiguring(false);
     }
-  };
-
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    toast.success("Copiado!");
   };
 
   // Determine status badge
@@ -454,7 +376,7 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
     );
   }
 
-  // Not connected state - show setup instructions
+  // Not connected state - show Marketplace only
   return (
     <Card>
       <CardHeader>
@@ -474,7 +396,7 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
         </div>
       </CardHeader>
       <CardContent className="space-y-6">
-        {/* MARKETPLACE - Primary Option */}
+        {/* MARKETPLACE - Only Option */}
         <div className="bg-green-500/5 border border-green-500/20 rounded-lg p-4 space-y-4">
           <div className="flex items-center gap-2">
             <ShoppingCart className="h-5 w-5 text-green-600" />
@@ -513,160 +435,6 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
             </a>
           </Button>
         </div>
-
-        {/* Separator */}
-        <div className="flex items-center gap-4">
-          <Separator className="flex-1" />
-          <span className="text-xs text-muted-foreground">ou</span>
-          <Separator className="flex-1" />
-        </div>
-
-        {/* LOCAL APP - Secondary/Advanced Option (Collapsible) */}
-        <Collapsible open={localAppExpanded} onOpenChange={setLocalAppExpanded}>
-          <CollapsibleTrigger asChild>
-            <Button variant="ghost" className="w-full justify-between p-4 h-auto">
-              <div className="flex items-center gap-2">
-                <Wrench className="h-4 w-4 text-muted-foreground" />
-                <span className="text-sm font-medium">Configuração Manual (Avançado)</span>
-              </div>
-              <ChevronDown className={`h-4 w-4 text-muted-foreground transition-transform ${localAppExpanded ? 'rotate-180' : ''}`} />
-            </Button>
-          </CollapsibleTrigger>
-          
-          <CollapsibleContent className="space-y-4 pt-2">
-            <div className="bg-muted/50 rounded-lg p-4 space-y-4">
-              <p className="text-sm text-muted-foreground">
-                Para desenvolvedores ou configurações especiais. Use esta opção se precisar de controle total sobre a instalação.
-              </p>
-
-              {/* Setup Instructions */}
-              <div className="bg-sky-500/5 border border-sky-500/20 rounded-lg p-3">
-                <ol className="text-sm text-muted-foreground space-y-2">
-                  <li className="flex gap-2">
-                    <span className="font-bold text-sky-600">1.</span>
-                    No Bitrix24: Aplicações → Desenvolvedores → Adicionar App Local
-                  </li>
-                  <li className="flex gap-2">
-                    <span className="font-bold text-sky-600">2.</span>
-                    Configure as URLs abaixo e permissões: imopenlines, imconnector, im, crm
-                  </li>
-                  <li className="flex gap-2">
-                    <span className="font-bold text-sky-600">3.</span>
-                    Instale e use o token gerado
-                  </li>
-                </ol>
-              </div>
-
-              {/* URLs to copy */}
-              <div className="space-y-3">
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">Handler URL</Label>
-                  <div className="flex gap-2">
-                    <Input
-                      readOnly
-                      value="https://ybqwwipwimnkonnebbys.supabase.co/functions/v1/bitrix24-install"
-                      className="font-mono text-xs bg-muted"
-                    />
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      onClick={() => copyToClipboard("https://ybqwwipwimnkonnebbys.supabase.co/functions/v1/bitrix24-install")}
-                    >
-                      <Copy className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">Initial Install URL</Label>
-                  <div className="flex gap-2">
-                    <Input
-                      readOnly
-                      value="https://chat.thoth24.com/bitrix24-setup"
-                      className="font-mono text-xs bg-muted"
-                    />
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      onClick={() => copyToClipboard("https://chat.thoth24.com/bitrix24-setup")}
-                    >
-                      <Copy className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Token Generation */}
-              <div className="border rounded-lg p-4 space-y-3 bg-background">
-                <div className="flex items-center gap-2">
-                  <Key className="h-5 w-5 text-primary" />
-                  <span className="font-medium">Token de Vinculação</span>
-                </div>
-                
-                {linkingToken ? (
-                  <div className="space-y-2">
-                    <div className="flex gap-2">
-                      <Input
-                        readOnly
-                        value={linkingToken}
-                        className="font-mono text-lg text-center tracking-widest bg-muted"
-                      />
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        onClick={() => copyToClipboard(linkingToken)}
-                      >
-                        <Copy className="h-4 w-4" />
-                      </Button>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      Cole este token na tela de configuração do Bitrix24
-                    </p>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleGenerateToken}
-                      disabled={generatingToken}
-                    >
-                      {generatingToken ? (
-                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                      ) : (
-                        <RefreshCw className="h-4 w-4 mr-2" />
-                      )}
-                      Gerar Novo Token
-                    </Button>
-                  </div>
-                ) : (
-                  <Button
-                    onClick={handleGenerateToken}
-                    disabled={generatingToken}
-                    className="w-full"
-                    variant="outline"
-                  >
-                    {generatingToken ? (
-                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                    ) : (
-                      <Key className="h-4 w-4 mr-2" />
-                    )}
-                    Gerar Token
-                  </Button>
-                )}
-              </div>
-
-              {/* Documentation link */}
-              <Button variant="outline" className="w-full" size="sm" asChild>
-                <a 
-                  href="https://helpdesk.bitrix24.com.br/open/17558322/" 
-                  target="_blank" 
-                  rel="noopener noreferrer"
-                >
-                  <ExternalLink className="h-4 w-4 mr-2" />
-                  Ver Tutorial Completo
-                </a>
-              </Button>
-            </div>
-          </CollapsibleContent>
-        </Collapsible>
       </CardContent>
     </Card>
   );

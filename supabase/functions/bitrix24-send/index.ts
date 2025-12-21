@@ -34,7 +34,6 @@ async function refreshBitrixToken(integration: any, supabase: any): Promise<stri
 
     if (data.error) {
       console.error("Token refresh error:", data.error);
-      // Mark token as failed
       await supabase
         .from("integrations")
         .update({
@@ -73,33 +72,23 @@ async function refreshBitrixToken(integration: any, supabase: any): Promise<stri
 // Helper to create or find lead/contact in Bitrix24
 async function createOrFindLead(
   apiUrl: string, 
-  accessToken: string | null, 
+  accessToken: string, 
   contactPhone: string, 
-  contactName: string,
-  isOAuth: boolean
+  contactName: string
 ): Promise<{ lead_id?: string; contact_id?: string; created?: boolean }> {
   try {
-    // Format phone for search
     const phoneSearch = contactPhone.replace(/\D/g, "");
     
-    // First, search for existing lead by phone
     console.log("Searching for existing lead with phone:", phoneSearch);
-    
-    const searchParams: Record<string, unknown> = {
-      filter: {
-        "PHONE": phoneSearch
-      },
-      select: ["ID", "TITLE", "NAME", "PHONE"]
-    };
-    
-    if (isOAuth && accessToken) {
-      searchParams.auth = accessToken;
-    }
     
     const searchResponse = await fetch(`${apiUrl}crm.lead.list`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(searchParams)
+      body: JSON.stringify({
+        auth: accessToken,
+        filter: { "PHONE": phoneSearch },
+        select: ["ID", "TITLE", "NAME", "PHONE"]
+      })
     });
     
     const searchResult = await searchResponse.json();
@@ -110,28 +99,22 @@ async function createOrFindLead(
       return { lead_id: searchResult.result[0].ID, created: false };
     }
     
-    // If no lead found, create new one
     console.log("No existing lead found, creating new lead...");
-    
-    const createParams: Record<string, unknown> = {
-      fields: {
-        TITLE: `WhatsApp: ${contactName || phoneSearch}`,
-        NAME: contactName || phoneSearch,
-        PHONE: [{ VALUE: phoneSearch, VALUE_TYPE: "WORK" }],
-        SOURCE_ID: "WEB", // or create custom source "WHATSAPP"
-        STATUS_ID: "NEW",
-        COMMENTS: `Lead criado automaticamente via WhatsApp Thoth.ai`
-      }
-    };
-    
-    if (isOAuth && accessToken) {
-      createParams.auth = accessToken;
-    }
     
     const createResponse = await fetch(`${apiUrl}crm.lead.add`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(createParams)
+      body: JSON.stringify({
+        auth: accessToken,
+        fields: {
+          TITLE: `WhatsApp: ${contactName || phoneSearch}`,
+          NAME: contactName || phoneSearch,
+          PHONE: [{ VALUE: phoneSearch, VALUE_TYPE: "WORK" }],
+          SOURCE_ID: "WEB",
+          STATUS_ID: "NEW",
+          COMMENTS: `Lead criado automaticamente via WhatsApp Thoth.ai`
+        }
+      })
     });
     
     const createResult = await createResponse.json();
@@ -148,46 +131,40 @@ async function createOrFindLead(
   }
 }
 
-// Helper to add activity (message history) to lead
+// Helper to add activity to lead
 async function addActivityToLead(
   apiUrl: string,
-  accessToken: string | null,
+  accessToken: string,
   leadId: string,
   contactPhone: string,
   message: string,
-  direction: "incoming" | "outgoing",
-  isOAuth: boolean
+  direction: "incoming" | "outgoing"
 ) {
   try {
-    const activityParams: Record<string, unknown> = {
-      fields: {
-        OWNER_TYPE_ID: 1, // Lead
-        OWNER_ID: leadId,
-        TYPE_ID: 4, // SMS/Message activity
-        SUBJECT: direction === "incoming" ? `Mensagem recebida de ${contactPhone}` : `Mensagem enviada para ${contactPhone}`,
-        DESCRIPTION: message,
-        DIRECTION: direction === "incoming" ? 1 : 2, // 1 = incoming, 2 = outgoing
-        COMPLETED: "Y",
-        RESPONSIBLE_ID: 1, // Admin user
-        COMMUNICATIONS: [
-          {
-            VALUE: contactPhone,
-            ENTITY_ID: leadId,
-            ENTITY_TYPE_ID: 1,
-            TYPE: "PHONE"
-          }
-        ]
-      }
-    };
-
-    if (isOAuth && accessToken) {
-      activityParams.auth = accessToken;
-    }
-
     const response = await fetch(`${apiUrl}crm.activity.add`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(activityParams)
+      body: JSON.stringify({
+        auth: accessToken,
+        fields: {
+          OWNER_TYPE_ID: 1,
+          OWNER_ID: leadId,
+          TYPE_ID: 4,
+          SUBJECT: direction === "incoming" ? `Mensagem recebida de ${contactPhone}` : `Mensagem enviada para ${contactPhone}`,
+          DESCRIPTION: message,
+          DIRECTION: direction === "incoming" ? 1 : 2,
+          COMPLETED: "Y",
+          RESPONSIBLE_ID: 1,
+          COMMUNICATIONS: [
+            {
+              VALUE: contactPhone,
+              ENTITY_ID: leadId,
+              ENTITY_TYPE_ID: 1,
+              TYPE: "PHONE"
+            }
+          ]
+        }
+      })
     });
 
     const result = await response.json();
@@ -254,12 +231,30 @@ serve(async (req) => {
     }
 
     const config = integration.config as Record<string, unknown>;
-    let webhookUrl = config?.webhook_url as string;
     const connectorId = config?.connector_id as string;
-    const isOAuth = !!config?.access_token;
+
+    // Get access token (OAuth mode only)
+    const accessToken = await refreshBitrixToken(integration, supabase);
+    if (!accessToken) {
+      console.error("Failed to get valid OAuth token");
+      return new Response(
+        JSON.stringify({ error: "OAuth token expired or invalid. Please reconnect Bitrix24 via Marketplace." }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+    
+    const clientEndpoint = config.client_endpoint as string;
+    if (!clientEndpoint) {
+      return new Response(
+        JSON.stringify({ error: "Invalid Bitrix24 configuration - no client endpoint" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const apiUrl = clientEndpoint.endsWith("/") ? clientEndpoint : `${clientEndpoint}/`;
 
     // Fetch line_id from bitrix_channel_mappings based on instance
-    let lineId = "1"; // default fallback
+    let lineId = "1";
     
     if (instance_id) {
       const { data: channelMapping } = await supabase
@@ -274,216 +269,87 @@ serve(async (req) => {
         lineId = channelMapping.line_id.toString();
         console.log(`Using line_id ${lineId} (${channelMapping.line_name}) from channel mapping`);
       } else {
-        // Fallback to config.line_id
         lineId = (config?.line_id as string) || "1";
         console.log(`No channel mapping found for instance ${instance_id}, using config line_id: ${lineId}`);
       }
     } else {
-      // No instance_id provided, use config line_id
       lineId = (config?.line_id as string) || "1";
-      console.log(`No instance_id provided, using config line_id: ${lineId}`);
     }
-    
-    console.log("Final line_id to be used:", lineId);
-    let accessToken: string | null = null;
-
-    // For OAuth-based integrations, ensure we have a valid access token
-    if (config?.access_token) {
-      accessToken = await refreshBitrixToken(integration, supabase);
-      if (!accessToken) {
-        console.error("Failed to get valid OAuth token");
-        return new Response(
-          JSON.stringify({ error: "OAuth token expired or invalid. Please reconnect Bitrix24." }),
-          { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
-      
-      // Use client_endpoint for OAuth-based calls
-      const clientEndpoint = config.client_endpoint as string;
-      if (clientEndpoint) {
-        webhookUrl = clientEndpoint;
-      }
-    }
-
-    if (!webhookUrl) {
-      console.error("Invalid Bitrix24 configuration - no webhook URL");
-      return new Response(
-        JSON.stringify({ error: "Invalid Bitrix24 configuration" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
-    // Ensure URL ends with /
-    const apiUrl = webhookUrl.endsWith("/") ? webhookUrl : `${webhookUrl}/`;
 
     // Create or find lead if this is first message or explicitly requested
     let leadInfo: { lead_id?: string; contact_id?: string; created?: boolean } = {};
     
     if (create_lead !== false && (is_first_message || create_lead === true)) {
       console.log("Checking/creating lead for contact:", contact_phone);
-      leadInfo = await createOrFindLead(apiUrl, accessToken, contact_phone, contact_name || contact_phone, isOAuth);
+      leadInfo = await createOrFindLead(apiUrl, accessToken, contact_phone, contact_name || contact_phone);
       console.log("Lead info:", leadInfo);
       
-      // Add activity to lead
       if (leadInfo.lead_id) {
-        await addActivityToLead(apiUrl, accessToken, leadInfo.lead_id, contact_phone, message, "incoming", isOAuth);
+        await addActivityToLead(apiUrl, accessToken, leadInfo.lead_id, contact_phone, message, "incoming");
       }
     }
 
     // Send to Open Lines via imconnector if configured
     let imconnectorResult = null;
     if (connectorId) {
-      // Check if connector is active on this line and activate if needed
       console.log(`Checking connector status on line ${lineId}...`);
-      
-      const statusParams: Record<string, unknown> = {
-        CONNECTOR: connectorId,
-        LINE: parseInt(lineId)
-      };
-      if (isOAuth && accessToken) {
-        statusParams.auth = accessToken;
-      }
       
       const statusResponse = await fetch(`${apiUrl}imconnector.status`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(statusParams)
+        body: JSON.stringify({
+          auth: accessToken,
+          CONNECTOR: connectorId,
+          LINE: parseInt(lineId)
+        })
       });
       const statusResult = await statusResponse.json();
       console.log("Connector status result:", JSON.stringify(statusResult));
       
-      // Check if connector is not active or not configured on this line
       const isActive = statusResult.result?.active || statusResult.result?.ACTIVE;
       const isConfigured = statusResult.result?.connection || statusResult.result?.CONNECTION;
       
-      // Webhook URL for receiving operator messages - MUST use bitrix24-events (public, no JWT)
-      const eventsCallbackUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/bitrix24-events`;
+      const eventsCallbackUrl = `${supabaseUrl}/functions/v1/bitrix24-events`;
       
       if (!isActive || !isConfigured) {
         console.log(`Connector not fully active on line ${lineId}, activating...`);
         
-        // Activate connector on this line
-        const activateParams: Record<string, unknown> = {
-          CONNECTOR: connectorId,
-          LINE: parseInt(lineId),
-          ACTIVE: 1
-        };
-        if (isOAuth && accessToken) {
-          activateParams.auth = accessToken;
-        }
-        
         const activateResponse = await fetch(`${apiUrl}imconnector.activate`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(activateParams)
+          body: JSON.stringify({
+            auth: accessToken,
+            CONNECTOR: connectorId,
+            LINE: parseInt(lineId),
+            ACTIVE: 1
+          })
         });
         const activateResult = await activateResponse.json();
         console.log("Connector activate result:", JSON.stringify(activateResult));
-      } else {
-        console.log(`Connector already active on line ${lineId}`);
       }
       
-      // ALWAYS configure connector data (webhook URL) for this line to ensure replies come back
+      // Configure connector data
       console.log(`Configuring connector data on line ${lineId} with events URL: ${eventsCallbackUrl}`);
-      const connectorDataParams: Record<string, unknown> = {
-        CONNECTOR: connectorId,
-        LINE: parseInt(lineId),
-        DATA: {
-          id: `${connectorId}_line_${lineId}`,
-          url: eventsCallbackUrl,
-          url_im: eventsCallbackUrl,
-          name: "Thoth WhatsApp",
-        }
-      };
-      if (isOAuth && accessToken) {
-        connectorDataParams.auth = accessToken;
-      }
-      
       const configResponse = await fetch(`${apiUrl}imconnector.connector.data.set`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(connectorDataParams)
+        body: JSON.stringify({
+          auth: accessToken,
+          CONNECTOR: connectorId,
+          LINE: parseInt(lineId),
+          DATA: {
+            id: `${connectorId}_line_${lineId}`,
+            url: eventsCallbackUrl,
+            url_im: eventsCallbackUrl,
+            name: "Thoth WhatsApp",
+          }
+        })
       });
       const configResult = await configResponse.json();
       console.log("Connector data.set result:", JSON.stringify(configResult));
-      
-      // Update integration config with current line_id
-      if (config?.line_id !== lineId || config?.activated_line_id !== lineId) {
-        console.log(`Updating integration config with line_id: ${lineId}`);
-        await supabase
-          .from("integrations")
-          .update({
-            config: {
-              ...config,
-              line_id: lineId,
-              activated_line_id: lineId,
-            },
-            updated_at: new Date().toISOString()
-          })
-          .eq("id", integration.id);
-      }
-
-      // Ensure event bindings are set up to receive operator messages
-      const events = [
-        "OnImConnectorMessageAdd",      // When operator sends message
-        "OnImConnectorDialogStart",     // When dialog starts
-        "OnImConnectorDialogFinish",    // When dialog ends
-        "OnImConnectorStatusChange",    // When connector status changes
-      ];
-
-      console.log("Ensuring event bindings for events URL:", eventsCallbackUrl);
-
-      // First, get existing event bindings
-      const eventGetParams: Record<string, unknown> = {};
-      if (isOAuth && accessToken) {
-        eventGetParams.auth = accessToken;
-      }
-
-      const eventListResponse = await fetch(`${apiUrl}event.get`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(eventGetParams)
-      });
-      const eventListResult = await eventListResponse.json();
-      console.log("Current event bindings:", JSON.stringify(eventListResult));
-
-      // Check if our events are bound and bind if missing
-      const existingEvents = eventListResult.result || [];
-      const existingHandlers = existingEvents.map((e: any) => `${e.event || e.EVENT}::${e.handler || e.HANDLER}`);
-
-      for (const eventName of events) {
-        const eventAlreadyBound = existingEvents.some((e: any) => {
-          const existingEventName = (e.event || e.EVENT || "").toUpperCase();
-          const existingHandler = (e.handler || e.HANDLER || "");
-          return existingEventName === eventName.toUpperCase() && 
-                 existingHandler.includes("bitrix24-events");
-        });
-
-        if (!eventAlreadyBound) {
-          console.log(`Binding event ${eventName}...`);
-          
-          const bindParams: Record<string, unknown> = {
-            event: eventName,
-            handler: eventsCallbackUrl
-          };
-          if (isOAuth && accessToken) {
-            bindParams.auth = accessToken;
-          }
-
-          const bindResponse = await fetch(`${apiUrl}event.bind`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(bindParams)
-          });
-          const bindResult = await bindResponse.json();
-          console.log(`Event bind ${eventName} result:`, JSON.stringify(bindResult));
-        } else {
-          console.log(`Event ${eventName} already bound`);
-        }
-      }
 
       // Build message payload for Bitrix24
-      const messagePayload: Record<string, unknown> = {
+      const messagePayload = {
         CONNECTOR: connectorId,
         LINE: lineId,
         MESSAGES: [
@@ -498,102 +364,62 @@ serve(async (req) => {
               date: Math.floor(Date.now() / 1000),
               text: message,
             },
-            chat: {
-              id: contact_phone,
-            },
           },
         ],
       };
 
-      // Add auth token for OAuth-based calls
-      if (isOAuth && accessToken) {
-        messagePayload.auth = accessToken;
-      }
-
-      console.log("Calling imconnector.send.messages:", JSON.stringify(messagePayload));
-
-      const response = await fetch(`${apiUrl}imconnector.send.messages`, {
+      console.log("Sending message via imconnector.send.messages");
+      
+      const sendResponse = await fetch(`${apiUrl}imconnector.send.messages`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(messagePayload),
+        body: JSON.stringify({
+          auth: accessToken,
+          ...messagePayload
+        }),
       });
 
-      imconnectorResult = await response.json();
+      imconnectorResult = await sendResponse.json();
       console.log("imconnector.send.messages result:", JSON.stringify(imconnectorResult));
-
-      if (imconnectorResult.error) {
-        // Check for token expiration errors
-        if (imconnectorResult.error === "expired_token" || imconnectorResult.error === "invalid_token") {
-          return new Response(
-            JSON.stringify({ error: "Token OAuth expirado. Reconecte o Bitrix24." }),
-            { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-          );
-        }
-        // Don't return error, lead might have been created
-        console.error("imconnector error:", imconnectorResult.error);
-      }
-
-      // Save session info for conversation to open in Contact Center
-      // The result may contain SESSION_ID, CHAT_ID, USER_ID that we need for replies
-      const sessionData = imconnectorResult.result || {};
-      const sessionId = sessionData.SESSION_ID || sessionData.session_id;
-      const chatId = sessionData.CHAT_ID || sessionData.chat_id;
-      const bitrixUserId = sessionData.USER_ID || sessionData.user_id;
-
-      console.log("Session data from imconnector:", { sessionId, chatId, bitrixUserId });
-
-      // ALWAYS update contact metadata with Bitrix24 info
-      // Save contact_phone as bitrix24_user_id since that's what we send as user.id
-      const { data: existingContact } = await supabase
-        .from("contacts")
-        .select("metadata")
-        .eq("phone_number", contact_phone)
-        .maybeSingle();
-
-      await supabase
-        .from("contacts")
-        .update({ 
-          metadata: { 
-            ...(existingContact?.metadata || {}),
-            bitrix24_user_id: contact_phone, // IMPORTANT: save phone as user_id for lookup
-            bitrix24_session_id: sessionId || existingContact?.metadata?.bitrix24_session_id,
-            bitrix24_chat_id: chatId || existingContact?.metadata?.bitrix24_chat_id,
-            bitrix24_lead_id: leadInfo.lead_id,
-            bitrix24_last_message_at: new Date().toISOString(),
-          } 
-        })
-        .eq("phone_number", contact_phone);
-
-      console.log("Updated contact metadata with bitrix24_user_id:", contact_phone);
     }
 
-    // Update contact with lead info
-    if (leadInfo.lead_id) {
-      const { data: existingContact } = await supabase
+    // Update contact metadata with Bitrix24 info
+    if (leadInfo.lead_id || imconnectorResult?.result) {
+      const { data: contact } = await supabase
         .from("contacts")
-        .select("metadata")
+        .select("id, metadata")
         .eq("phone_number", contact_phone)
+        .eq("instance_id", instance_id)
         .maybeSingle();
 
-      await supabase
-        .from("contacts")
-        .update({ 
-          metadata: { 
-            ...(existingContact?.metadata || {}),
-            bitrix24_lead_id: leadInfo.lead_id,
-          } 
-        })
-        .eq("phone_number", contact_phone);
+      if (contact) {
+        const existingMetadata = contact.metadata || {};
+        await supabase
+          .from("contacts")
+          .update({
+            metadata: {
+              ...existingMetadata,
+              bitrix24_user_id: contact_phone,
+              bitrix24_session_id: imconnectorResult?.result?.session_id,
+              bitrix24_lead_id: leadInfo.lead_id || existingMetadata.bitrix24_lead_id,
+              bitrix24_last_sync: new Date().toISOString(),
+            },
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", contact.id);
+      }
     }
 
     return new Response(
-      JSON.stringify({ 
-        success: true, 
-        imconnector: imconnectorResult?.result,
+      JSON.stringify({
+        success: true,
         lead: leadInfo,
+        imconnector: imconnectorResult?.result || null,
+        message_sent: !!imconnectorResult?.result,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
+
   } catch (error) {
     console.error("Bitrix24 send error:", error);
     const errorMessage = error instanceof Error ? error.message : "Unknown error";
