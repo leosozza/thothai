@@ -248,6 +248,14 @@ serve(async (req) => {
               oauth_pending: integration.config?.oauth_pending || false,
               auto_setup_complete: integration.config?.auto_setup_completed || false,
               connector_active: integration.config?.activated || false,
+              // Bot AI config
+              config: {
+                bot_registered: integration.config?.bot_registered || false,
+                bot_id: integration.config?.bot_id || null,
+                bot_name: integration.config?.bot_name || "Thoth AI",
+                bot_enabled: integration.config?.bot_enabled || false,
+                bot_persona_id: integration.config?.bot_persona_id || null,
+              },
             }),
             { headers: { ...corsHeaders, "Content-Type": "application/json" } }
           );
