@@ -173,19 +173,23 @@ serve(async (req) => {
           integration = byDomain2;
         }
 
-        let instances: any[] = [];
-        
-        if (integration?.workspace_id) {
-          // Integration exists with workspace - fetch instances from that workspace
-          const { data: workspaceInstances } = await supabase
-            .from("instances")
-            .select("id, name, phone_number, status")
-            .eq("workspace_id", integration.workspace_id)
-            .eq("status", "connected");
+        // SIMPLIFIED: Return found:true if integration exists (workspace is OPTIONAL)
+        if (integration) {
+          let instances: any[] = [];
           
-          instances = workspaceInstances || [];
-          console.log("Found workspace instances:", instances.length);
+          // If integration has workspace_id, fetch instances from that workspace
+          if (integration.workspace_id) {
+            const { data: workspaceInstances } = await supabase
+              .from("instances")
+              .select("id, name, phone_number, status")
+              .eq("workspace_id", integration.workspace_id)
+              .eq("status", "connected");
+            
+            instances = workspaceInstances || [];
+            console.log("Found workspace instances:", instances.length);
+          }
 
+          console.log("✅ Integration found:", integration.id, "- returning found:true");
           return new Response(
             JSON.stringify({
               found: true,
@@ -194,7 +198,6 @@ serve(async (req) => {
               registered: integration.config?.registered || false,
               instance_id: integration.config?.instance_id,
               is_active: integration.is_active,
-              workspace_id: integration.workspace_id,
               instances: instances,
               has_access_token: !!integration.config?.access_token,
               has_oauth_config: !!(integration.config?.client_id && integration.config?.client_secret),
@@ -207,12 +210,11 @@ serve(async (req) => {
           );
         }
 
-        // No integration found - require token for multi-tenant linking
-        console.log("No integration found - requires token for workspace linking");
+        // No integration found at all
+        console.log("No integration found for:", searchValue);
         return new Response(
           JSON.stringify({ 
             found: false,
-            requires_token: true,
             instances: [],
           }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
