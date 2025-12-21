@@ -52,6 +52,9 @@ export default function Bitrix24Setup() {
   const [connecting, setConnecting] = useState(false);
   const installFinishCalled = useRef(false);
   const [reconnecting, setReconnecting] = useState(false);
+  const [forceSyncing, setForceSyncing] = useState(false);
+  const [appInstalled, setAppInstalled] = useState<boolean | null>(null);
+  const [appInfo, setAppInfo] = useState<any>(null);
 
   // Initialize from URL params and Bitrix24 SDK
   useEffect(() => {
@@ -294,6 +297,88 @@ export default function Bitrix24Setup() {
     }
   };
 
+  // Check if app is marked as INSTALLED in Bitrix24
+  const checkAppInstalled = useCallback(async () => {
+    if (!integrationId) return;
+    
+    try {
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/bitrix24-webhook`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "check_app_installed",
+          integration_id: integrationId,
+        }),
+      });
+      
+      const data = await response.json();
+      console.log("App installed check:", data);
+      
+      setAppInstalled(data.app_installed ?? false);
+      setAppInfo(data.app_info);
+      
+      // If app is NOT installed, try to call installFinish again
+      if (!data.app_installed && !installFinishCalled.current) {
+        console.log("App not marked as installed, calling BX24.installFinish()...");
+        notifyInstallFinish();
+      }
+    } catch (err) {
+      console.error("Error checking app installed:", err);
+    }
+  }, [integrationId, notifyInstallFinish]);
+
+  // Force reinstall events to make Bitrix24 re-evaluate the installation
+  const handleForceSync = async () => {
+    if (!integrationId) {
+      toast.error("Integração não encontrada");
+      return;
+    }
+    
+    try {
+      setForceSyncing(true);
+      
+      // Step 1: Call installFinish via BX24 SDK
+      notifyInstallFinish();
+      
+      // Step 2: Force reinstall events via API
+      const response = await fetch(`${SUPABASE_URL}/functions/v1/bitrix24-webhook`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "force_reinstall_events",
+          integration_id: integrationId,
+        }),
+      });
+      
+      const data = await response.json();
+      console.log("Force reinstall result:", data);
+      
+      if (data.success) {
+        toast.success("Sincronização forçada concluída! Eventos reconfigurados.");
+        
+        // Check app status again
+        await checkAppInstalled();
+        
+        // Reload data
+        await loadData();
+      } else {
+        toast.error(data.error || "Erro na sincronização forçada");
+      }
+    } catch (err: any) {
+      console.error("Error in force sync:", err);
+      toast.error(err.message || "Erro na sincronização forçada");
+    } finally {
+      setForceSyncing(false);
+    }
+  };
+
+  // Check app installed status when connected
+  useEffect(() => {
+    if (step === "connected" && integrationId) {
+      checkAppInstalled();
+    }
+  }, [step, integrationId, checkAppInstalled]);
+
   const getInstanceName = (instanceId: string) => {
     const instance = instances.find(i => i.id === instanceId);
     return instance?.name || instance?.phone_number || "WhatsApp";
@@ -373,6 +458,33 @@ export default function Bitrix24Setup() {
               </div>
             </div>
 
+            {/* App Installation Status */}
+            {appInstalled !== null && (
+              <div className={`rounded-lg p-3 ${appInstalled ? 'bg-green-500/10' : 'bg-yellow-500/10'}`}>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium">Status da Instalação</span>
+                  <Badge variant={appInstalled ? "default" : "secondary"} className={appInstalled ? "bg-green-500" : "bg-yellow-500"}>
+                    {appInstalled ? (
+                      <>
+                        <CheckCircle className="h-3 w-3 mr-1" />
+                        Instalado
+                      </>
+                    ) : (
+                      <>
+                        <AlertCircle className="h-3 w-3 mr-1" />
+                        Pendente
+                      </>
+                    )}
+                  </Badge>
+                </div>
+                {!appInstalled && (
+                  <p className="text-xs text-muted-foreground mt-2">
+                    O Bitrix24 ainda não confirmou a instalação. Clique em "Forçar Sincronização" para resolver.
+                  </p>
+                )}
+              </div>
+            )}
+
             {/* Instructions */}
             <div className="bg-primary/5 rounded-lg p-4">
               <h4 className="font-medium text-sm mb-2 flex items-center gap-2">
@@ -386,20 +498,35 @@ export default function Bitrix24Setup() {
               </ul>
             </div>
 
-            {/* Reconnect button (only if issues) */}
-            <Button 
-              variant="outline" 
-              className="w-full" 
-              onClick={handleReconnect}
-              disabled={reconnecting}
-            >
-              {reconnecting ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <RefreshCw className="h-4 w-4 mr-2" />
-              )}
-              Reconectar
-            </Button>
+            {/* Action buttons */}
+            <div className="flex gap-2">
+              <Button 
+                variant="outline" 
+                className="flex-1" 
+                onClick={handleReconnect}
+                disabled={reconnecting || forceSyncing}
+              >
+                {reconnecting ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                )}
+                Reconectar
+              </Button>
+              <Button 
+                variant={appInstalled === false ? "default" : "outline"}
+                className="flex-1" 
+                onClick={handleForceSync}
+                disabled={forceSyncing || reconnecting}
+              >
+                {forceSyncing ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Zap className="h-4 w-4 mr-2" />
+                )}
+                Forçar Sincronização
+              </Button>
+            </div>
           </CardContent>
         </Card>
       </div>
