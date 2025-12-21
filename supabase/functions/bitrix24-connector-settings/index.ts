@@ -20,6 +20,27 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
 };
 
+// Bitrix opens this handler inside an iframe (Contact Center → Settings).
+// Some environments inject a very restrictive CSP; we set our own CSP to:
+// - allow the Bitrix24 JS SDK
+// - allow inline styles/scripts used by these simple HTML pages
+// - allow embedding into Bitrix24 portals
+const htmlHeaders = {
+  ...corsHeaders,
+  "Content-Type": "text/html; charset=utf-8",
+  "X-Frame-Options": "ALLOWALL",
+  "Content-Security-Policy": [
+    "default-src 'self'",
+    "script-src 'self' https://api.bitrix24.com 'unsafe-inline'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: https:",
+    "connect-src *",
+    "frame-ancestors https://*.bitrix24.com https://*.bitrix24.com.br",
+    "object-src 'none'",
+    "base-uri 'self'",
+  ].join('; '),
+} as const;
+
 // Helper to refresh Bitrix24 OAuth token
 async function refreshBitrixToken(integration: any, supabase: any): Promise<string | null> {
   const config = integration.config;
@@ -292,11 +313,7 @@ serve(async (req) => {
 </html>`;
 
       return new Response(setupHtml, {
-        headers: { 
-          ...corsHeaders, 
-          "Content-Type": "text/html; charset=utf-8",
-          "X-Frame-Options": "ALLOWALL"
-        }
+        headers: htmlHeaders,
       });
     }
 
@@ -503,11 +520,7 @@ serve(async (req) => {
 </html>`;
 
       return new Response(tokenHtml, {
-        headers: { 
-          ...corsHeaders, 
-          "Content-Type": "text/html; charset=utf-8",
-          "X-Frame-Options": "ALLOWALL"
-        }
+        headers: htmlHeaders,
       });
     }
 
@@ -619,11 +632,7 @@ serve(async (req) => {
 </html>`;
 
     return new Response(successHtml, {
-      headers: { 
-        ...corsHeaders, 
-        "Content-Type": "text/html; charset=utf-8",
-        "X-Frame-Options": "ALLOWALL"
-      }
+      headers: htmlHeaders,
     });
 
   } catch (error) {
@@ -641,11 +650,7 @@ serve(async (req) => {
 
     return new Response(errorHtml, {
       status: 500,
-      headers: { 
-        ...corsHeaders, 
-        "Content-Type": "text/html; charset=utf-8",
-        "X-Frame-Options": "ALLOWALL"
-      }
+      headers: htmlHeaders,
     });
   }
 });
