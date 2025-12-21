@@ -500,24 +500,48 @@ serve(async (req) => {
         }
       }
 
-      // Return HTML for marketplace installation
+      // Return HTML for marketplace installation with BX24.installFinish()
+      // CRITICAL: Must call BX24.installFinish() to notify Bitrix24 that installation is complete
       return new Response(
         `<!DOCTYPE html>
         <html>
         <head>
           <meta charset="utf-8">
           <title>Thoth WhatsApp - Instalação</title>
+          <script src="https://api.bitrix24.com/api/v1/"></script>
           <style>
             body { font-family: Arial, sans-serif; padding: 20px; text-align: center; }
             .success { color: #22c55e; }
             h1 { margin-bottom: 10px; }
             p { color: #666; }
+            .loading { margin-top: 20px; }
           </style>
         </head>
         <body>
           <h1 class="success">✅ Instalado com Sucesso!</h1>
           <p>O aplicativo Thoth WhatsApp foi instalado.</p>
-          <p>Configure o conector em: Contact Center → Canais → Thoth WhatsApp</p>
+          <p class="loading">Configurando automaticamente...</p>
+          
+          <script>
+            console.log('ONAPPINSTALL HTML loaded');
+            
+            // CRITICAL: Call BX24.installFinish() to notify Bitrix24
+            if (typeof BX24 !== 'undefined') {
+              BX24.init(function() {
+                console.log('BX24 initialized, calling installFinish...');
+                BX24.installFinish();
+                console.log('BX24.installFinish() called successfully');
+                
+                // Wait a moment then redirect to connector settings
+                setTimeout(function() {
+                  window.location.href = '${supabaseUrl}/functions/v1/bitrix24-connector-settings?member_id=${memberId || ""}&DOMAIN=${domain || ""}';
+                }, 1000);
+              });
+            } else {
+              console.log('BX24 not available, redirecting directly');
+              window.location.href = '${supabaseUrl}/functions/v1/bitrix24-connector-settings?member_id=${memberId || ""}&DOMAIN=${domain || ""}';
+            }
+          </script>
         </body>
         </html>`,
         { headers: { ...corsHeaders, "Content-Type": "text/html; charset=utf-8" } }
@@ -576,14 +600,53 @@ serve(async (req) => {
       console.log("=== PLACEMENT EVENT ===");
       console.log("Placement type:", body.PLACEMENT);
       
-      // Redirect to connector settings function
-      return new Response(null, {
-        status: 302,
-        headers: {
-          ...corsHeaders,
-          "Location": `${supabaseUrl}/functions/v1/bitrix24-connector-settings?${new URLSearchParams(body as any).toString()}`,
-        },
-      });
+      // CRITICAL: Do NOT use 302 redirect - return HTML with BX24.installFinish() and JS redirect
+      // 302 redirects break the Bitrix24 iframe flow
+      const redirectUrl = `${supabaseUrl}/functions/v1/bitrix24-connector-settings?${new URLSearchParams(body as any).toString()}`;
+      
+      return new Response(
+        `<!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <title>Thoth WhatsApp</title>
+          <script src="https://api.bitrix24.com/api/v1/"></script>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 40px; text-align: center; background: #f5f7fa; }
+            .loading { color: #666; }
+            .spinner { margin: 20px auto; width: 40px; height: 40px; border: 4px solid #e0e0e0; border-top: 4px solid #25D366; border-radius: 50%; animation: spin 1s linear infinite; }
+            @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+          </style>
+        </head>
+        <body>
+          <div class="spinner"></div>
+          <p class="loading">Carregando configurações...</p>
+          
+          <script>
+            console.log('PLACEMENT event HTML loaded');
+            
+            if (typeof BX24 !== 'undefined') {
+              BX24.init(function() {
+                console.log('BX24 initialized in PLACEMENT handler');
+                
+                // CRITICAL: Always call installFinish to ensure app is marked as installed
+                BX24.installFinish();
+                console.log('BX24.installFinish() called');
+                
+                // Now redirect using JavaScript (NOT 302)
+                setTimeout(function() {
+                  window.location.href = '${redirectUrl}';
+                }, 500);
+              });
+            } else {
+              console.log('BX24 not available, redirecting directly');
+              window.location.href = '${redirectUrl}';
+            }
+          </script>
+        </body>
+        </html>`,
+        { headers: { ...corsHeaders, "Content-Type": "text/html; charset=utf-8" } }
+      );
     }
 
     // Default response for unhandled events

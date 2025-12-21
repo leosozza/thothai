@@ -528,6 +528,9 @@ serve(async (req) => {
   <script>
     if (typeof BX24 !== 'undefined') {
       BX24.init(function() {
+        // CRITICAL: Always call installFinish to ensure app is marked as installed
+        BX24.installFinish();
+        console.log('BX24.installFinish() called in setup HTML');
         BX24.fitWindow();
       });
     }
@@ -804,6 +807,9 @@ serve(async (req) => {
     
     if (typeof BX24 !== 'undefined') {
       BX24.init(function() {
+        // CRITICAL: Always call installFinish to ensure app is marked as installed
+        BX24.installFinish();
+        console.log('BX24.installFinish() called in token HTML');
         BX24.fitWindow();
       });
     }
@@ -917,6 +923,9 @@ serve(async (req) => {
     
     if (typeof BX24 !== 'undefined') {
       BX24.init(function() {
+        // CRITICAL: Always call installFinish to ensure app is marked as installed
+        BX24.installFinish();
+        console.log('BX24.installFinish() called in success HTML');
         BX24.fitWindow();
       });
     }
