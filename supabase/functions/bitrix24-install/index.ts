@@ -433,49 +433,21 @@ serve(async (req) => {
         app_sid: auth.application_token || body.APP_SID,
       };
 
-      // MARKETPLACE: Auto-create workspace if it doesn't exist
-      let workspaceId = integration?.workspace_id;
-      
-      if (!workspaceId) {
-        // Create a new workspace automatically for marketplace installations
-        const workspaceName = `Bitrix24 - ${domain || memberId}`;
-        const workspaceSlug = `bitrix24-${(memberId || domain || Date.now().toString()).toString().toLowerCase().replace(/[^a-z0-9-]/g, '-').substring(0, 50)}`;
-        
-        console.log("Creating automatic workspace for marketplace app:", workspaceName);
-        
-        const { data: newWorkspace, error: wsError } = await supabase
-          .from("workspaces")
-          .insert({
-            name: workspaceName,
-            slug: workspaceSlug,
-            plan: "free",
-            owner_id: "00000000-0000-0000-0000-000000000000", // Placeholder for marketplace apps
-            settings: { source: "bitrix24_marketplace", member_id: memberId, domain: domain },
-          })
-          .select()
-          .single();
-        
-        if (wsError) {
-          console.error("Error creating workspace:", wsError);
-        } else {
-          workspaceId = newWorkspace.id;
-          console.log("Created workspace for marketplace:", workspaceId);
-        }
-      }
-
+      // MARKETPLACE: Integration WITHOUT workspace (simplified flow)
       if (integration) {
+        // Update existing integration
         await supabase
           .from("integrations")
           .update({
             config: { ...integration.config, ...configData },
             is_active: true,
-            workspace_id: workspaceId || integration.workspace_id,
             updated_at: new Date().toISOString(),
           })
           .eq("id", integration.id);
         
         console.log("Updated existing integration for ONAPPINSTALL:", integration.id);
       } else {
+        // Create NEW integration WITHOUT workspace_id (null)
         const { data: newInt, error: insertError } = await supabase
           .from("integrations")
           .insert({
@@ -483,7 +455,7 @@ serve(async (req) => {
             name: `Bitrix24 - ${domain || memberId}`,
             config: configData,
             is_active: true,
-            workspace_id: workspaceId,
+            workspace_id: null, // NO WORKSPACE - direct Bitrix24 marketplace integration
           })
           .select()
           .single();
@@ -492,7 +464,7 @@ serve(async (req) => {
           console.error("Error creating integration:", insertError);
         } else {
           integration = newInt;
-          console.log("Created new integration for ONAPPINSTALL:", integration?.id, "with workspace:", workspaceId);
+          console.log("✅ Created new integration for ONAPPINSTALL:", integration?.id, "WITHOUT workspace (marketplace mode)");
         }
       }
 
@@ -661,85 +633,45 @@ serve(async (req) => {
         console.log("Existing integration found:", integration?.id || "none");
       }
       
-      // AUTO-CREATE: If no integration exists, create workspace + integration
+      // AUTO-CREATE: If no integration exists, create integration WITHOUT workspace
       if (!integration && searchId) {
-        console.log("=== AUTO-CREATING WORKSPACE AND INTEGRATION ===");
+        console.log("=== AUTO-CREATING INTEGRATION (NO WORKSPACE) ===");
         
-        // Try to get actual domain from Bitrix24 API
-        let actualDomain = domain;
-        if (body.AUTH_ID && !actualDomain) {
-          try {
-            const serverEndpoint = body.SERVER_ENDPOINT || `https://oauth.bitrix.info/rest/`;
-            const profileResp = await fetch(`${serverEndpoint}profile?auth=${body.AUTH_ID}`);
-            if (profileResp.ok) {
-              const profileData = await profileResp.json();
-              console.log("Profile data for domain:", JSON.stringify(profileData.result).substring(0, 200));
-            }
-          } catch (e) {
-            console.log("Could not fetch profile for domain:", e);
-          }
-        }
+        // Use domain from body or try to extract from member_id
+        const actualDomain = domain || (memberId ? `portal-${memberId}` : 'unknown');
+        const integrationName = `Bitrix24 - ${actualDomain}`;
         
-        // Create workspace
-        const workspaceName = `Bitrix24 - ${actualDomain || searchId}`;
-        const workspaceSlug = `bitrix24-${(searchId).toString().toLowerCase().replace(/[^a-z0-9-]/g, '-').substring(0, 50)}-${Date.now()}`;
+        const configData: Record<string, any> = {
+          member_id: memberId,
+          domain: actualDomain,
+          auth_id: body.AUTH_ID,
+          refresh_id: body.REFRESH_ID,
+          server_endpoint: body.SERVER_ENDPOINT,
+          auth_expires: body.AUTH_EXPIRES,
+          status: body.status,
+          placement: body.PLACEMENT,
+          created_via: 'placement_auto_create',
+          created_at: new Date().toISOString()
+        };
         
-        const { data: newWorkspace, error: wsError } = await supabase
-          .from("workspaces")
+        // Create integration WITHOUT workspace_id (null)
+        const { data: newInt, error: intError } = await supabase
+          .from("integrations")
           .insert({
-            name: workspaceName,
-            slug: workspaceSlug,
-            plan: 'free',
-            owner_id: '00000000-0000-0000-0000-000000000000',
-            settings: { 
-              source: 'bitrix24_marketplace_placement',
-              member_id: memberId,
-              domain: actualDomain,
-              created_at: new Date().toISOString()
-            }
+            workspace_id: null, // NO WORKSPACE - direct Bitrix24 marketplace integration
+            type: "bitrix24",
+            name: integrationName,
+            config: configData,
+            is_active: true
           })
           .select()
           .single();
         
-        if (wsError) {
-          console.error("Error creating workspace:", wsError);
+        if (intError) {
+          console.error("Error creating integration:", intError);
         } else {
-          console.log("Created workspace:", newWorkspace?.id, newWorkspace?.name);
-        }
-        
-        // Create integration with workspace_id
-        if (newWorkspace?.id) {
-          const configData: Record<string, any> = {
-            member_id: memberId,
-            domain: actualDomain,
-            auth_id: body.AUTH_ID,
-            refresh_id: body.REFRESH_ID,
-            server_endpoint: body.SERVER_ENDPOINT,
-            auth_expires: body.AUTH_EXPIRES,
-            status: body.status,
-            placement: body.PLACEMENT,
-            created_via: 'placement_auto_create',
-            created_at: new Date().toISOString()
-          };
-          
-          const { data: newInt, error: intError } = await supabase
-            .from("integrations")
-            .insert({
-              workspace_id: newWorkspace.id,
-              type: "bitrix24",
-              name: workspaceName,
-              config: configData,
-              is_active: true
-            })
-            .select()
-            .single();
-          
-          if (intError) {
-            console.error("Error creating integration:", intError);
-          } else {
-            console.log("Created integration:", newInt?.id, "with workspace_id:", newInt?.workspace_id);
-            integration = newInt;
-          }
+          console.log("✅ Created integration:", newInt?.id, "WITHOUT workspace (marketplace mode)");
+          integration = newInt;
         }
       }
       

@@ -119,11 +119,11 @@ export default function Bitrix24App() {
       
       if (data.domain) setDomain(data.domain);
 
-      // Check if workspace is linked
-      if (data.workspace_id) {
+      // SIMPLIFIED: Show dashboard if integration exists (workspace_id no longer required)
+      if (data.found && data.integration_id) {
         setView("dashboard");
       } else {
-        // Workspace not linked yet - show pending message instead of token
+        // Integration not found - show pending message
         setView("pending");
       }
     } catch (err) {

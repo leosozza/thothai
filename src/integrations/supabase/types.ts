@@ -508,7 +508,7 @@ export type Database = {
           name: string
           type: string
           updated_at: string
-          workspace_id: string
+          workspace_id: string | null
         }
         Insert: {
           config?: Json | null
@@ -519,7 +519,7 @@ export type Database = {
           name: string
           type: string
           updated_at?: string
-          workspace_id: string
+          workspace_id?: string | null
         }
         Update: {
           config?: Json | null
@@ -530,7 +530,7 @@ export type Database = {
           name?: string
           type?: string
           updated_at?: string
-          workspace_id?: string
+          workspace_id?: string | null
         }
         Relationships: [
           {
