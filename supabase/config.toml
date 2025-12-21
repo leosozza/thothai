@@ -74,3 +74,6 @@ verify_jwt = false
 
 [functions.bitrix24-debug-logger]
 verify_jwt = false
+
+[functions.generate-logo]
+verify_jwt = true
