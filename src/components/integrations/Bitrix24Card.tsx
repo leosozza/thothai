@@ -86,8 +86,10 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
   const [verifying, setVerifying] = useState(false);
   const [reconfiguring, setReconfiguring] = useState(false);
   const [forcingActivation, setForcingActivation] = useState<number | null>(null);
+  const [checkingStatus, setCheckingStatus] = useState(false);
   const [diagnosis, setDiagnosis] = useState<DiagnosisResult | null>(null);
   const [verification, setVerification] = useState<VerificationResult | null>(null);
+  const [connectorStatusRaw, setConnectorStatusRaw] = useState<any>(null);
 
   const config = integration?.config || {};
   const isConnected = integration?.is_active && config.auto_setup_completed;
@@ -370,6 +372,40 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
     }
   };
 
+  const handleCheckConnectorStatus = async () => {
+    if (!integration?.id) {
+      toast.error("Integração não encontrada");
+      return;
+    }
+
+    setCheckingStatus(true);
+    setConnectorStatusRaw(null);
+    
+    try {
+      const response = await supabase.functions.invoke("bitrix24-webhook", {
+        body: {
+          action: "check_connector_status",
+          integration_id: integration.id,
+          line_id: 2,
+        }
+      });
+
+      console.log("check_connector_status response:", response.data);
+      setConnectorStatusRaw(response.data);
+      
+      if (response.data?.success) {
+        toast.success("Status obtido!");
+      } else {
+        toast.error(response.data?.error || "Erro ao verificar status");
+      }
+    } catch (error) {
+      console.error("Error checking status:", error);
+      toast.error("Erro ao verificar status");
+    } finally {
+      setCheckingStatus(false);
+    }
+  };
+
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
     toast.success("Copiado!");
@@ -627,6 +663,20 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
           <div className="flex gap-2">
             <Button 
               variant="outline" 
+              onClick={handleCheckConnectorStatus}
+              disabled={checkingStatus}
+              className="flex-1"
+            >
+              {checkingStatus ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Stethoscope className="h-4 w-4 mr-2" />
+              )}
+              API Status
+            </Button>
+
+            <Button 
+              variant="outline" 
               onClick={handleReconnect}
               disabled={reconnecting}
               className="flex-1"
@@ -638,7 +688,9 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
               )}
               Reconectar
             </Button>
+          </div>
 
+          <div className="flex gap-2">
             <Button 
               variant="destructive"
               onClick={handleReconfigureFromZero}
@@ -653,6 +705,76 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
               Do Zero
             </Button>
           </div>
+
+          {/* Raw Connector Status from imconnector.status API */}
+          {connectorStatusRaw && (
+            <div className="border rounded-lg p-4 space-y-3 bg-muted/30">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Stethoscope className="h-5 w-5 text-orange-500" />
+                  <span className="font-medium">imconnector.status (Raw API)</span>
+                </div>
+                <Button 
+                  variant="ghost" 
+                  size="sm"
+                  onClick={() => copyToClipboard(JSON.stringify(connectorStatusRaw, null, 2))}
+                >
+                  <Copy className="h-4 w-4" />
+                </Button>
+              </div>
+              
+              {connectorStatusRaw.success && (
+                <div className="grid grid-cols-2 gap-2 text-sm">
+                  <div className="flex items-center gap-2">
+                    {connectorStatusRaw.status?.active ? (
+                      <CheckCircle2 className="h-4 w-4 text-green-500" />
+                    ) : (
+                      <XCircle className="h-4 w-4 text-red-500" />
+                    )}
+                    <span>active: {String(connectorStatusRaw.status?.active)}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {connectorStatusRaw.status?.registered ? (
+                      <CheckCircle2 className="h-4 w-4 text-green-500" />
+                    ) : (
+                      <XCircle className="h-4 w-4 text-red-500" />
+                    )}
+                    <span>registered: {String(connectorStatusRaw.status?.registered)}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {connectorStatusRaw.status?.connection ? (
+                      <CheckCircle2 className="h-4 w-4 text-green-500" />
+                    ) : (
+                      <XCircle className="h-4 w-4 text-red-500" />
+                    )}
+                    <span>connection: {String(connectorStatusRaw.status?.connection)}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {connectorStatusRaw.connector_in_list ? (
+                      <CheckCircle2 className="h-4 w-4 text-green-500" />
+                    ) : (
+                      <XCircle className="h-4 w-4 text-red-500" />
+                    )}
+                    <span>in list: {String(connectorStatusRaw.connector_in_list)}</span>
+                  </div>
+                </div>
+              )}
+
+              <div className="bg-muted rounded p-2 overflow-auto max-h-40">
+                <pre className="text-xs">
+                  {JSON.stringify(connectorStatusRaw.status?.raw, null, 2)}
+                </pre>
+              </div>
+
+              {connectorStatusRaw.status?.error && (
+                <div className="bg-red-500/10 rounded p-2">
+                  <p className="text-sm text-red-600">
+                    Error: {JSON.stringify(connectorStatusRaw.status.error)}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
     );
