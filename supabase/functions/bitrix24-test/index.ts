@@ -10,7 +10,8 @@ const corsHeaders = {
 async function refreshBitrixToken(integration: any, supabase: any): Promise<string | null> {
   const config = integration.config;
   
-  if (!config?.refresh_token || !config?.client_id || !config?.client_secret) {
+  // MARKETPLACE: Check for refresh_token only (credentials come from env vars)
+  if (!config?.refresh_token) {
     console.log("No OAuth credentials for refresh");
     return config?.access_token || null;
   }
@@ -27,7 +28,10 @@ async function refreshBitrixToken(integration: any, supabase: any): Promise<stri
   console.log("Token expiring soon, refreshing...");
 
   try {
-    const tokenUrl = `https://oauth.bitrix.info/oauth/token/?grant_type=refresh_token&client_id=${config.client_id}&client_secret=${config.client_secret}&refresh_token=${config.refresh_token}`;
+    // MARKETPLACE: Use credentials from environment variables, NOT from database
+    const clientId = Deno.env.get("BITRIX24_CLIENT_ID") || "";
+    const clientSecret = Deno.env.get("BITRIX24_CLIENT_SECRET") || "";
+    const tokenUrl = `https://oauth.bitrix.info/oauth/token/?grant_type=refresh_token&client_id=${clientId}&client_secret=${clientSecret}&refresh_token=${config.refresh_token}`;
     
     const response = await fetch(tokenUrl);
     const data = await response.json();

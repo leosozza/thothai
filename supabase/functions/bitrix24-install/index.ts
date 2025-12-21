@@ -54,16 +54,25 @@ serve(async (req) => {
           integration = byDomain1;
         }
 
-        if (!integration || !integration.config?.client_id || !integration.config?.client_secret) {
+        // MARKETPLACE: Use credentials from environment variables
+        const clientId = Deno.env.get("BITRIX24_CLIENT_ID") || "";
+        const clientSecret = Deno.env.get("BITRIX24_CLIENT_SECRET") || "";
+        
+        if (!clientId || !clientSecret) {
+          console.error("BITRIX24_CLIENT_ID or BITRIX24_CLIENT_SECRET not configured");
+          return new Response(
+            `<!DOCTYPE html><html><head><meta charset="UTF-8"></head><body><h1>Erro</h1><p>Credenciais do Marketplace não configuradas. Contate o suporte.</p></body></html>`,
+            { status: 500, headers: { ...corsHeaders, "Content-Type": "text/html; charset=utf-8" } }
+          );
+        }
+        
+        if (!integration) {
           console.error("Integration not found for OAuth callback:", domain);
           return new Response(
-            `<!DOCTYPE html><html><head><meta charset="UTF-8"></head><body><h1>Erro</h1><p>Integração OAuth não encontrada. Por favor, configure novamente.</p></body></html>`,
+            `<!DOCTYPE html><html><head><meta charset="UTF-8"></head><body><h1>Erro</h1><p>Integração não encontrada. Por favor, reinstale o app.</p></body></html>`,
             { status: 400, headers: { ...corsHeaders, "Content-Type": "text/html; charset=utf-8" } }
           );
         }
-
-        const clientId = integration.config.client_id;
-        const clientSecret = integration.config.client_secret;
 
         // Exchange code for tokens
         const tokenUrl = `https://${domain}/oauth/token/`;

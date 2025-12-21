@@ -182,11 +182,7 @@ export default function Integrations() {
   const [linkingToken, setLinkingToken] = useState<string | null>(null);
   const [generatingToken, setGeneratingToken] = useState(false);
 
-  // OAuth Manual Bitrix24
-  const [oauthClientId, setOauthClientId] = useState("");
-  const [oauthClientSecret, setOauthClientSecret] = useState("");
-  const [oauthDomain, setOauthDomain] = useState("");
-  const [savingOAuth, setSavingOAuth] = useState(false);
+  // MARKETPLACE: OAuth credentials now come from environment, no manual config needed
 
   // Channel Mappings
   const [channelMappings, setChannelMappings] = useState<ChannelMapping[]>([]);
@@ -1009,44 +1005,8 @@ export default function Integrations() {
     }
   }, [workspace]);
 
-  const handleSaveOAuthManual = async () => {
-    if (!oauthDomain || !oauthClientId || !oauthClientSecret) {
-      toast.error("Preencha todos os campos: Domínio, Client ID e Client Secret");
-      return;
-    }
-
-    setSavingOAuth(true);
-    try {
-      const response = await supabase.functions.invoke("bitrix24-install", {
-        body: {
-          action: "oauth_exchange",
-          domain: oauthDomain.replace(/^https?:\/\//, "").replace(/\/$/, ""),
-          client_id: oauthClientId,
-          client_secret: oauthClientSecret,
-          workspace_id: workspace?.id,
-        },
-      });
-
-      if (response.error) {
-        throw new Error(response.error.message || "Erro ao iniciar OAuth");
-      }
-
-      const data = response.data;
-      const authUrl = data?.auth_url || data?.authorization_url;
-      if (authUrl) {
-        toast.info("Redirecionando para autorização no Bitrix24...");
-        window.location.href = authUrl;
-      } else {
-        console.error("Response data:", data);
-        throw new Error("URL de autorização não retornada");
-      }
-    } catch (error) {
-      console.error("Error initiating OAuth:", error);
-      toast.error(error instanceof Error ? error.message : "Erro ao iniciar OAuth");
-    } finally {
-      setSavingOAuth(false);
-    }
-  };
+  // MARKETPLACE: OAuth is handled automatically via marketplace app installation
+  // No manual OAuth configuration needed
 
   const handleSyncContacts = async () => {
     if (!workspace?.id) {
