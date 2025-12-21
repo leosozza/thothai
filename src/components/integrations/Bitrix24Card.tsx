@@ -17,6 +17,9 @@ import {
   ExternalLink,
   Phone,
   AlertCircle,
+  Stethoscope,
+  Wrench,
+  XCircle,
 } from "lucide-react";
 
 interface Integration {
@@ -41,10 +44,24 @@ interface Bitrix24CardProps {
   onRefresh: () => void;
 }
 
+interface DiagnosisResult {
+  connector_id: string;
+  line_id: number;
+  connector_registered: boolean;
+  connector_active: boolean;
+  connector_connection: boolean;
+  events_bound: boolean;
+  issues: string[];
+  fixes_applied: string[];
+}
+
 export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }: Bitrix24CardProps) {
   const [linkingToken, setLinkingToken] = useState<string | null>(null);
   const [generatingToken, setGeneratingToken] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
+  const [diagnosing, setDiagnosing] = useState(false);
+  const [fixing, setFixing] = useState(false);
+  const [diagnosis, setDiagnosis] = useState<DiagnosisResult | null>(null);
 
   const config = integration?.config || {};
   const isConnected = integration?.is_active && config.auto_setup_completed;
@@ -141,6 +158,81 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
     }
   };
 
+  const handleDiagnose = async () => {
+    if (!integration?.id) {
+      toast.error("Integração não encontrada");
+      return;
+    }
+
+    setDiagnosing(true);
+    setDiagnosis(null);
+    
+    try {
+      const response = await supabase.functions.invoke("bitrix24-webhook", {
+        body: {
+          action: "diagnose_connector",
+          integration_id: integration.id,
+          auto_fix: false,
+        }
+      });
+
+      if (response.data?.success) {
+        setDiagnosis(response.data.diagnosis);
+        if (response.data.healthy) {
+          toast.success("Conector funcionando corretamente!");
+        } else {
+          toast.warning(`${response.data.diagnosis.issues.length} problema(s) encontrado(s)`);
+        }
+      } else {
+        toast.error(response.data?.error || "Erro ao diagnosticar");
+      }
+    } catch (error) {
+      console.error("Error diagnosing:", error);
+      toast.error("Erro ao diagnosticar");
+    } finally {
+      setDiagnosing(false);
+    }
+  };
+
+  const handleAutoFix = async () => {
+    if (!integration?.id) {
+      toast.error("Integração não encontrada");
+      return;
+    }
+
+    setFixing(true);
+    
+    try {
+      const response = await supabase.functions.invoke("bitrix24-webhook", {
+        body: {
+          action: "diagnose_connector",
+          integration_id: integration.id,
+          auto_fix: true,
+        }
+      });
+
+      if (response.data?.success) {
+        setDiagnosis(response.data.diagnosis);
+        if (response.data.diagnosis.fixes_applied.length > 0) {
+          toast.success(`${response.data.diagnosis.fixes_applied.length} correção(ões) aplicada(s)!`);
+        }
+        if (response.data.healthy) {
+          toast.success("Conector corrigido e funcionando!");
+        } else {
+          toast.warning("Alguns problemas não puderam ser corrigidos automaticamente");
+        }
+        onRefresh();
+      } else {
+        toast.error(response.data?.error || "Erro ao corrigir");
+      }
+    } catch (error) {
+      console.error("Error fixing:", error);
+      toast.error("Erro ao corrigir");
+    } finally {
+      setFixing(false);
+    }
+  };
+
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
     toast.success("Copiado!");
@@ -194,6 +286,69 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
             )}
           </div>
 
+          {/* Diagnosis Results */}
+          {diagnosis && (
+            <div className="border rounded-lg p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <Stethoscope className="h-5 w-5 text-primary" />
+                <span className="font-medium">Diagnóstico do Conector</span>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-2 text-sm">
+                <div className="flex items-center gap-2">
+                  {diagnosis.connector_registered ? (
+                    <CheckCircle2 className="h-4 w-4 text-green-500" />
+                  ) : (
+                    <XCircle className="h-4 w-4 text-red-500" />
+                  )}
+                  <span>Conector Registrado</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {diagnosis.connector_active ? (
+                    <CheckCircle2 className="h-4 w-4 text-green-500" />
+                  ) : (
+                    <XCircle className="h-4 w-4 text-red-500" />
+                  )}
+                  <span>Conector Ativo</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {diagnosis.events_bound ? (
+                    <CheckCircle2 className="h-4 w-4 text-green-500" />
+                  ) : (
+                    <XCircle className="h-4 w-4 text-red-500" />
+                  )}
+                  <span>Eventos Configurados</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-muted-foreground">Linha:</span>
+                  <span className="font-medium">{diagnosis.line_id}</span>
+                </div>
+              </div>
+
+              {diagnosis.issues.length > 0 && (
+                <div className="bg-red-500/10 rounded p-2">
+                  <p className="text-sm font-medium text-red-600 mb-1">Problemas:</p>
+                  <ul className="text-sm text-red-600 list-disc list-inside">
+                    {diagnosis.issues.map((issue, i) => (
+                      <li key={i}>{issue}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {diagnosis.fixes_applied.length > 0 && (
+                <div className="bg-green-500/10 rounded p-2">
+                  <p className="text-sm font-medium text-green-600 mb-1">Correções Aplicadas:</p>
+                  <ul className="text-sm text-green-600 list-disc list-inside">
+                    {diagnosis.fixes_applied.map((fix, i) => (
+                      <li key={i}>{fix}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* How to use */}
           <Alert>
             <AlertCircle className="h-4 w-4" />
@@ -202,7 +357,35 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
             </AlertDescription>
           </Alert>
 
-          {/* Reconnect button */}
+          {/* Action buttons */}
+          <div className="grid grid-cols-2 gap-2">
+            <Button 
+              variant="outline" 
+              onClick={handleDiagnose}
+              disabled={diagnosing}
+            >
+              {diagnosing ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Stethoscope className="h-4 w-4 mr-2" />
+              )}
+              Diagnosticar
+            </Button>
+
+            <Button 
+              variant="outline" 
+              onClick={handleAutoFix}
+              disabled={fixing}
+            >
+              {fixing ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Wrench className="h-4 w-4 mr-2" />
+              )}
+              Corrigir Automaticamente
+            </Button>
+          </div>
+
           <Button 
             variant="outline" 
             onClick={handleReconnect}
@@ -214,7 +397,7 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
             ) : (
               <RefreshCw className="h-4 w-4 mr-2" />
             )}
-            Reconectar
+            Reconectar Completo
           </Button>
         </CardContent>
       </Card>

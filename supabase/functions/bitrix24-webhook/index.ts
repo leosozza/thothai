@@ -442,6 +442,125 @@ async function handleCompleteSetup(supabase: any, payload: any, supabaseUrl: str
   const activationResult = await activateConnectorViaAPI(integration, supabase, line_id, 1, webhookUrl);
   console.log("Activation result:", activationResult);
 
+  // Verify activation succeeded by checking status
+  const config = integration.config || {};
+  const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
+  const connectorId = config.connector_id || "thoth_whatsapp";
+  const accessToken = await refreshBitrixToken(integration, supabase);
+
+  let verificationResult = { active: false, verified: false };
+  
+  if (accessToken) {
+    try {
+      console.log("Verifying connector activation...");
+      const statusResponse = await fetch(`${clientEndpoint}imconnector.status`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          auth: accessToken,
+          CONNECTOR: connectorId,
+          LINE: line_id
+        })
+      });
+      const statusResult = await statusResponse.json();
+      console.log("Verification status:", JSON.stringify(statusResult, null, 2));
+
+      verificationResult.verified = true;
+      verificationResult.active = statusResult.result?.active === true || statusResult.result?.ACTIVE === "Y";
+
+      // If not active, try activating again with a different approach
+      if (!verificationResult.active) {
+        console.log("Connector not active after first attempt, trying again...");
+        
+        // Try imconnector.register first
+        const registerResponse = await fetch(`${clientEndpoint}imconnector.register`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            auth: accessToken,
+            ID: connectorId,
+            NAME: "Thoth WhatsApp",
+            ICON: {
+              DATA_IMAGE: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0OCIgaGVpZ2h0PSI0OCIgdmlld0JveD0iMCAwIDQ4IDQ4Ij48cGF0aCBmaWxsPSIjMjVEMzY2IiBkPSJNMjQgNEMxMi45NTQgNCgICAyNC4wMzggMjQuMDM4IDQ0IDI0LjAzOCA0NGgtLjAzMkM1LjY2NSA0NCA0IDM0LjMzNSA0IDI0eiIvPjwvc3ZnPg=="
+            },
+            PLACEMENT_HANDLER: webhookUrl
+          })
+        });
+        const registerResult = await registerResponse.json();
+        console.log("Register result:", JSON.stringify(registerResult, null, 2));
+
+        // Try activation again
+        const reactivateResponse = await fetch(`${clientEndpoint}imconnector.activate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            auth: accessToken,
+            CONNECTOR: connectorId,
+            LINE: line_id,
+            ACTIVE: 1
+          })
+        });
+        const reactivateResult = await reactivateResponse.json();
+        console.log("Reactivate result:", JSON.stringify(reactivateResult, null, 2));
+
+        // Set connector data again
+        await fetch(`${clientEndpoint}imconnector.connector.data.set`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            auth: accessToken,
+            CONNECTOR: connectorId,
+            LINE: line_id,
+            DATA: {
+              id: `${connectorId}_line_${line_id}`,
+              url: webhookUrl,
+              url_im: webhookUrl,
+              name: "Thoth WhatsApp"
+            }
+          })
+        });
+
+        // Check status again
+        const finalStatusResponse = await fetch(`${clientEndpoint}imconnector.status`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            auth: accessToken,
+            CONNECTOR: connectorId,
+            LINE: line_id
+          })
+        });
+        const finalStatusResult = await finalStatusResponse.json();
+        console.log("Final verification status:", JSON.stringify(finalStatusResult, null, 2));
+        verificationResult.active = finalStatusResult.result?.active === true || finalStatusResult.result?.ACTIVE === "Y";
+      }
+
+      // Bind events to ensure we receive messages
+      console.log("Binding connector events...");
+      const eventsToBind = ["OnImConnectorMessageAdd", "OnImConnectorDialogStart", "OnImConnectorDialogFinish"];
+      
+      for (const eventName of eventsToBind) {
+        try {
+          await fetch(`${clientEndpoint}event.bind`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              auth: accessToken,
+              event: eventName,
+              handler: webhookUrl
+            })
+          });
+        } catch (e) {
+          console.log(`Failed to bind ${eventName}:`, e);
+        }
+      }
+    } catch (e) {
+      console.error("Error verifying activation:", e);
+    }
+  }
+
+  console.log("Verification result:", verificationResult);
+
   // Save the mapping
   const { data, error } = await supabase
     .from("bitrix_channel_mappings")
@@ -515,6 +634,255 @@ async function handleSaveMapping(supabase: any, payload: any) {
     JSON.stringify({ success: true, mapping: data }),
     { headers: { ...corsHeaders, "Content-Type": "application/json" } }
   );
+}
+
+// Handle diagnose_connector action - Diagnose and auto-fix connector issues
+async function handleDiagnoseConnector(supabase: any, payload: any, supabaseUrl: string) {
+  console.log("=== DIAGNOSE CONNECTOR ===");
+  const { integration_id, line_id, auto_fix } = payload;
+
+  if (!integration_id) {
+    return new Response(
+      JSON.stringify({ error: "Integration ID não fornecido" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const { data: integration, error: integrationError } = await supabase
+    .from("integrations")
+    .select("*")
+    .eq("id", integration_id)
+    .single();
+
+  if (integrationError || !integration) {
+    console.error("Integration not found:", integrationError);
+    return new Response(
+      JSON.stringify({ error: "Integração não encontrada" }),
+      { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const accessToken = await refreshBitrixToken(integration, supabase);
+  if (!accessToken) {
+    return new Response(
+      JSON.stringify({ error: "Token de acesso não disponível" }),
+      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const config = integration.config;
+  const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
+  const connectorId = config.connector_id || "thoth_whatsapp";
+  const targetLineId = line_id || config.line_id || config.activated_line_id || 2;
+  const webhookUrl = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
+
+  console.log("Diagnosing connector:", { connectorId, targetLineId, clientEndpoint });
+
+  const diagnosis = {
+    connector_id: connectorId,
+    line_id: targetLineId,
+    connector_registered: false,
+    connector_active: false,
+    connector_connection: false,
+    events_bound: false,
+    issues: [] as string[],
+    fixes_applied: [] as string[],
+  };
+
+  try {
+    // 1. Check if connector is registered
+    console.log("Step 1: Checking connector list...");
+    const listResponse = await fetch(`${clientEndpoint}imconnector.list`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ auth: accessToken })
+    });
+    const listResult = await listResponse.json();
+    console.log("Connector list:", JSON.stringify(listResult, null, 2));
+
+    const connectorsList = listResult.result || [];
+    const ourConnector = connectorsList.find((c: any) => 
+      c.ID === connectorId || c.ID?.toLowerCase().includes("thoth")
+    );
+    diagnosis.connector_registered = !!ourConnector;
+
+    if (!ourConnector) {
+      diagnosis.issues.push("Conector não está registrado no Bitrix24");
+    }
+
+    // 2. Check connector status for the line
+    console.log("Step 2: Checking connector status for line", targetLineId);
+    const statusResponse = await fetch(`${clientEndpoint}imconnector.status`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        auth: accessToken,
+        CONNECTOR: connectorId,
+        LINE: targetLineId
+      })
+    });
+    const statusResult = await statusResponse.json();
+    console.log("Connector status:", JSON.stringify(statusResult, null, 2));
+
+    if (statusResult.result) {
+      diagnosis.connector_active = statusResult.result.active === true || statusResult.result.ACTIVE === "Y";
+      diagnosis.connector_connection = statusResult.result.connection === true || statusResult.result.CONNECTION === "Y";
+    }
+
+    if (!diagnosis.connector_active) {
+      diagnosis.issues.push(`Conector não está ativo para a linha ${targetLineId}`);
+    }
+
+    // 3. Check events binding
+    console.log("Step 3: Checking event bindings...");
+    const eventsResponse = await fetch(`${clientEndpoint}event.get`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ auth: accessToken })
+    });
+    const eventsResult = await eventsResponse.json();
+    console.log("Events:", JSON.stringify(eventsResult, null, 2));
+
+    const boundEvents = eventsResult.result || [];
+    const requiredEvents = ["OnImConnectorMessageAdd", "ONIMCONNECTORMESSAGEADD"];
+    const hasRequiredEvents = boundEvents.some((e: any) => 
+      requiredEvents.includes(e.event) || requiredEvents.includes(e.event?.toUpperCase())
+    );
+    diagnosis.events_bound = hasRequiredEvents;
+
+    if (!hasRequiredEvents) {
+      diagnosis.issues.push("Evento OnImConnectorMessageAdd não está configurado");
+    }
+
+    // 4. Auto-fix if requested
+    if (auto_fix && diagnosis.issues.length > 0) {
+      console.log("Auto-fix requested, applying fixes...");
+
+      // Fix 1: Activate connector
+      if (!diagnosis.connector_active) {
+        console.log("Activating connector for line", targetLineId);
+        const activateResponse = await fetch(`${clientEndpoint}imconnector.activate`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            auth: accessToken,
+            CONNECTOR: connectorId,
+            LINE: targetLineId,
+            ACTIVE: 1
+          })
+        });
+        const activateResult = await activateResponse.json();
+        console.log("Activate result:", JSON.stringify(activateResult, null, 2));
+
+        if (activateResult.result || !activateResult.error) {
+          diagnosis.fixes_applied.push("Conector ativado para a linha " + targetLineId);
+          diagnosis.connector_active = true;
+
+          // Set connector data
+          const dataSetResponse = await fetch(`${clientEndpoint}imconnector.connector.data.set`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              auth: accessToken,
+              CONNECTOR: connectorId,
+              LINE: targetLineId,
+              DATA: {
+                id: `${connectorId}_line_${targetLineId}`,
+                url: webhookUrl,
+                url_im: webhookUrl,
+                name: "Thoth WhatsApp"
+              }
+            })
+          });
+          const dataSetResult = await dataSetResponse.json();
+          console.log("Data set result:", JSON.stringify(dataSetResult, null, 2));
+          
+          if (dataSetResult.result || !dataSetResult.error) {
+            diagnosis.fixes_applied.push("Dados do conector configurados");
+          }
+        } else {
+          console.error("Failed to activate connector:", activateResult.error);
+        }
+      }
+
+      // Fix 2: Bind events if not bound
+      if (!diagnosis.events_bound) {
+        console.log("Binding events...");
+        
+        const eventsToBind = [
+          "OnImConnectorMessageAdd",
+          "OnImConnectorDialogStart", 
+          "OnImConnectorDialogFinish"
+        ];
+
+        for (const eventName of eventsToBind) {
+          const bindResponse = await fetch(`${clientEndpoint}event.bind`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              auth: accessToken,
+              event: eventName,
+              handler: webhookUrl
+            })
+          });
+          const bindResult = await bindResponse.json();
+          console.log(`Bind ${eventName} result:`, JSON.stringify(bindResult, null, 2));
+
+          if (bindResult.result || bindResult.error === "HANDLER_ALREADY_BINDED") {
+            diagnosis.fixes_applied.push(`Evento ${eventName} configurado`);
+          }
+        }
+        diagnosis.events_bound = true;
+      }
+
+      // Re-check status after fixes
+      if (diagnosis.fixes_applied.length > 0) {
+        console.log("Re-checking status after fixes...");
+        const reStatusResponse = await fetch(`${clientEndpoint}imconnector.status`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            auth: accessToken,
+            CONNECTOR: connectorId,
+            LINE: targetLineId
+          })
+        });
+        const reStatusResult = await reStatusResponse.json();
+        console.log("Re-check status:", JSON.stringify(reStatusResult, null, 2));
+
+        if (reStatusResult.result) {
+          diagnosis.connector_active = reStatusResult.result.active === true || reStatusResult.result.ACTIVE === "Y";
+          diagnosis.connector_connection = reStatusResult.result.connection === true || reStatusResult.result.CONNECTION === "Y";
+        }
+      }
+    }
+
+    // Update issues list after fixes
+    diagnosis.issues = [];
+    if (!diagnosis.connector_registered) diagnosis.issues.push("Conector não registrado");
+    if (!diagnosis.connector_active) diagnosis.issues.push("Conector não ativo");
+    if (!diagnosis.events_bound) diagnosis.issues.push("Eventos não configurados");
+
+    console.log("Final diagnosis:", diagnosis);
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        diagnosis,
+        healthy: diagnosis.issues.length === 0,
+        message: diagnosis.issues.length === 0 
+          ? "Conector funcionando corretamente" 
+          : `${diagnosis.issues.length} problema(s) encontrado(s)`
+      }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  } catch (error) {
+    console.error("Error diagnosing connector:", error);
+    return new Response(
+      JSON.stringify({ error: error instanceof Error ? error.message : "Erro ao diagnosticar" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
 }
 
 // Handle check_connector_status action - Check real connector status on Bitrix24
@@ -2341,6 +2709,11 @@ serve(async (req) => {
     // Handle reconfigure connector (full reset with clean URLs)
     if (action === "reconfigure_connector" || payload.action === "reconfigure_connector") {
       return await handleReconfigureConnector(supabase, payload, supabaseUrl);
+    }
+
+    // Handle diagnose connector (check and auto-fix issues)
+    if (action === "diagnose_connector" || payload.action === "diagnose_connector") {
+      return await handleDiagnoseConnector(supabase, payload, supabaseUrl);
     }
 
     // Handle automation robot registration
