@@ -240,6 +240,7 @@ export default function Integrations() {
   const [testingConnection, setTestingConnection] = useState(false);
   const [refreshingToken, setRefreshingToken] = useState(false);
   const [testResult, setTestResult] = useState<{ success: boolean; message?: string; details?: any } | null>(null);
+  const [refreshingStatus, setRefreshingStatus] = useState(false);
   
   // Connector activation states
   const [activatingConnector, setActivatingConnector] = useState(false);
@@ -249,12 +250,32 @@ export default function Integrations() {
 
   useEffect(() => {
     if (workspace) {
-      fetchIntegrations();
-      fetchInstances();
-      fetchChannelMappings();
-      fetchPersonas();
+      refreshAllData();
     }
   }, [workspace]);
+
+  // Refresh all data and ensure UI reflects database state
+  const refreshAllData = async (showToast = false) => {
+    setRefreshingStatus(true);
+    try {
+      await Promise.all([
+        fetchIntegrations(),
+        fetchInstances(),
+        fetchChannelMappings(),
+        fetchPersonas(),
+      ]);
+      if (showToast) {
+        toast.success("Status atualizado!");
+      }
+    } catch (error) {
+      console.error("Error refreshing data:", error);
+      if (showToast) {
+        toast.error("Erro ao atualizar status");
+      }
+    } finally {
+      setRefreshingStatus(false);
+    }
+  };
 
   const fetchIntegrations = async () => {
     try {
@@ -1280,6 +1301,23 @@ export default function Integrations() {
 
           {/* Bitrix24 CRM Tab - Simplified */}
           <TabsContent value="crm" className="mt-6 space-y-4">
+            {/* Refresh Status Button */}
+            <div className="flex justify-end">
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={() => refreshAllData(true)}
+                disabled={refreshingStatus}
+              >
+                {refreshingStatus ? (
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                ) : (
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                )}
+                Atualizar Status
+              </Button>
+            </div>
+
             {/* Main Bitrix24 Card */}
             <Card>
               <CardHeader>
