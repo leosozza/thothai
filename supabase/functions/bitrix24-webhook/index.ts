@@ -517,6 +517,125 @@ async function handleSaveMapping(supabase: any, payload: any) {
   );
 }
 
+// Handle check_connector_status action - Check real connector status on Bitrix24
+async function handleCheckConnectorStatus(supabase: any, payload: any) {
+  console.log("=== CHECK CONNECTOR STATUS ===");
+  const { integration_id, line_id } = payload;
+
+  if (!integration_id) {
+    return new Response(
+      JSON.stringify({ error: "Integration ID não fornecido" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const { data: integration, error: integrationError } = await supabase
+    .from("integrations")
+    .select("*")
+    .eq("id", integration_id)
+    .single();
+
+  if (integrationError || !integration) {
+    console.error("Integration not found:", integrationError);
+    return new Response(
+      JSON.stringify({ error: "Integração não encontrada" }),
+      { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const accessToken = await refreshBitrixToken(integration, supabase);
+  if (!accessToken) {
+    return new Response(
+      JSON.stringify({ error: "Token de acesso não disponível" }),
+      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const config = integration.config;
+  const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
+  const connectorId = config.connector_id || "thoth_whatsapp";
+  const targetLineId = line_id || config.line_id || config.activated_line_id || 2;
+
+  console.log("Checking connector status for:", { connectorId, targetLineId, clientEndpoint });
+
+  try {
+    // 1. Check connector status
+    const statusResponse = await fetch(`${clientEndpoint}imconnector.status`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        auth: accessToken,
+        CONNECTOR: connectorId,
+        LINE: targetLineId
+      })
+    });
+    const statusResult = await statusResponse.json();
+    console.log("Connector status result:", JSON.stringify(statusResult, null, 2));
+
+    // 2. List all registered connectors
+    const listResponse = await fetch(`${clientEndpoint}imconnector.list`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ auth: accessToken })
+    });
+    const listResult = await listResponse.json();
+    console.log("Connector list result:", JSON.stringify(listResult, null, 2));
+
+    // 3. Check if our connector is in the list
+    const connectorsList = listResult.result || [];
+    const ourConnector = connectorsList.find((c: any) => 
+      c.ID === connectorId || c.NAME?.includes("Thoth") || c.NAME?.includes("thoth")
+    );
+
+    // 4. Get mapping from database
+    const { data: mapping } = await supabase
+      .from("bitrix_channel_mappings")
+      .select("*")
+      .eq("integration_id", integration_id)
+      .eq("line_id", targetLineId)
+      .maybeSingle();
+
+    // Build response
+    const response = {
+      success: true,
+      connector_id: connectorId,
+      line_id: targetLineId,
+      status: {
+        active: statusResult.result?.active === true || statusResult.result?.ACTIVE === "Y",
+        registered: statusResult.result?.register === true || statusResult.result?.REGISTER === "Y",
+        connection: statusResult.result?.connection === true || statusResult.result?.CONNECTION === "Y",
+        error: statusResult.result?.error,
+        raw: statusResult.result
+      },
+      connector_in_list: !!ourConnector,
+      our_connector: ourConnector,
+      all_connectors: connectorsList.length,
+      database_mapping: mapping ? {
+        instance_id: mapping.instance_id,
+        is_active: mapping.is_active,
+        line_id: mapping.line_id
+      } : null,
+      integration_config: {
+        line_id: config.line_id,
+        activated_line_id: config.activated_line_id,
+        connector_id: config.connector_id,
+        connector_registered: config.connector_registered
+      }
+    };
+
+    return new Response(
+      JSON.stringify(response),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  } catch (error) {
+    console.error("Error checking connector status:", error);
+    return new Response(
+      JSON.stringify({ error: error instanceof Error ? error.message : "Erro ao verificar status" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+}
+
 // Handle delete_mapping action
 async function handleDeleteMapping(supabase: any, payload: any) {
   console.log("=== DELETE MAPPING ===");
@@ -2190,6 +2309,10 @@ serve(async (req) => {
       return await handleDeleteMapping(supabase, payload);
     }
 
+    if (action === "check_connector_status" || payload.action === "check_connector_status") {
+      return await handleCheckConnectorStatus(supabase, payload);
+    }
+
     if (action === "list_channels" || payload.action === "list_channels") {
       return await handleListChannels(supabase, payload);
     }
@@ -2251,13 +2374,22 @@ serve(async (req) => {
 
     // Otherwise, process as event
     const event = payload.event;
-    console.log("Processing event:", event);
+    console.log("=== PROCESSING BITRIX24 EVENT ===");
+    console.log("Event type:", event);
+    console.log("Event timestamp:", new Date().toISOString());
+    
+    // Log all events for debugging
+    if (event) {
+      console.log("Event payload keys:", Object.keys(payload.data || payload));
+    }
 
     switch (event) {
       case "ONIMCONNECTORMESSAGEADD": {
         // This event is triggered when an operator sends a message from Bitrix24 Open Channel
         // The message needs to be forwarded to WhatsApp
-        console.log("=== OPERATOR MESSAGE TO SEND TO WHATSAPP ===");
+        console.log("=== ONIMCONNECTORMESSAGEADD - OPERATOR MESSAGE TO SEND TO WHATSAPP ===");
+        console.log("Event received at:", new Date().toISOString());
+        console.log("Full payload:", JSON.stringify(payload, null, 2));
         console.log("Full payload data:", JSON.stringify(payload.data, null, 2));
         
         const messages = payload.data?.MESSAGES || [];
