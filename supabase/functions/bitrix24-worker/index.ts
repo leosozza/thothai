@@ -388,6 +388,33 @@ async function processOperatorMessage(
     contact = data;
   }
 
+  // Strategy 5: Extract phone from chat_id (format: wa_5515996045202)
+  if (!contact && recipientChatId && recipientChatId.toString().startsWith("wa_")) {
+    const phoneFromChatId = recipientChatId.toString().replace("wa_", "");
+    console.log("Trying phone from chat_id:", phoneFromChatId);
+    
+    // Exact match
+    const { data: exactMatch } = await supabase
+      .from("contacts")
+      .select("*")
+      .eq("instance_id", instanceId)
+      .eq("phone_number", phoneFromChatId)
+      .maybeSingle();
+    
+    if (exactMatch) {
+      contact = exactMatch;
+    } else {
+      // Suffix match (last 10 digits)
+      const { data: suffixMatch } = await supabase
+        .from("contacts")
+        .select("*")
+        .eq("instance_id", instanceId)
+        .ilike("phone_number", `%${phoneFromChatId.slice(-10)}`)
+        .maybeSingle();
+      contact = suffixMatch;
+    }
+  }
+
   if (!contact) {
     console.error("Contact not found:", { recipientId, recipientChatId });
     return;
