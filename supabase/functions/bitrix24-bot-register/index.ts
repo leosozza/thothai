@@ -101,7 +101,7 @@ serve(async (req) => {
 
     const config = integration.config;
     const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
-    const webhookUrl = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
+    const eventsUrl = `${supabaseUrl}/functions/v1/bitrix24-events`;
 
     switch (action) {
       case "register": {
@@ -124,9 +124,9 @@ serve(async (req) => {
           CODE: "thoth_ai_bot",
           TYPE: "B", // B = chatbot (immediate responses)
           OPENLINE: "Y", // Support Open Lines
-          EVENT_MESSAGE_ADD: webhookUrl,
-          EVENT_WELCOME_MESSAGE: webhookUrl,
-          EVENT_BOT_DELETE: webhookUrl,
+          EVENT_MESSAGE_ADD: eventsUrl,
+          EVENT_WELCOME_MESSAGE: eventsUrl,
+          EVENT_BOT_DELETE: eventsUrl,
           PROPERTIES: {
             NAME: bot_name || "Thoth AI",
             LAST_NAME: "",
@@ -209,8 +209,8 @@ serve(async (req) => {
           auth: accessToken,
           BOT_ID: botId,
           FIELDS: {
-            EVENT_MESSAGE_ADD: webhookUrl,
-            EVENT_WELCOME_MESSAGE: webhookUrl,
+            EVENT_MESSAGE_ADD: eventsUrl,
+            EVENT_WELCOME_MESSAGE: eventsUrl,
             PROPERTIES: {
               NAME: bot_name || config.bot_name || "Thoth AI",
               WORK_POSITION: bot_description || "Assistente Virtual com IA",

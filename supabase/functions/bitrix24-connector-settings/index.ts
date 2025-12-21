@@ -300,7 +300,7 @@ serve(async (req) => {
 
     // Check if already configured
     const config = integration.config || {};
-    const webhookUrl = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
+    const eventsUrl = `${supabaseUrl}/functions/v1/bitrix24-events`;
 
     // If this is a SETTING_CONNECTOR placement call, activate the connector
     if (placement === "SETTING_CONNECTOR" || activeStatus === 1) {
@@ -325,7 +325,7 @@ serve(async (req) => {
           const activateResult = await activateResponse.json();
           console.log("imconnector.activate result:", activateResult);
 
-          // 2. Set connector data
+          // 2. Set connector data - use bitrix24-events (public, no JWT)
           if (activeStatus === 1) {
             await fetch(`${apiUrl}imconnector.connector.data.set`, {
               method: "POST",
@@ -336,8 +336,8 @@ serve(async (req) => {
                 LINE: lineId,
                 DATA: {
                   id: `${connectorId}_line_${lineId}`,
-                  url: webhookUrl,
-                  url_im: webhookUrl,
+                  url: eventsUrl,
+                  url_im: eventsUrl,
                   name: "Thoth WhatsApp"
                 }
               })
