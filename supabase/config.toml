@@ -75,7 +75,7 @@ verify_jwt = false
 [functions.bitrix24-events]
 verify_jwt = false
 
-# Worker PRIVADO para processar fila de eventos
-# Chamado internamente após enfileiramento
+# Worker para processar fila de eventos
+# Acessível para cron jobs e chamadas internas
 [functions.bitrix24-worker]
-verify_jwt = true
+verify_jwt = false
