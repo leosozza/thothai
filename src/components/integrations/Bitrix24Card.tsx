@@ -20,6 +20,7 @@ import {
   Stethoscope,
   Wrench,
   XCircle,
+  Trash2,
 } from "lucide-react";
 
 interface Integration {
@@ -61,7 +62,9 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
   const [reconnecting, setReconnecting] = useState(false);
   const [diagnosing, setDiagnosing] = useState(false);
   const [fixing, setFixing] = useState(false);
+  const [cleaning, setCleaning] = useState(false);
   const [diagnosis, setDiagnosis] = useState<DiagnosisResult | null>(null);
+  const [cleanResult, setCleanResult] = useState<{ removed: number; events_removed: number } | null>(null);
 
   const config = integration?.config || {};
   const isConnected = integration?.is_active && config.auto_setup_completed;
@@ -229,7 +232,42 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
       console.error("Error fixing:", error);
       toast.error("Erro ao corrigir");
     } finally {
-      setFixing(false);
+    setFixing(false);
+    }
+  };
+
+  const handleCleanConnectors = async () => {
+    if (!integration?.id) {
+      toast.error("Integração não encontrada");
+      return;
+    }
+
+    setCleaning(true);
+    setCleanResult(null);
+    
+    try {
+      const response = await supabase.functions.invoke("bitrix24-webhook", {
+        body: {
+          action: "clean_connectors",
+          integration_id: integration.id,
+        }
+      });
+
+      if (response.data?.success) {
+        setCleanResult({
+          removed: response.data.removed_count || 0,
+          events_removed: response.data.events_removed || 0,
+        });
+        toast.success(`${response.data.removed_count || 0} conector(es) e ${response.data.events_removed || 0} evento(s) removidos!`);
+        onRefresh();
+      } else {
+        toast.error(response.data?.error || "Erro ao limpar conectores");
+      }
+    } catch (error) {
+      console.error("Error cleaning connectors:", error);
+      toast.error("Erro ao limpar conectores");
+    } finally {
+      setCleaning(false);
     }
   };
 
@@ -349,6 +387,19 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
             </div>
           )}
 
+          {/* Clean Result */}
+          {cleanResult && (
+            <div className="border rounded-lg p-4 bg-orange-500/10 border-orange-500/20">
+              <div className="flex items-center gap-2 text-orange-600">
+                <Trash2 className="h-5 w-5" />
+                <span className="font-medium">Limpeza Concluída</span>
+              </div>
+              <p className="text-sm text-orange-600 mt-1">
+                {cleanResult.removed} conector(es) e {cleanResult.events_removed} evento(s) duplicados removidos.
+              </p>
+            </div>
+          )}
+
           {/* How to use */}
           <Alert>
             <AlertCircle className="h-4 w-4" />
@@ -383,6 +434,20 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
                 <Wrench className="h-4 w-4 mr-2" />
               )}
               Corrigir Automaticamente
+            </Button>
+
+            <Button 
+              variant="outline" 
+              onClick={handleCleanConnectors}
+              disabled={cleaning}
+              className="text-orange-600 border-orange-500/30 hover:bg-orange-500/10"
+            >
+              {cleaning ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Trash2 className="h-4 w-4 mr-2" />
+              )}
+              Limpar Conectores
             </Button>
           </div>
 
