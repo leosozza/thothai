@@ -3566,10 +3566,59 @@ async function handleVerifyIntegration(supabase: any, payload: any, supabaseUrl:
     const thothConnectors = verification.connectors.filter(c => 
       c.id.toLowerCase().includes("thoth") || c.id.toLowerCase().includes("whatsapp")
     );
+    
+    // AUTO-CLEAN: If duplicates found, remove them automatically
     if (thothConnectors.length > 1) {
-      verification.duplicate_connectors = thothConnectors.map(c => c.id);
-      verification.issues.push(`${thothConnectors.length} conectores duplicados encontrados`);
-      verification.recommendations.push("Execute 'Reconectar Completo' para limpar duplicados");
+      console.log("Found duplicate connectors, auto-cleaning...");
+      const mainConnectorId = "thoth_whatsapp";
+      const duplicates = thothConnectors.filter(c => c.id !== mainConnectorId);
+      
+      let cleanedCount = 0;
+      for (const dup of duplicates) {
+        console.log(`Auto-removing duplicate connector: ${dup.id}`);
+        try {
+          // Deactivate for all lines first
+          for (let lineId = 1; lineId <= 10; lineId++) {
+            await fetch(`${clientEndpoint}imconnector.activate`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                auth: accessToken,
+                CONNECTOR: dup.id,
+                LINE: lineId,
+                ACTIVE: 0
+              })
+            });
+          }
+          
+          // Unregister the duplicate
+          const unregisterResponse = await fetch(`${clientEndpoint}imconnector.unregister`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              auth: accessToken,
+              ID: dup.id
+            })
+          });
+          const unregisterResult = await unregisterResponse.json();
+          console.log(`Unregister ${dup.id} result:`, JSON.stringify(unregisterResult));
+          
+          if (unregisterResult.result || !unregisterResult.error) {
+            cleanedCount++;
+          }
+        } catch (e) {
+          console.error(`Error removing ${dup.id}:`, e);
+        }
+      }
+      
+      if (cleanedCount > 0) {
+        verification.duplicate_connectors = duplicates.map(c => c.id);
+        verification.issues.push(`${cleanedCount} conector(es) duplicado(s) removido(s) automaticamente`);
+        // Update connectors list to reflect cleanup
+        verification.connectors = verification.connectors.filter(c => 
+          !duplicates.some(d => d.id === c.id)
+        );
+      }
     }
 
     // 2. Check connector status for each line

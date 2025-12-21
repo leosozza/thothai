@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,10 +17,9 @@ import {
   ExternalLink,
   Phone,
   AlertCircle,
-  Stethoscope,
+  AlertTriangle,
   Wrench,
   XCircle,
-  Search,
   RotateCcw,
   Zap,
 } from "lucide-react";
@@ -47,17 +46,6 @@ interface Bitrix24CardProps {
   onRefresh: () => void;
 }
 
-interface DiagnosisResult {
-  connector_id: string;
-  line_id: number;
-  connector_registered: boolean;
-  connector_active: boolean;
-  connector_connection: boolean;
-  events_bound: boolean;
-  issues: string[];
-  fixes_applied: string[];
-}
-
 interface VerificationResult {
   connector_id: string;
   domain: string;
@@ -71,25 +59,26 @@ interface VerificationResult {
     name: string;
     active: boolean;
     connector_active: boolean;
+    connector_registered: boolean;
+    connector_connection: boolean;
   }[];
   mappings: any[];
   issues: string[];
   recommendations: string[];
+  warnings?: string[];
 }
 
 export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }: Bitrix24CardProps) {
   const [linkingToken, setLinkingToken] = useState<string | null>(null);
   const [generatingToken, setGeneratingToken] = useState(false);
-  const [reconnecting, setReconnecting] = useState(false);
-  const [diagnosing, setDiagnosing] = useState(false);
-  const [fixing, setFixing] = useState(false);
   const [verifying, setVerifying] = useState(false);
+  const [fixing, setFixing] = useState(false);
   const [reconfiguring, setReconfiguring] = useState(false);
   const [forcingActivation, setForcingActivation] = useState<number | null>(null);
-  const [checkingStatus, setCheckingStatus] = useState(false);
-  const [diagnosis, setDiagnosis] = useState<DiagnosisResult | null>(null);
   const [verification, setVerification] = useState<VerificationResult | null>(null);
-  const [connectorStatusRaw, setConnectorStatusRaw] = useState<any>(null);
+  const [isHealthy, setIsHealthy] = useState<boolean | null>(null);
+  const [summary, setSummary] = useState<string>("");
+  const autoVerifiedRef = useRef(false);
 
   const config = integration?.config || {};
   const isConnected = integration?.is_active && config.auto_setup_completed;
@@ -97,6 +86,52 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
   const instanceId = config.instance_id as string || "";
   
   const linkedInstance = instances.find(i => i.id === instanceId);
+
+  // Auto-verify on mount when connected
+  const handleVerifyIntegration = useCallback(async (silent = false) => {
+    if (!integration?.id) return;
+
+    if (!silent) setVerifying(true);
+    
+    try {
+      const response = await supabase.functions.invoke("bitrix24-webhook", {
+        body: {
+          action: "verify_integration",
+          integration_id: integration.id,
+        }
+      });
+
+      if (response.data?.success) {
+        setVerification(response.data.verification);
+        setIsHealthy(response.data.healthy);
+        setSummary(response.data.summary || "");
+        
+        if (!silent) {
+          if (response.data.healthy) {
+            toast.success(response.data.summary || "Integração funcionando!");
+          } else {
+            toast.warning(response.data.summary || "Problemas encontrados");
+          }
+        }
+      } else if (!silent) {
+        toast.error(response.data?.error || "Erro na verificação");
+      }
+    } catch (error) {
+      console.error("Error verifying:", error);
+      if (!silent) toast.error("Erro na verificação");
+    } finally {
+      setVerifying(false);
+    }
+  }, [integration?.id]);
+
+  // Auto-verify and auto-fix on mount
+  useEffect(() => {
+    if (isConnected && integration?.id && !autoVerifiedRef.current) {
+      autoVerifiedRef.current = true;
+      // Auto-verify silently on mount
+      handleVerifyIntegration(true);
+    }
+  }, [isConnected, integration?.id, handleVerifyIntegration]);
 
   // Fetch existing token on mount
   useEffect(() => {
@@ -156,72 +191,6 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
     }
   };
 
-  const handleReconnect = async () => {
-    if (!integration?.id || !instanceId) {
-      toast.error("Dados da integração não disponíveis");
-      return;
-    }
-
-    setReconnecting(true);
-    try {
-      const response = await supabase.functions.invoke("bitrix24-webhook", {
-        body: {
-          action: "auto_setup",
-          integration_id: integration.id,
-          instance_id: instanceId,
-        }
-      });
-
-      if (response.data?.success) {
-        toast.success("Reconectado com sucesso!");
-        onRefresh();
-      } else {
-        toast.error(response.data?.error || "Erro ao reconectar");
-      }
-    } catch (error) {
-      console.error("Error reconnecting:", error);
-      toast.error("Erro ao reconectar");
-    } finally {
-      setReconnecting(false);
-    }
-  };
-
-  const handleDiagnose = async () => {
-    if (!integration?.id) {
-      toast.error("Integração não encontrada");
-      return;
-    }
-
-    setDiagnosing(true);
-    setDiagnosis(null);
-    
-    try {
-      const response = await supabase.functions.invoke("bitrix24-webhook", {
-        body: {
-          action: "diagnose_connector",
-          integration_id: integration.id,
-          auto_fix: false,
-        }
-      });
-
-      if (response.data?.success) {
-        setDiagnosis(response.data.diagnosis);
-        if (response.data.healthy) {
-          toast.success("Conector funcionando corretamente!");
-        } else {
-          toast.warning(`${response.data.diagnosis.issues.length} problema(s) encontrado(s)`);
-        }
-      } else {
-        toast.error(response.data?.error || "Erro ao diagnosticar");
-      }
-    } catch (error) {
-      console.error("Error diagnosing:", error);
-      toast.error("Erro ao diagnosticar");
-    } finally {
-      setDiagnosing(false);
-    }
-  };
-
   const handleAutoFix = async () => {
     if (!integration?.id) {
       toast.error("Integração não encontrada");
@@ -240,8 +209,7 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
       });
 
       if (response.data?.success) {
-        setDiagnosis(response.data.diagnosis);
-        if (response.data.diagnosis.fixes_applied.length > 0) {
+        if (response.data.diagnosis?.fixes_applied?.length > 0) {
           toast.success(`${response.data.diagnosis.fixes_applied.length} correção(ões) aplicada(s)!`);
         }
         if (response.data.healthy) {
@@ -249,6 +217,8 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
         } else {
           toast.warning("Alguns problemas não puderam ser corrigidos automaticamente");
         }
+        // Re-verify to show updated status
+        await handleVerifyIntegration(true);
         onRefresh();
       } else {
         toast.error(response.data?.error || "Erro ao corrigir");
@@ -257,7 +227,7 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
       console.error("Error fixing:", error);
       toast.error("Erro ao corrigir");
     } finally {
-    setFixing(false);
+      setFixing(false);
     }
   };
 
@@ -282,26 +252,22 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
         }
       });
 
-      console.log("Reconfigure result:", response.data);
-
       if (response.data?.success) {
         const result = response.data;
         if (result.connector_registered && result.connector_activated) {
           toast.success("✅ Conector registrado e ativado com sucesso!");
         } else if (result.connector_registered) {
-          toast.warning("Conector registrado, mas ativação pendente. Execute 'Verificar Integração' para confirmar.");
+          toast.warning("Conector registrado, mas ativação pendente");
         } else {
           toast.warning("Reconfiguração parcial - verifique o diagnóstico");
         }
         
-        // Aguardar 2 segundos para o Bitrix24 processar
+        // Wait and re-verify
         await new Promise(resolve => setTimeout(resolve, 2000));
-        
-        // Forçar refresh com status completo
+        await handleVerifyIntegration(true);
         onRefresh();
       } else {
         toast.error(response.data?.error || "Erro na reconfiguração");
-        console.error("Reconfigure error:", response.data);
       }
     } catch (error) {
       console.error("Error reconfiguring:", error);
@@ -328,16 +294,14 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
         }
       });
 
-      console.log("Force activate response:", response.data);
-
       if (response.data?.success) {
         if (response.data.active) {
           toast.success(`Linha ${lineId} ativada com sucesso!`);
         } else {
           toast.info("Comandos enviados. A ativação pode levar alguns segundos.");
         }
-        // Refresh verification to show updated status
-        handleVerifyIntegration();
+        // Re-verify
+        await handleVerifyIntegration(true);
         onRefresh();
       } else {
         toast.error(response.data?.error || "Erro ao forçar ativação");
@@ -350,82 +314,64 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
     }
   };
 
-  const handleVerifyIntegration = async () => {
-    if (!integration?.id) {
-      toast.error("Integração não encontrada");
-      return;
-    }
-
-    setVerifying(true);
-    setVerification(null);
-    
-    try {
-      const response = await supabase.functions.invoke("bitrix24-webhook", {
-        body: {
-          action: "verify_integration",
-          integration_id: integration.id,
-        }
-      });
-
-      if (response.data?.success) {
-        setVerification(response.data.verification);
-        if (response.data.healthy) {
-          toast.success("Integração funcionando corretamente!");
-        } else {
-          toast.warning(`${response.data.verification.issues.length} problema(s) encontrado(s)`);
-        }
-      } else {
-        toast.error(response.data?.error || "Erro na verificação");
-      }
-    } catch (error) {
-      console.error("Error verifying:", error);
-      toast.error("Erro na verificação");
-    } finally {
-      setVerifying(false);
-    }
-  };
-
-  const handleCheckConnectorStatus = async () => {
-    if (!integration?.id) {
-      toast.error("Integração não encontrada");
-      return;
-    }
-
-    setCheckingStatus(true);
-    setConnectorStatusRaw(null);
-    
-    try {
-      const response = await supabase.functions.invoke("bitrix24-webhook", {
-        body: {
-          action: "check_connector_status",
-          integration_id: integration.id,
-          line_id: 2,
-        }
-      });
-
-      console.log("check_connector_status response:", response.data);
-      setConnectorStatusRaw(response.data);
-      
-      if (response.data?.success) {
-        toast.success("Status obtido!");
-      } else {
-        toast.error(response.data?.error || "Erro ao verificar status");
-      }
-    } catch (error) {
-      console.error("Error checking status:", error);
-      toast.error("Erro ao verificar status");
-    } finally {
-      setCheckingStatus(false);
-    }
-  };
-
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
     toast.success("Copiado!");
   };
 
-  // Connected state - simple status view
+  // Determine status badge
+  const getStatusBadge = () => {
+    if (verifying) {
+      return (
+        <Badge className="bg-blue-500/10 text-blue-600 border-blue-500/20">
+          <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+          Verificando...
+        </Badge>
+      );
+    }
+    
+    if (isHealthy === null) {
+      return (
+        <Badge className="bg-green-500/10 text-green-600 border-green-500/20">
+          <CheckCircle2 className="h-3 w-3 mr-1" />
+          Conectado
+        </Badge>
+      );
+    }
+    
+    if (isHealthy) {
+      const hasWarnings = verification?.warnings && verification.warnings.length > 0;
+      if (hasWarnings) {
+        return (
+          <Badge className="bg-yellow-500/10 text-yellow-600 border-yellow-500/20">
+            <AlertTriangle className="h-3 w-3 mr-1" />
+            {summary || "Com avisos"}
+          </Badge>
+        );
+      }
+      return (
+        <Badge className="bg-green-500/10 text-green-600 border-green-500/20">
+          <CheckCircle2 className="h-3 w-3 mr-1" />
+          {summary || "Funcionando"}
+        </Badge>
+      );
+    }
+    
+    return (
+      <Badge className="bg-red-500/10 text-red-600 border-red-500/20">
+        <XCircle className="h-3 w-3 mr-1" />
+        {summary || "Problemas"}
+      </Badge>
+    );
+  };
+
+  // Connected state - simplified UI
   if (isConnected) {
+    const criticalIssues = verification?.issues.filter(issue => 
+      !issue.includes("duplicado") && !issue.includes("removido")
+    ) || [];
+    const warnings = verification?.warnings || [];
+
     return (
       <Card>
         <CardHeader>
@@ -437,10 +383,7 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
               <div>
                 <CardTitle className="flex items-center gap-2">
                   Bitrix24
-                  <Badge className="bg-green-500/10 text-green-600 border-green-500/20">
-                    <CheckCircle2 className="h-3 w-3 mr-1" />
-                    Conectado
-                  </Badge>
+                  {getStatusBadge()}
                 </CardTitle>
                 <CardDescription>
                   Integrado com {domain}
@@ -472,62 +415,45 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
             )}
           </div>
 
-          {/* Diagnosis Results */}
-          {diagnosis && (
-            <div className="border rounded-lg p-4 space-y-3">
-              <div className="flex items-center gap-2">
-                <Stethoscope className="h-5 w-5 text-primary" />
-                <span className="font-medium">Diagnóstico do Conector</span>
-              </div>
-              
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <div className="flex items-center gap-2">
-                  {diagnosis.connector_registered ? (
-                    <CheckCircle2 className="h-4 w-4 text-green-500" />
-                  ) : (
+          {/* Verification Results - Only show if we have issues or warnings */}
+          {verification && (criticalIssues.length > 0 || warnings.length > 0) && (
+            <div className="space-y-3">
+              {/* Critical Issues */}
+              {criticalIssues.length > 0 && (
+                <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-3">
+                  <div className="flex items-center gap-2 mb-2">
                     <XCircle className="h-4 w-4 text-red-500" />
-                  )}
-                  <span>Conector Registrado</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  {diagnosis.connector_active ? (
-                    <CheckCircle2 className="h-4 w-4 text-green-500" />
-                  ) : (
-                    <XCircle className="h-4 w-4 text-red-500" />
-                  )}
-                  <span>Conector Ativo</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  {diagnosis.events_bound ? (
-                    <CheckCircle2 className="h-4 w-4 text-green-500" />
-                  ) : (
-                    <XCircle className="h-4 w-4 text-red-500" />
-                  )}
-                  <span>Eventos Configurados</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-muted-foreground">Linha:</span>
-                  <span className="font-medium">{diagnosis.line_id}</span>
-                </div>
-              </div>
-
-              {diagnosis.issues.length > 0 && (
-                <div className="bg-red-500/10 rounded p-2">
-                  <p className="text-sm font-medium text-red-600 mb-1">Problemas:</p>
-                  <ul className="text-sm text-red-600 list-disc list-inside">
-                    {diagnosis.issues.map((issue, i) => (
-                      <li key={i}>{issue}</li>
+                    <span className="font-medium text-red-600">Problemas Críticos</span>
+                  </div>
+                  <ul className="text-sm text-red-600 space-y-1">
+                    {criticalIssues.map((issue, i) => (
+                      <li key={i}>• {issue}</li>
                     ))}
                   </ul>
                 </div>
               )}
 
-              {diagnosis.fixes_applied.length > 0 && (
-                <div className="bg-green-500/10 rounded p-2">
-                  <p className="text-sm font-medium text-green-600 mb-1">Correções Aplicadas:</p>
-                  <ul className="text-sm text-green-600 list-disc list-inside">
-                    {diagnosis.fixes_applied.map((fix, i) => (
-                      <li key={i}>{fix}</li>
+              {/* Warnings */}
+              {warnings.length > 0 && (
+                <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <AlertTriangle className="h-4 w-4 text-yellow-500" />
+                    <span className="font-medium text-yellow-600">Avisos</span>
+                  </div>
+                  <ul className="text-sm text-yellow-600 space-y-1">
+                    {warnings.map((warning, i) => (
+                      <li key={i}>• {warning}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Recommendations */}
+              {verification.recommendations.length > 0 && (
+                <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3">
+                  <ul className="text-sm text-blue-600 space-y-1">
+                    {verification.recommendations.map((rec, i) => (
+                      <li key={i}>💡 {rec}</li>
                     ))}
                   </ul>
                 </div>
@@ -535,102 +461,33 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
             </div>
           )}
 
-          {/* Verification Results */}
-          {verification && (
-            <div className="border rounded-lg p-4 space-y-3">
-              <div className="flex items-center gap-2">
-                <Search className="h-5 w-5 text-blue-500" />
-                <span className="font-medium">Verificação Completa</span>
-              </div>
-              
-              <div className="text-sm space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Conectores registrados:</span>
-                  <span className="font-medium">{verification.connectors.length}</span>
-                </div>
-                
-                {verification.duplicate_connectors.length > 0 && (
-                  <div className="bg-red-500/10 rounded p-2">
-                    <p className="text-sm font-medium text-red-600">
-                      ⚠️ {verification.duplicate_connectors.length} conectores duplicados: {verification.duplicate_connectors.join(", ")}
-                    </p>
-                  </div>
-                )}
-
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Eventos configurados:</span>
-                  <span className="font-medium">{verification.events.length}</span>
-                </div>
-
-                {verification.duplicate_events > 0 && (
-                  <div className="bg-yellow-500/10 rounded p-2 text-yellow-700">
-                    ⚠️ {verification.duplicate_events} eventos duplicados
-                  </div>
-                )}
-
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Linhas configuradas:</span>
-                  <span className="font-medium">{verification.lines.length}</span>
-                </div>
-
-                {/* Lines status with force activate button */}
-                {verification.lines.map((line) => (
-                  <div key={line.id} className="flex items-center justify-between text-xs bg-muted/50 rounded p-2">
+          {/* Lines status with force activate button - only show inactive */}
+          {verification?.lines && verification.lines.some(l => l.active && !l.connector_active) && (
+            <div className="space-y-2">
+              <span className="text-sm font-medium">Linhas Inativas:</span>
+              {verification.lines
+                .filter(l => l.active && !l.connector_active)
+                .map((line) => (
+                  <div key={line.id} className="flex items-center justify-between text-sm bg-red-500/5 border border-red-500/20 rounded p-2">
                     <span>{line.name} (ID: {line.id})</span>
-                    <div className="flex items-center gap-2">
-                      {line.connector_active ? (
-                        <>
-                          <CheckCircle2 className="h-3 w-3 text-green-500" />
-                          <span className="text-green-600">Ativo</span>
-                        </>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleForceActivateLine(line.id)}
+                      disabled={forcingActivation === line.id}
+                      className="h-7 text-xs"
+                    >
+                      {forcingActivation === line.id ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
                       ) : (
                         <>
-                          <XCircle className="h-3 w-3 text-red-500" />
-                          <span className="text-red-600">Inativo</span>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleForceActivateLine(line.id)}
-                            disabled={forcingActivation === line.id}
-                            className="h-6 text-xs px-2 ml-1"
-                          >
-                            {forcingActivation === line.id ? (
-                              <Loader2 className="h-3 w-3 animate-spin" />
-                            ) : (
-                              <>
-                                <Zap className="h-3 w-3 mr-1" />
-                                Ativar
-                              </>
-                            )}
-                          </Button>
+                          <Zap className="h-3 w-3 mr-1" />
+                          Ativar
                         </>
                       )}
-                    </div>
+                    </Button>
                   </div>
                 ))}
-              </div>
-
-              {verification.issues.length > 0 && (
-                <div className="bg-red-500/10 rounded p-2">
-                  <p className="text-sm font-medium text-red-600 mb-1">Problemas:</p>
-                  <ul className="text-sm text-red-600 list-disc list-inside">
-                    {verification.issues.map((issue, i) => (
-                      <li key={i}>{issue}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {verification.recommendations.length > 0 && (
-                <div className="bg-blue-500/10 rounded p-2">
-                  <p className="text-sm font-medium text-blue-600 mb-1">Recomendações:</p>
-                  <ul className="text-sm text-blue-600 list-disc list-inside">
-                    {verification.recommendations.map((rec, i) => (
-                      <li key={i}>{rec}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
             </div>
           )}
 
@@ -642,18 +499,18 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
             </AlertDescription>
           </Alert>
 
-          {/* Action buttons */}
+          {/* Simplified Action buttons - just 2 main actions */}
           <div className="flex gap-2">
             <Button 
               variant="outline" 
-              onClick={handleVerifyIntegration}
-              disabled={verifying}
+              onClick={() => handleVerifyIntegration(false)}
+              disabled={verifying || fixing}
               className="flex-1"
             >
               {verifying ? (
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
               ) : (
-                <Search className="h-4 w-4 mr-2" />
+                <RefreshCw className="h-4 w-4 mr-2" />
               )}
               Verificar
             </Button>
@@ -661,7 +518,7 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
             <Button 
               variant="outline" 
               onClick={handleAutoFix}
-              disabled={fixing}
+              disabled={fixing || verifying}
               className="flex-1"
             >
               {fixing ? (
@@ -671,123 +528,21 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
               )}
               Corrigir
             </Button>
-          </div>
 
-          <div className="flex gap-2">
-            <Button 
-              variant="outline" 
-              onClick={handleCheckConnectorStatus}
-              disabled={checkingStatus}
-              className="flex-1"
-            >
-              {checkingStatus ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <Stethoscope className="h-4 w-4 mr-2" />
-              )}
-              API Status
-            </Button>
-
-            <Button 
-              variant="outline" 
-              onClick={handleReconnect}
-              disabled={reconnecting}
-              className="flex-1"
-            >
-              {reconnecting ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              ) : (
-                <RefreshCw className="h-4 w-4 mr-2" />
-              )}
-              Reconectar
-            </Button>
-          </div>
-
-          <div className="flex gap-2">
             <Button 
               variant="destructive"
               onClick={handleReconfigureFromZero}
               disabled={reconfiguring}
-              className="flex-1"
+              size="icon"
+              title="Reconfigurar do Zero"
             >
               {reconfiguring ? (
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
-                <RotateCcw className="h-4 w-4 mr-2" />
+                <RotateCcw className="h-4 w-4" />
               )}
-              Do Zero
             </Button>
           </div>
-
-          {/* Raw Connector Status from imconnector.status API */}
-          {connectorStatusRaw && (
-            <div className="border rounded-lg p-4 space-y-3 bg-muted/30">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Stethoscope className="h-5 w-5 text-orange-500" />
-                  <span className="font-medium">imconnector.status (Raw API)</span>
-                </div>
-                <Button 
-                  variant="ghost" 
-                  size="sm"
-                  onClick={() => copyToClipboard(JSON.stringify(connectorStatusRaw, null, 2))}
-                >
-                  <Copy className="h-4 w-4" />
-                </Button>
-              </div>
-              
-              {connectorStatusRaw.success && (
-                <div className="grid grid-cols-2 gap-2 text-sm">
-                  <div className="flex items-center gap-2">
-                    {connectorStatusRaw.status?.active ? (
-                      <CheckCircle2 className="h-4 w-4 text-green-500" />
-                    ) : (
-                      <XCircle className="h-4 w-4 text-red-500" />
-                    )}
-                    <span>active: {String(connectorStatusRaw.status?.active)}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {connectorStatusRaw.status?.registered ? (
-                      <CheckCircle2 className="h-4 w-4 text-green-500" />
-                    ) : (
-                      <XCircle className="h-4 w-4 text-red-500" />
-                    )}
-                    <span>registered: {String(connectorStatusRaw.status?.registered)}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {connectorStatusRaw.status?.connection ? (
-                      <CheckCircle2 className="h-4 w-4 text-green-500" />
-                    ) : (
-                      <XCircle className="h-4 w-4 text-red-500" />
-                    )}
-                    <span>connection: {String(connectorStatusRaw.status?.connection)}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {connectorStatusRaw.connector_in_list ? (
-                      <CheckCircle2 className="h-4 w-4 text-green-500" />
-                    ) : (
-                      <XCircle className="h-4 w-4 text-red-500" />
-                    )}
-                    <span>in list: {String(connectorStatusRaw.connector_in_list)}</span>
-                  </div>
-                </div>
-              )}
-
-              <div className="bg-muted rounded p-2 overflow-auto max-h-40">
-                <pre className="text-xs">
-                  {JSON.stringify(connectorStatusRaw.status?.raw, null, 2)}
-                </pre>
-              </div>
-
-              {connectorStatusRaw.status?.error && (
-                <div className="bg-red-500/10 rounded p-2">
-                  <p className="text-sm text-red-600">
-                    Error: {JSON.stringify(connectorStatusRaw.status.error)}
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
         </CardContent>
       </Card>
     );
