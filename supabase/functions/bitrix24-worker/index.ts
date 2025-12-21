@@ -220,6 +220,10 @@ async function processEvent(
         console.log("ONAPPTEST received - test event from Bitrix24");
         break;
 
+      case "ADMIN_REBIND_EVENTS":
+        await processAdminRebindEvents(payload, supabase, supabaseUrl, supabaseServiceKey);
+        break;
+
       default:
         console.log(`Unknown event type: ${event.event_type}`);
     }
@@ -674,4 +678,162 @@ async function processPlacement(
   }
 
   console.log("Placement processed");
+}
+
+/**
+ * Process ADMIN_REBIND_EVENTS - Migrate events to new URL
+ */
+async function processAdminRebindEvents(
+  payload: any, 
+  supabase: any, 
+  supabaseUrl: string,
+  supabaseServiceKey: string
+) {
+  console.log("=== PROCESSING ADMIN REBIND EVENTS ===");
+  console.log("Payload:", JSON.stringify(payload, null, 2));
+
+  const integrationId = payload.integration_id;
+  if (!integrationId) {
+    throw new Error("integration_id is required");
+  }
+
+  const { data: integration, error: integrationError } = await supabase
+    .from("integrations")
+    .select("*")
+    .eq("id", integrationId)
+    .single();
+
+  if (integrationError || !integration) {
+    throw new Error(`Integration not found: ${integrationError?.message || "unknown"}`);
+  }
+
+  const config = integration.config;
+  const accessToken = await refreshBitrixToken(integration, supabase);
+  
+  if (!accessToken) {
+    throw new Error("No access token available");
+  }
+
+  const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
+  const oldWebhookUrl = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
+  const newEventsUrl = `${supabaseUrl}/functions/v1/bitrix24-events`;
+
+  console.log("Old URL:", oldWebhookUrl);
+  console.log("New URL:", newEventsUrl);
+
+  const results = {
+    unbound: 0,
+    bound: 0,
+    errors: [] as string[]
+  };
+
+  // 1. Get current events
+  const eventsResponse = await fetch(`${clientEndpoint}event.get`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ auth: accessToken })
+  });
+  const eventsResult = await eventsResponse.json();
+  const currentEvents = eventsResult.result || [];
+
+  console.log(`Found ${currentEvents.length} total events`);
+
+  // 2. Find events to migrate (bound to old webhook URL)
+  const eventsToMigrate = currentEvents.filter((e: any) => 
+    e.handler && e.handler.includes("/bitrix24-webhook")
+  );
+
+  console.log(`Found ${eventsToMigrate.length} events to migrate`);
+
+  // 3. Events that need migration
+  const eventNames = [
+    "OnImConnectorMessageAdd",
+    "OnImConnectorDialogStart",
+    "OnImConnectorDialogFinish",
+    "OnImConnectorStatusDelete",
+  ];
+
+  // 4. Unbind old and bind new
+  for (const event of eventsToMigrate) {
+    // Unbind from old URL
+    try {
+      await fetch(`${clientEndpoint}event.unbind`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          auth: accessToken,
+          event: event.event,
+          handler: event.handler
+        })
+      });
+      results.unbound++;
+      console.log(`Unbound: ${event.event}`);
+    } catch (e) {
+      results.errors.push(`Unbind ${event.event}: ${e}`);
+    }
+  }
+
+  // 5. Bind all required events to new URL
+  for (const eventName of eventNames) {
+    try {
+      const bindResponse = await fetch(`${clientEndpoint}event.bind`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          auth: accessToken,
+          event: eventName,
+          handler: newEventsUrl
+        })
+      });
+      const bindResult = await bindResponse.json();
+      
+      if (!bindResult.error || bindResult.error === "HANDLER_ALREADY_BINDED") {
+        results.bound++;
+        console.log(`Bound: ${eventName}`);
+      }
+    } catch (e) {
+      results.errors.push(`Bind ${eventName}: ${e}`);
+    }
+  }
+
+  // 6. Update connector data
+  const connectorId = config.connector_id || "thoth_whatsapp";
+  const lineId = config.line_id || config.activated_line_id || 2;
+
+  try {
+    await fetch(`${clientEndpoint}imconnector.connector.data.set`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        auth: accessToken,
+        CONNECTOR: connectorId,
+        LINE: lineId,
+        DATA: {
+          id: `${connectorId}_line_${lineId}`,
+          url: newEventsUrl,
+          url_im: newEventsUrl,
+          name: "Thoth WhatsApp"
+        }
+      })
+    });
+    console.log("Connector data updated");
+  } catch (e) {
+    results.errors.push(`Connector data: ${e}`);
+  }
+
+  // 7. Update integration config
+  await supabase
+    .from("integrations")
+    .update({
+      config: {
+        ...config,
+        events_url: newEventsUrl,
+        events_migrated_at: new Date().toISOString()
+      },
+      updated_at: new Date().toISOString()
+    })
+    .eq("id", integration.id);
+
+  console.log("=== REBIND COMPLETE ===");
+  console.log(`Unbound: ${results.unbound}, Bound: ${results.bound}, Errors: ${results.errors.length}`);
 }
