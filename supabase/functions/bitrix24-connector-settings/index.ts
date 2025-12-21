@@ -256,7 +256,7 @@ serve(async (req) => {
           <div class="step-number">1</div>
           <div class="step-content">
             <div class="step-title">Acesse o Thoth.ai</div>
-            <div class="step-desc">Faça login em <strong>app.thoth24.com</strong></div>
+            <div class="step-desc">Faça login em <strong>chat.thoth24.com</strong></div>
           </div>
         </div>
         <div class="step">
@@ -292,7 +292,11 @@ serve(async (req) => {
 </html>`;
 
       return new Response(setupHtml, {
-        headers: { ...corsHeaders, "Content-Type": "text/html; charset=utf-8" }
+        headers: { 
+          ...corsHeaders, 
+          "Content-Type": "text/html; charset=utf-8",
+          "X-Frame-Options": "ALLOWALL"
+        }
       });
     }
 
@@ -499,7 +503,11 @@ serve(async (req) => {
 </html>`;
 
       return new Response(tokenHtml, {
-        headers: { ...corsHeaders, "Content-Type": "text/html; charset=utf-8" }
+        headers: { 
+          ...corsHeaders, 
+          "Content-Type": "text/html; charset=utf-8",
+          "X-Frame-Options": "ALLOWALL"
+        }
       });
     }
 
@@ -611,7 +619,11 @@ serve(async (req) => {
 </html>`;
 
     return new Response(successHtml, {
-      headers: { ...corsHeaders, "Content-Type": "text/html; charset=utf-8" }
+      headers: { 
+        ...corsHeaders, 
+        "Content-Type": "text/html; charset=utf-8",
+        "X-Frame-Options": "ALLOWALL"
+      }
     });
 
   } catch (error) {
@@ -629,7 +641,11 @@ serve(async (req) => {
 
     return new Response(errorHtml, {
       status: 500,
-      headers: { ...corsHeaders, "Content-Type": "text/html; charset=utf-8" }
+      headers: { 
+        ...corsHeaders, 
+        "Content-Type": "text/html; charset=utf-8",
+        "X-Frame-Options": "ALLOWALL"
+      }
     });
   }
 });
