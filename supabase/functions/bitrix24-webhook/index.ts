@@ -905,6 +905,215 @@ async function handleDiagnoseConnector(supabase: any, payload: any, supabaseUrl:
   }
 }
 
+// Handle clean_connectors action - Remove all duplicate connectors and events
+async function handleCleanConnectors(supabase: any, payload: any, supabaseUrl: string) {
+  console.log("=== CLEAN CONNECTORS ===");
+  console.log("Payload:", JSON.stringify(payload, null, 2));
+
+  const { integration_id } = payload;
+
+  if (!integration_id) {
+    return new Response(
+      JSON.stringify({ error: "Integration ID não fornecido" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const { data: integration, error: integrationError } = await supabase
+    .from("integrations")
+    .select("*")
+    .eq("id", integration_id)
+    .single();
+
+  if (integrationError || !integration) {
+    console.error("Integration not found:", integrationError);
+    return new Response(
+      JSON.stringify({ error: "Integração não encontrada" }),
+      { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const accessToken = await refreshBitrixToken(integration, supabase);
+  if (!accessToken) {
+    return new Response(
+      JSON.stringify({ error: "Token de acesso não disponível" }),
+      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const config = integration.config;
+  const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
+  const webhookUrl = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
+
+  let removedCount = 0;
+  let eventsRemoved = 0;
+  const errors: string[] = [];
+
+  try {
+    // 1. List all connectors
+    console.log("Step 1: Listing all connectors...");
+    const listResponse = await fetch(`${clientEndpoint}imconnector.list`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ auth: accessToken })
+    });
+    const listResult = await listResponse.json();
+    console.log("Connector list:", JSON.stringify(listResult, null, 2));
+
+    const connectorsResult = listResult.result || {};
+    let connectorIds: string[] = [];
+    
+    if (Array.isArray(connectorsResult)) {
+      connectorIds = connectorsResult.map((c: any) => c.ID || c.id);
+    } else if (typeof connectorsResult === 'object') {
+      connectorIds = Object.keys(connectorsResult);
+    }
+
+    // Find all connectors with "thoth" or "whatsapp" in the name
+    const ourConnectors = connectorIds.filter(id => 
+      id.toLowerCase().includes("thoth") || id.toLowerCase().includes("whatsapp")
+    );
+    console.log("Found our connectors:", ourConnectors);
+
+    // 2. Unregister all except the main one (thoth_whatsapp)
+    const mainConnectorId = "thoth_whatsapp";
+    const duplicates = ourConnectors.filter(id => id !== mainConnectorId);
+
+    for (const connectorId of duplicates) {
+      console.log(`Unregistering duplicate connector: ${connectorId}`);
+      try {
+        // First deactivate for all lines
+        for (let lineId = 1; lineId <= 10; lineId++) {
+          await fetch(`${clientEndpoint}imconnector.activate`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              auth: accessToken,
+              CONNECTOR: connectorId,
+              LINE: lineId,
+              ACTIVE: 0
+            })
+          });
+        }
+
+        // Then unregister
+        const unregisterResponse = await fetch(`${clientEndpoint}imconnector.unregister`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            auth: accessToken,
+            ID: connectorId
+          })
+        });
+        const unregisterResult = await unregisterResponse.json();
+        console.log(`Unregister ${connectorId} result:`, JSON.stringify(unregisterResult, null, 2));
+
+        if (unregisterResult.result || !unregisterResult.error) {
+          removedCount++;
+        } else if (unregisterResult.error) {
+          errors.push(`Erro ao remover ${connectorId}: ${unregisterResult.error_description || unregisterResult.error}`);
+        }
+      } catch (e) {
+        console.error(`Error unregistering ${connectorId}:`, e);
+        errors.push(`Erro ao remover ${connectorId}`);
+      }
+    }
+
+    // 3. Clean duplicate events
+    console.log("Step 3: Cleaning duplicate events...");
+    const eventsResponse = await fetch(`${clientEndpoint}event.get`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ auth: accessToken })
+    });
+    const eventsResult = await eventsResponse.json();
+    console.log("Events:", JSON.stringify(eventsResult, null, 2));
+
+    const boundEvents = eventsResult.result || [];
+    
+    // Find events that point to our webhook
+    const ourEvents = boundEvents.filter((e: any) => 
+      e.handler?.includes("bitrix24") || e.HANDLER?.includes("bitrix24")
+    );
+    console.log("Our events:", ourEvents.length);
+
+    // Group events by event name and keep only one per event type
+    const eventsByName: Record<string, any[]> = {};
+    for (const event of ourEvents) {
+      const eventName = event.event || event.EVENT;
+      if (!eventsByName[eventName]) {
+        eventsByName[eventName] = [];
+      }
+      eventsByName[eventName].push(event);
+    }
+
+    // Remove duplicates (keep only the first one for each event type)
+    for (const [eventName, events] of Object.entries(eventsByName)) {
+      if (events.length > 1) {
+        console.log(`Found ${events.length} duplicate events for ${eventName}, keeping one and removing ${events.length - 1}`);
+        
+        for (let i = 1; i < events.length; i++) {
+          const event = events[i];
+          const eventId = event.id || event.ID;
+          const handler = event.handler || event.HANDLER;
+          
+          try {
+            const unbindResponse = await fetch(`${clientEndpoint}event.unbind`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                auth: accessToken,
+                event: eventName,
+                handler: handler
+              })
+            });
+            const unbindResult = await unbindResponse.json();
+            console.log(`Unbind ${eventName} result:`, JSON.stringify(unbindResult, null, 2));
+            
+            if (unbindResult.result) {
+              eventsRemoved++;
+            }
+          } catch (e) {
+            console.error(`Error unbinding event ${eventName}:`, e);
+          }
+        }
+      }
+    }
+
+    // 4. Update integration config to use the main connector ID
+    await supabase
+      .from("integrations")
+      .update({
+        config: {
+          ...config,
+          connector_id: mainConnectorId,
+          connectors_cleaned_at: new Date().toISOString(),
+        },
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", integration.id);
+
+    console.log("Clean complete:", { removedCount, eventsRemoved, errors });
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        removed_count: removedCount,
+        events_removed: eventsRemoved,
+        errors: errors.length > 0 ? errors : undefined,
+        message: `${removedCount} conector(es) e ${eventsRemoved} evento(s) duplicado(s) removidos`
+      }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  } catch (error) {
+    console.error("Error cleaning connectors:", error);
+    return new Response(
+      JSON.stringify({ error: error instanceof Error ? error.message : "Erro ao limpar conectores" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+}
+
 // Handle check_connector_status action - Check real connector status on Bitrix24
 async function handleCheckConnectorStatus(supabase: any, payload: any) {
   console.log("=== CHECK CONNECTOR STATUS ===");
@@ -2734,6 +2943,11 @@ serve(async (req) => {
     // Handle diagnose connector (check and auto-fix issues)
     if (action === "diagnose_connector" || payload.action === "diagnose_connector") {
       return await handleDiagnoseConnector(supabase, payload, supabaseUrl);
+    }
+
+    // Handle clean connectors (remove duplicates)
+    if (action === "clean_connectors" || payload.action === "clean_connectors") {
+      return await handleCleanConnectors(supabase, payload, supabaseUrl);
     }
 
     // Handle automation robot registration
