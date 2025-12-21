@@ -334,7 +334,7 @@ serve(async (req) => {
         const apiUrl = (config.client_endpoint as string) || `https://${config.domain}/rest/`;
         const connectorId = (config.connector_id as string) || "thoth_whatsapp";
         const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-        const webhookUrl = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
+        const eventsUrl = `${supabaseUrl}/functions/v1/bitrix24-events`;
 
         // Activate
         const activateResponse = await fetch(`${apiUrl}imconnector.activate`, {
@@ -350,7 +350,7 @@ serve(async (req) => {
         const activateResult = await activateResponse.json();
         console.log("imconnector.activate:", JSON.stringify(activateResult));
 
-        // Set data
+        // Set data - use bitrix24-events (public, no JWT)
         const dataSetResponse = await fetch(`${apiUrl}imconnector.connector.data.set`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -360,8 +360,8 @@ serve(async (req) => {
             LINE: line_id || 1,
             DATA: {
               id: `${connectorId}_line_${line_id || 1}`,
-              url: webhookUrl,
-              url_im: webhookUrl,
+              url: eventsUrl,
+              url_im: eventsUrl,
               name: "Thoth WhatsApp"
             }
           })
@@ -400,7 +400,7 @@ serve(async (req) => {
         // Simulate a PLACEMENT call from Bitrix24 to test webhook response
         console.log("=== SIMULATING PLACEMENT CALL ===");
         
-        const webhookUrl = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
+        const adminWebhookUrl = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
         const lineId = 1; // Default to line 1
         
         // Build payload similar to what Bitrix24 sends
@@ -423,8 +423,8 @@ serve(async (req) => {
 
         console.log("Simulating with payload:", JSON.stringify(placementPayload, null, 2));
 
-        // Call the webhook
-        const response = await fetch(webhookUrl, {
+        // Call the admin webhook (note: this is for admin operations, events use bitrix24-events)
+        const response = await fetch(adminWebhookUrl, {
           method: "POST",
           headers: { 
             "Content-Type": "application/json"

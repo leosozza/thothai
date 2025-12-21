@@ -337,7 +337,8 @@ async function handlePlacement(supabase: any, payload: any, supabaseUrl: string)
 
   console.log("Found integration:", integration.id, "workspace:", integration.workspace_id);
 
-  const webhookUrl = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
+  // CRITICAL: Use bitrix24-events (public, no JWT) for Bitrix24 event callbacks
+  const eventsUrl = `${supabaseUrl}/functions/v1/bitrix24-events`;
   const config = integration.config || {};
 
   // Determine API endpoint and access token
@@ -374,7 +375,7 @@ async function handlePlacement(supabase: any, payload: any, supabaseUrl: string)
       const activateResult = await activateResponse.json();
       console.log("imconnector.activate result:", JSON.stringify(activateResult));
       
-      // 2. Set connector data with webhook URL
+      // 2. Set connector data with events URL (public, no JWT)
       if (activeStatus === 1) {
         const dataSetUrl = `${apiUrl}imconnector.connector.data.set`;
         console.log("Calling:", dataSetUrl);
@@ -385,8 +386,8 @@ async function handlePlacement(supabase: any, payload: any, supabaseUrl: string)
           LINE: lineId,
           DATA: {
             id: `${connectorId}_line_${lineId}`,
-            url: webhookUrl,
-            url_im: webhookUrl,
+            url: eventsUrl,
+            url_im: eventsUrl,
             name: "Thoth WhatsApp"
           }
         };
@@ -465,10 +466,11 @@ async function handleCompleteSetup(supabase: any, payload: any, supabaseUrl: str
     );
   }
 
-  const webhookUrl = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
+  // CRITICAL: Use bitrix24-events (public, no JWT) for event callbacks
+  const eventsUrl = `${supabaseUrl}/functions/v1/bitrix24-events`;
 
   // Activate connector via API (with ACTIVE = 1)
-  const activationResult = await activateConnectorViaAPI(integration, supabase, line_id, 1, webhookUrl);
+  const activationResult = await activateConnectorViaAPI(integration, supabase, line_id, 1, eventsUrl);
   console.log("Activation result:", activationResult);
 
   // Verify activation succeeded by checking status
@@ -512,7 +514,7 @@ async function handleCompleteSetup(supabase: any, payload: any, supabaseUrl: str
             ICON: {
               DATA_IMAGE: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0OCIgaGVpZ2h0PSI0OCIgdmlld0JveD0iMCAwIDQ4IDQ4Ij48cGF0aCBmaWxsPSIjMjVEMzY2IiBkPSJNMjQgNEMxMi45NTQgNCgICAyNC4wMzggMjQuMDM4IDQ0IDI0LjAzOCA0NGgtLjAzMkM1LjY2NSA0NCA0IDM0LjMzNSA0IDI0eiIvPjwvc3ZnPg=="
             },
-            PLACEMENT_HANDLER: webhookUrl
+            PLACEMENT_HANDLER: eventsUrl
           })
         });
         const registerResult = await registerResponse.json();
@@ -542,8 +544,8 @@ async function handleCompleteSetup(supabase: any, payload: any, supabaseUrl: str
             LINE: line_id,
             DATA: {
               id: `${connectorId}_line_${line_id}`,
-              url: webhookUrl,
-              url_im: webhookUrl,
+              url: eventsUrl,
+              url_im: eventsUrl,
               name: "Thoth WhatsApp"
             }
           })
@@ -564,7 +566,7 @@ async function handleCompleteSetup(supabase: any, payload: any, supabaseUrl: str
         verificationResult.active = finalStatusResult.result?.active === true || finalStatusResult.result?.ACTIVE === "Y";
       }
 
-      // Bind events to ensure we receive messages
+      // Bind events to ensure we receive messages - use bitrix24-events (public, no JWT)
       console.log("Binding connector events...");
       const eventsToBind = ["OnImConnectorMessageAdd", "OnImConnectorDialogStart", "OnImConnectorDialogFinish"];
       
@@ -576,7 +578,7 @@ async function handleCompleteSetup(supabase: any, payload: any, supabaseUrl: str
             body: JSON.stringify({
               auth: accessToken,
               event: eventName,
-              handler: webhookUrl
+              handler: eventsUrl
             })
           });
         } catch (e) {
@@ -703,7 +705,8 @@ async function handleDiagnoseConnector(supabase: any, payload: any, supabaseUrl:
   const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
   const connectorId = config.connector_id || "thoth_whatsapp";
   const targetLineId = line_id || config.line_id || config.activated_line_id || 2;
-  const webhookUrl = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
+  // CRITICAL: Use bitrix24-events (public, no JWT) for event callbacks
+  const eventsUrl = `${supabaseUrl}/functions/v1/bitrix24-events`;
 
   console.log("Diagnosing connector:", { connectorId, targetLineId, clientEndpoint });
 
@@ -837,8 +840,8 @@ async function handleDiagnoseConnector(supabase: any, payload: any, supabaseUrl:
               LINE: targetLineId,
               DATA: {
                 id: `${connectorId}_line_${targetLineId}`,
-                url: webhookUrl,
-                url_im: webhookUrl,
+                url: eventsUrl,
+                url_im: eventsUrl,
                 name: "Thoth WhatsApp"
               }
             })
@@ -854,7 +857,7 @@ async function handleDiagnoseConnector(supabase: any, payload: any, supabaseUrl:
         }
       }
 
-      // Fix 2: Bind events if not bound
+      // Fix 2: Bind events if not bound - use bitrix24-events (public, no JWT)
       if (!diagnosis.events_bound) {
         console.log("Binding events...");
         
@@ -871,7 +874,7 @@ async function handleDiagnoseConnector(supabase: any, payload: any, supabaseUrl:
             body: JSON.stringify({
               auth: accessToken,
               event: eventName,
-              handler: webhookUrl
+              handler: eventsUrl
             })
           });
           const bindResult = await bindResponse.json();
@@ -972,7 +975,8 @@ async function handleCleanConnectors(supabase: any, payload: any, supabaseUrl: s
 
   const config = integration.config;
   const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
-  const webhookUrl = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
+  // Note: This is for cleanup, we check for both old webhook and new events URLs
+  const eventsUrl = `${supabaseUrl}/functions/v1/bitrix24-events`;
 
   let removedCount = 0;
   let eventsRemoved = 0;
@@ -1456,11 +1460,12 @@ async function handleActivateConnectorForLine(supabase: any, payload: any, supab
     );
   }
 
-  const webhookUrl = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
+  // CRITICAL: Use bitrix24-events (public, no JWT) for event callbacks
+  const eventsUrl = `${supabaseUrl}/functions/v1/bitrix24-events`;
   const activeValue = active === true || active === 1 ? 1 : 0;
 
   // Use the existing activateConnectorViaAPI function
-  const result = await activateConnectorViaAPI(integration, supabase, line_id, activeValue, webhookUrl);
+  const result = await activateConnectorViaAPI(integration, supabase, line_id, activeValue, eventsUrl);
 
   if (result.success) {
     return new Response(
@@ -2825,11 +2830,12 @@ async function handleForceActivate(supabase: any, payload: any, supabaseUrl: str
   const config = integration.config;
   const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
   const connectorId = config.connector_id || "thoth_whatsapp";
-  const webhookUrl = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
+  // CRITICAL: Use bitrix24-events (public, no JWT) for event callbacks
+  const eventsUrl = `${supabaseUrl}/functions/v1/bitrix24-events`;
 
   console.log("Force activating connector:", connectorId, "for line:", line_id);
   console.log("Using endpoint:", clientEndpoint);
-  console.log("Webhook URL:", webhookUrl);
+  console.log("Events URL:", eventsUrl);
 
   const results = {
     activate: { success: false, result: null as any, error: null as any },
@@ -2870,8 +2876,8 @@ async function handleForceActivate(supabase: any, payload: any, supabaseUrl: str
         LINE: parseInt(line_id),
         DATA: {
           id: `${connectorId}_line_${line_id}`,
-          url: webhookUrl,
-          url_im: webhookUrl,
+          url: eventsUrl,
+          url_im: eventsUrl,
           name: "Thoth WhatsApp"
         }
       })
@@ -2933,8 +2939,8 @@ async function handleForceActivate(supabase: any, payload: any, supabaseUrl: str
           LINE: parseInt(line_id),
           DATA: {
             id: `${connectorId}_line_${line_id}`,
-            url: webhookUrl,
-            url_im: webhookUrl,
+            url: eventsUrl,
+            url_im: eventsUrl,
             name: "Thoth WhatsApp"
           }
         })

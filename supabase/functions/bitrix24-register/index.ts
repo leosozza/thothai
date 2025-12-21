@@ -510,9 +510,8 @@ serve(async (req) => {
       console.log("Error listing connectors for cleanup:", e);
     }
     
-    // Also clean up duplicate events before binding new ones
+    // Also clean up duplicate events before binding new ones (both old webhook and events URLs)
     console.log("=== CLEANING DUPLICATE EVENTS ===");
-    const cleanWebhookUrlForCleanup = `${supabaseUrl}/functions/v1/bitrix24-webhook`;
     
     try {
       const eventsListUrl = `${bitrixApiUrl}event.get?auth=${accessToken}`;
@@ -520,8 +519,9 @@ serve(async (req) => {
       const eventsResult = await eventsResponse.json();
       
       if (eventsResult.result) {
+        // Clean up events pointing to either old webhook or current events URL
         const eventsToUnbind = eventsResult.result.filter((event: any) => 
-          event.handler?.includes("bitrix24-webhook")
+          event.handler?.includes("bitrix24-webhook") || event.handler?.includes("bitrix24-events")
         );
         
         console.log(`Found ${eventsToUnbind.length} Thoth events to clean up`);

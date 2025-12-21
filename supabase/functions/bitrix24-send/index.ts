@@ -356,8 +356,8 @@ serve(async (req) => {
       const isActive = statusResult.result?.active || statusResult.result?.ACTIVE;
       const isConfigured = statusResult.result?.connection || statusResult.result?.CONNECTION;
       
-      // Webhook URL for receiving operator messages
-      const webhookCallbackUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/bitrix24-webhook`;
+      // Webhook URL for receiving operator messages - MUST use bitrix24-events (public, no JWT)
+      const eventsCallbackUrl = `${Deno.env.get("SUPABASE_URL")}/functions/v1/bitrix24-events`;
       
       if (!isActive || !isConfigured) {
         console.log(`Connector not fully active on line ${lineId}, activating...`);
@@ -384,17 +384,15 @@ serve(async (req) => {
       }
       
       // ALWAYS configure connector data (webhook URL) for this line to ensure replies come back
-      console.log(`Configuring connector data on line ${lineId} with webhook: ${webhookCallbackUrl}`);
+      console.log(`Configuring connector data on line ${lineId} with events URL: ${eventsCallbackUrl}`);
       const connectorDataParams: Record<string, unknown> = {
         CONNECTOR: connectorId,
         LINE: parseInt(lineId),
         DATA: {
           id: `${connectorId}_line_${lineId}`,
-          url: webhookCallbackUrl,
-          url_im: webhookCallbackUrl,
+          url: eventsCallbackUrl,
+          url_im: eventsCallbackUrl,
           name: "Thoth WhatsApp",
-          // Additional fields that might be needed for message routing
-          PLACEMENT_HANDLER: webhookCallbackUrl,
         }
       };
       if (isOAuth && accessToken) {
@@ -433,7 +431,7 @@ serve(async (req) => {
         "OnImConnectorStatusChange",    // When connector status changes
       ];
 
-      console.log("Ensuring event bindings for webhook:", webhookCallbackUrl);
+      console.log("Ensuring event bindings for events URL:", eventsCallbackUrl);
 
       // First, get existing event bindings
       const eventGetParams: Record<string, unknown> = {};
@@ -458,7 +456,7 @@ serve(async (req) => {
           const existingEventName = (e.event || e.EVENT || "").toUpperCase();
           const existingHandler = (e.handler || e.HANDLER || "");
           return existingEventName === eventName.toUpperCase() && 
-                 existingHandler.includes("bitrix24-webhook");
+                 existingHandler.includes("bitrix24-events");
         });
 
         if (!eventAlreadyBound) {
@@ -466,7 +464,7 @@ serve(async (req) => {
           
           const bindParams: Record<string, unknown> = {
             event: eventName,
-            handler: webhookCallbackUrl
+            handler: eventsCallbackUrl
           };
           if (isOAuth && accessToken) {
             bindParams.auth = accessToken;
