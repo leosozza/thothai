@@ -10,10 +10,10 @@ verify_jwt = true
 verify_jwt = false
 
 [functions.ai-process-message]
-verify_jwt = true
+verify_jwt = false
 
 [functions.ai-process-bitrix24]
-verify_jwt = true
+verify_jwt = false
 
 [functions.flow-engine]
 verify_jwt = false
