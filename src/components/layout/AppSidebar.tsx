@@ -48,6 +48,7 @@ import {
   Sun,
   Moon,
   Sparkles,
+  Stethoscope,
   TestTube2,
 } from "lucide-react";
 
@@ -117,6 +118,11 @@ const systemNavItems = [
     title: "Configurações",
     url: "/settings",
     icon: Settings,
+  },
+  {
+    title: "Diagnósticos",
+    url: "/settings/diagnostics",
+    icon: Stethoscope,
   },
 ];
 
