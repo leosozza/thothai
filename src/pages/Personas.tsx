@@ -52,6 +52,7 @@ interface Persona {
   temperature: number;
   welcome_message: string | null;
   is_default: boolean;
+  is_active: boolean;
   department_id: string | null;
   bitrix_bot_enabled: boolean;
   bitrix_bot_id: number | null;
@@ -142,6 +143,7 @@ export default function Personas() {
         ...p,
         use_native_voice: p.use_native_voice ?? true,
         use_native_credits: p.use_native_credits ?? true,
+        is_active: p.is_active ?? true,
       })) as Persona[]);
     } catch (error) {
       console.error("Error fetching personas:", error);
@@ -414,6 +416,23 @@ export default function Personas() {
     }
   };
 
+  const handleToggleActive = async (personaId: string, isActive: boolean) => {
+    try {
+      const { error } = await supabase
+        .from("personas")
+        .update({ is_active: isActive })
+        .eq("id", personaId);
+
+      if (error) throw error;
+      
+      toast.success(isActive ? "Persona ativada" : "Persona desativada");
+      fetchPersonas();
+    } catch (error) {
+      console.error("Error toggling persona:", error);
+      toast.error("Erro ao alterar status da persona");
+    }
+  };
+
   return (
     <AppLayout title="Personas">
       <div className="p-6 space-y-6">
@@ -470,7 +489,10 @@ export default function Personas() {
         ) : (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {personas.map((persona) => (
-              <Card key={persona.id} className="relative overflow-hidden">
+              <Card 
+                key={persona.id} 
+                className={`relative overflow-hidden transition-all ${!persona.is_active ? "opacity-60 grayscale" : ""}`}
+              >
                 {persona.is_default && (
                   <div className="absolute top-0 right-0">
                     <Badge className="rounded-none rounded-bl-lg bg-primary text-primary-foreground gap-1">
@@ -492,6 +514,15 @@ export default function Personas() {
                       <CardDescription className="line-clamp-2">
                         {persona.description || "Sem descrição"}
                       </CardDescription>
+                    </div>
+                    <div className="flex flex-col items-center gap-1">
+                      <Switch 
+                        checked={persona.is_active}
+                        onCheckedChange={(checked) => handleToggleActive(persona.id, checked)}
+                      />
+                      <span className="text-xs text-muted-foreground">
+                        {persona.is_active ? "Ativo" : "Inativo"}
+                      </span>
                     </div>
                   </div>
                 </CardHeader>

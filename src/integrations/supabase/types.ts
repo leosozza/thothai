@@ -1095,6 +1095,7 @@ export type Database = {
           description: string | null
           fallback_message: string | null
           id: string
+          is_active: boolean | null
           is_default: boolean | null
           name: string
           system_prompt: string
@@ -1119,6 +1120,7 @@ export type Database = {
           description?: string | null
           fallback_message?: string | null
           id?: string
+          is_active?: boolean | null
           is_default?: boolean | null
           name: string
           system_prompt: string
@@ -1143,6 +1145,7 @@ export type Database = {
           description?: string | null
           fallback_message?: string | null
           id?: string
+          is_active?: boolean | null
           is_default?: boolean | null
           name?: string
           system_prompt?: string
