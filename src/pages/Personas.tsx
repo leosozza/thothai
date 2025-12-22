@@ -155,13 +155,47 @@ export default function Personas() {
     
     setTogglingBitrix(true);
     try {
-      // If enabling, first disable any other persona that's currently the Bitrix bot
+      // Get persona details for bot registration
+      const persona = personas.find(p => p.id === personaId);
+      if (!persona) throw new Error("Persona não encontrada");
+
       if (enable) {
+        // First disable any other persona that's currently the Bitrix bot
         await supabase
           .from("personas")
           .update({ bitrix_bot_enabled: false })
           .eq("workspace_id", workspace?.id)
           .eq("bitrix_bot_enabled", true);
+
+        // Register the bot in Bitrix24 if not already registered
+        if (!bitrixIntegration.config.bot_id) {
+          toast.loading("Registrando bot no Bitrix24...", { id: "bot-register" });
+          
+          const { data: registerData, error: registerError } = await supabase.functions.invoke(
+            "bitrix24-bot-register",
+            {
+              body: {
+                action: "register",
+                integration_id: bitrixIntegration.id,
+                bot_name: persona.name,
+                bot_description: persona.description || `Assistente IA - ${persona.name}`,
+              },
+            }
+          );
+
+          toast.dismiss("bot-register");
+
+          if (registerError || registerData?.error) {
+            throw new Error(registerData?.error || registerError?.message || "Erro ao registrar bot");
+          }
+
+          console.log("Bot registered:", registerData);
+          
+          // Update local integration state with bot_id
+          if (registerData?.bot_id) {
+            bitrixIntegration.config.bot_id = registerData.bot_id;
+          }
+        }
       }
 
       // Update the persona
@@ -189,11 +223,14 @@ export default function Personas() {
       // Update local state
       setBitrixIntegration({ ...bitrixIntegration, config: newConfig });
       
-      toast.success(enable ? "Persona ativada como Chatbot no Bitrix24" : "Persona desativada do Bitrix24");
+      toast.success(enable 
+        ? "Chatbot ativado para todos os canais do Contact Center" 
+        : "Chatbot desativado do Bitrix24"
+      );
       fetchPersonas();
     } catch (error) {
       console.error("Error toggling Bitrix bot:", error);
-      toast.error("Erro ao atualizar configuração do Bitrix24");
+      toast.error(error instanceof Error ? error.message : "Erro ao atualizar configuração do Bitrix24");
     } finally {
       setTogglingBitrix(false);
     }
@@ -502,10 +539,10 @@ export default function Personas() {
                     <div>
                       <Label className="flex items-center gap-2">
                         <MessageSquare className="h-4 w-4 text-blue-600" />
-                        Chatbot no Bitrix24
+                        Chatbot no Contact Center
                       </Label>
                       <p className="text-xs text-muted-foreground">
-                        Ativar esta persona como chatbot no Bitrix24
+                        Ativar para todos os canais (Instagram, Widget, Telegram, etc.)
                       </p>
                     </div>
                     <Switch 
