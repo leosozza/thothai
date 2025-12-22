@@ -87,7 +87,7 @@ const tierConfig = {
     multiplier: "1x",
     color: "bg-green-500/10 text-green-600 border-green-500/30",
     icon: Zap,
-    description: "Modelos leves e gratuitos"
+    description: "Modelos leves e eficientes"
   },
   professional: {
     label: "Professional",
