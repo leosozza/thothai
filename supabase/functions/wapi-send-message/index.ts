@@ -210,7 +210,7 @@ serve(async (req) => {
           content: message,
           media_url: finalMediaUrl,
           status: "sent",
-          is_from_bot: false,
+          is_from_bot: !!internal_call, // Mark as bot message if internal call
         })
         .select()
         .single();

@@ -124,6 +124,12 @@ serve(async (req) => {
         const pushName = payload.sender?.pushName || "";
         const profilePic = payload.sender?.profilePicture || payload.chat?.profilePicture;
 
+        // ANTI-LOOP: Skip messages sent by the connected WhatsApp account
+        if (isFromMe) {
+          console.log("Skipping own message (fromMe=true):", messageId);
+          break;
+        }
+
         // Determine message type
         let messageType = "text";
         if (payload.msgContent?.imageMessage) messageType = "image";
@@ -321,16 +327,31 @@ serve(async (req) => {
         const attendanceMode = conversation.attendance_mode || 'ai';
         const assignedTo = conversation.assigned_to;
         
-        // Only trigger AI processing if:
-        // 1. Message is incoming (not from me)
-        // 2. Has content
-        // 3. Attendance mode is 'ai' or 'hybrid'
-        // 4. No human is assigned (or mode is hybrid)
-        if (!isFromMe && msgContent) {
+        // Only trigger AI processing if message has content
+        if (msgContent) {
           const shouldProcessWithAI = attendanceMode === 'ai' || 
             (attendanceMode === 'hybrid' && !assignedTo);
           
           if (shouldProcessWithAI) {
+            // ANTI-LOOP: Check if bot responded recently (cooldown of 3 seconds)
+            const { data: recentBotMessage } = await supabase
+              .from("messages")
+              .select("created_at")
+              .eq("conversation_id", conversation.id)
+              .eq("direction", "outgoing")
+              .eq("is_from_bot", true)
+              .order("created_at", { ascending: false })
+              .limit(1)
+              .maybeSingle();
+
+            if (recentBotMessage) {
+              const timeSinceLastBot = Date.now() - new Date(recentBotMessage.created_at).getTime();
+              if (timeSinceLastBot < 3000) {
+                console.log("ANTI-LOOP: Skipping AI - bot responded recently:", timeSinceLastBot, "ms ago");
+                break;
+              }
+            }
+
             console.log("Triggering flow-engine for incoming message (mode:", attendanceMode, ")");
             
             try {

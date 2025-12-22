@@ -86,6 +86,31 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
+    // ANTI-LOOP: Check if we already processed this conversation recently (2 seconds)
+    const { data: recentOutgoing } = await supabase
+      .from("messages")
+      .select("created_at")
+      .eq("conversation_id", conversation_id)
+      .eq("direction", "outgoing")
+      .eq("is_from_bot", true)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (recentOutgoing) {
+      const timeSince = Date.now() - new Date(recentOutgoing.created_at).getTime();
+      if (timeSince < 2000) {
+        console.log("ANTI-LOOP: Skipping - already processed recently:", timeSince, "ms ago");
+        return new Response(JSON.stringify({ 
+          skipped: true, 
+          reason: "Already processed recently",
+          time_since_ms: timeSince 
+        }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
     // Fetch the default persona for this workspace
     let systemPrompt = "Você é um assistente prestativo e profissional. Responda de forma clara e objetiva.";
     let personaName = "Assistente";
