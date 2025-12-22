@@ -48,7 +48,54 @@ serve(async (req) => {
   const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
   try {
-    const payload: ElevenLabsWebhookPayload = await req.json();
+    // Get raw body for signature validation
+    const rawBody = await req.text();
+    
+    // Validate webhook signature if secret is configured
+    const webhookSecret = Deno.env.get("ELEVENLABS_WEBHOOK_SECRET");
+    if (webhookSecret) {
+      const signature = req.headers.get("X-ElevenLabs-Signature") || 
+                        req.headers.get("x-elevenlabs-signature");
+      
+      if (!signature) {
+        console.error("Missing webhook signature header");
+        return new Response(JSON.stringify({ error: "Missing signature" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // Calculate expected HMAC-SHA256 signature
+      const encoder = new TextEncoder();
+      const key = await crypto.subtle.importKey(
+        "raw",
+        encoder.encode(webhookSecret),
+        { name: "HMAC", hash: "SHA-256" },
+        false,
+        ["sign"]
+      );
+      const signatureBuffer = await crypto.subtle.sign(
+        "HMAC",
+        key,
+        encoder.encode(rawBody)
+      );
+      const expectedSignature = Array.from(new Uint8Array(signatureBuffer))
+        .map(b => b.toString(16).padStart(2, "0"))
+        .join("");
+
+      if (signature !== expectedSignature) {
+        console.error("Invalid webhook signature - request rejected");
+        return new Response(JSON.stringify({ error: "Invalid signature" }), {
+          status: 401,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      console.log("Webhook signature validated successfully");
+    }
+
+    // Parse the body from raw text
+    const payload: ElevenLabsWebhookPayload = JSON.parse(rawBody);
     console.log("ElevenLabs webhook received:", payload.type, payload.conversation_id);
 
     const { type, conversation_id, agent_id, data, call_details } = payload;
