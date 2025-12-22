@@ -30,6 +30,9 @@ verify_jwt = false
 [functions.elevenlabs-agent-token]
 verify_jwt = true
 
+[functions.elevenlabs-list-voices]
+verify_jwt = false
+
 [functions.ai-playground]
 verify_jwt = true
 

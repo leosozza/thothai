@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useWorkspace } from "@/hooks/useWorkspace";
 import { Label } from "@/components/ui/label";
@@ -12,7 +12,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Sparkles, Key, Volume2, Play, Pause, Zap, Star, Crown } from "lucide-react";
+import { Sparkles, Key, Volume2, Play, Pause, Zap, Star, Crown, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 interface NativeVoiceModel {
@@ -35,6 +35,19 @@ interface VoiceProvider {
   slug: string;
   type: string;
   available_voices: Array<{ id: string; name: string; gender?: string }>;
+}
+
+interface ExternalVoice {
+  id: string;
+  name: string;
+  gender: string | null;
+  language: string | null;
+  accent: string | null;
+  age: string | null;
+  use_case: string | null;
+  description: string | null;
+  preview_url: string | null;
+  category: string;
 }
 
 interface VoiceModelSelectorProps {
@@ -69,6 +82,33 @@ const tierConfig = {
   },
 };
 
+// Common language labels mapping
+const languageLabels: Record<string, string> = {
+  "american": "Inglês (Americano)",
+  "british": "Inglês (Britânico)",
+  "english": "Inglês",
+  "spanish": "Espanhol",
+  "portuguese": "Português",
+  "brazilian": "Português (Brasil)",
+  "french": "Francês",
+  "german": "Alemão",
+  "italian": "Italiano",
+  "polish": "Polonês",
+  "russian": "Russo",
+  "turkish": "Turco",
+  "ukrainian": "Ucraniano",
+  "japanese": "Japonês",
+  "korean": "Coreano",
+  "chinese": "Chinês",
+  "arabic": "Árabe",
+  "hindi": "Hindi",
+  "dutch": "Holandês",
+  "swedish": "Sueco",
+  "australian": "Inglês (Australiano)",
+  "irish": "Inglês (Irlandês)",
+  "indian": "Inglês (Indiano)",
+};
+
 export function VoiceModelSelector({
   voiceEnabled,
   onVoiceEnabledChange,
@@ -87,6 +127,12 @@ export function VoiceModelSelector({
   const [loading, setLoading] = useState(true);
   const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
   const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null);
+  
+  // External voices state (ElevenLabs)
+  const [externalVoices, setExternalVoices] = useState<ExternalVoice[]>([]);
+  const [availableLanguages, setAvailableLanguages] = useState<string[]>([]);
+  const [selectedLanguage, setSelectedLanguage] = useState<string>("all");
+  const [loadingExternalVoices, setLoadingExternalVoices] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -100,6 +146,47 @@ export function VoiceModelSelector({
       }
     }
   }, [selectedVoiceId, nativeVoices, useNativeVoice]);
+
+  // Fetch external voices when provider changes to ElevenLabs
+  const fetchExternalVoices = useCallback(async (providerSlug: string) => {
+    if (providerSlug !== "elevenlabs" || !workspace?.id) return;
+    
+    setLoadingExternalVoices(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("elevenlabs-list-voices", {
+        body: { workspace_id: workspace.id }
+      });
+
+      if (error) {
+        console.error("Error fetching ElevenLabs voices:", error);
+        return;
+      }
+
+      if (data?.voices) {
+        setExternalVoices(data.voices);
+        setAvailableLanguages(data.languages || []);
+        
+        // Auto-select first voice if none selected
+        if (data.voices.length > 0 && !selectedVoiceId) {
+          onVoiceChange(data.voices[0].id);
+        }
+      }
+    } catch (error) {
+      console.error("Error fetching external voices:", error);
+    } finally {
+      setLoadingExternalVoices(false);
+    }
+  }, [workspace?.id, selectedVoiceId, onVoiceChange]);
+
+  // Fetch external voices when provider is selected
+  useEffect(() => {
+    if (!useNativeVoice && selectedVoiceProviderId) {
+      const provider = voiceProviders.find(p => p.id === selectedVoiceProviderId);
+      if (provider?.slug === "elevenlabs") {
+        fetchExternalVoices("elevenlabs");
+      }
+    }
+  }, [useNativeVoice, selectedVoiceProviderId, voiceProviders, fetchExternalVoices]);
 
   const fetchData = async () => {
     try {
@@ -200,13 +287,15 @@ export function VoiceModelSelector({
         onVoiceChange(voices[0].voice_id);
         onProviderChange(null);
       }
+      // Clear external voices
+      setExternalVoices([]);
+      setSelectedLanguage("all");
     } else {
       if (configuredProviders.length > 0) {
         const provider = configuredProviders[0];
         onProviderChange(provider.id);
-        if (provider.available_voices.length > 0) {
-          onVoiceChange(provider.available_voices[0].id);
-        }
+        // Voice will be selected after external voices are fetched
+        onVoiceChange(null);
       }
     }
   };
@@ -223,9 +312,32 @@ export function VoiceModelSelector({
     const provider = voiceProviders.find(p => p.id === providerId);
     if (provider) {
       onProviderChange(providerId);
-      if (provider.available_voices.length > 0) {
+      onVoiceChange(null);
+      setSelectedLanguage("all");
+      setExternalVoices([]);
+      
+      // Fetch voices for the new provider
+      if (provider.slug === "elevenlabs") {
+        fetchExternalVoices("elevenlabs");
+      } else if (provider.available_voices.length > 0) {
         onVoiceChange(provider.available_voices[0].id);
       }
+    }
+  };
+
+  const handleLanguageChange = (lang: string) => {
+    setSelectedLanguage(lang);
+    
+    // Auto-select first voice in the filtered list
+    const filtered = lang === "all" 
+      ? externalVoices 
+      : externalVoices.filter(v => 
+          v.language?.toLowerCase() === lang.toLowerCase() ||
+          v.accent?.toLowerCase() === lang.toLowerCase()
+        );
+    
+    if (filtered.length > 0) {
+      onVoiceChange(filtered[0].id);
     }
   };
 
@@ -254,6 +366,17 @@ export function VoiceModelSelector({
   };
 
   const selectedProvider = voiceProviders.find(p => p.id === selectedVoiceProviderId);
+  
+  // Get filtered external voices
+  const filteredExternalVoices = selectedLanguage === "all"
+    ? externalVoices
+    : externalVoices.filter(v => 
+        v.language?.toLowerCase() === selectedLanguage.toLowerCase() ||
+        v.accent?.toLowerCase() === selectedLanguage.toLowerCase()
+      );
+
+  // Get the currently selected external voice for preview
+  const selectedExternalVoice = externalVoices.find(v => v.id === selectedVoiceId);
 
   if (loading) {
     return <div className="animate-pulse h-24 bg-muted rounded-lg" />;
@@ -427,6 +550,7 @@ export function VoiceModelSelector({
             </>
           ) : (
             <>
+              {/* Provider Selection */}
               <div className="space-y-2">
                 <Label>Provedor</Label>
                 <Select
@@ -446,7 +570,107 @@ export function VoiceModelSelector({
                 </Select>
               </div>
 
-              {selectedProvider && selectedProvider.available_voices.length > 0 && (
+              {/* Loading state for external voices */}
+              {loadingExternalVoices && (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Carregando vozes...
+                </div>
+              )}
+
+              {/* ElevenLabs-specific UI with language filter */}
+              {selectedProvider?.slug === "elevenlabs" && !loadingExternalVoices && externalVoices.length > 0 && (
+                <>
+                  {/* Language Filter */}
+                  <div className="space-y-2">
+                    <Label>Idioma</Label>
+                    <Select
+                      value={selectedLanguage}
+                      onValueChange={handleLanguageChange}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Filtrar por idioma" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">
+                          Todos os idiomas ({externalVoices.length})
+                        </SelectItem>
+                        {availableLanguages.map(lang => {
+                          const count = externalVoices.filter(v => 
+                            v.language?.toLowerCase() === lang.toLowerCase() ||
+                            v.accent?.toLowerCase() === lang.toLowerCase()
+                          ).length;
+                          const label = languageLabels[lang.toLowerCase()] || lang;
+                          return (
+                            <SelectItem key={lang} value={lang}>
+                              {label} ({count})
+                            </SelectItem>
+                          );
+                        })}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Voice Selection */}
+                  <div className="space-y-2">
+                    <Label>Voz ({filteredExternalVoices.length} disponíveis)</Label>
+                    <Select
+                      value={selectedVoiceId || ""}
+                      onValueChange={onVoiceChange}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecione uma voz" />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-[300px]">
+                        {filteredExternalVoices.map(voice => (
+                          <SelectItem key={voice.id} value={voice.id}>
+                            <div className="flex items-center gap-2">
+                              <span>{voice.name}</span>
+                              {(voice.gender || voice.language) && (
+                                <span className="text-xs text-muted-foreground">
+                                  ({[voice.gender, voice.language || voice.accent].filter(Boolean).join(", ")})
+                                </span>
+                              )}
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Voice Preview for ElevenLabs */}
+                  {selectedExternalVoice?.preview_url && (
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-2"
+                        onClick={() => handlePlaySample(selectedExternalVoice.id, selectedExternalVoice.preview_url)}
+                      >
+                        {playingVoiceId === selectedExternalVoice.id ? (
+                          <>
+                            <Pause className="h-4 w-4" />
+                            Pausar
+                          </>
+                        ) : (
+                          <>
+                            <Play className="h-4 w-4" />
+                            Ouvir Preview
+                          </>
+                        )}
+                      </Button>
+                      {selectedExternalVoice.description && (
+                        <span className="text-xs text-muted-foreground">
+                          {selectedExternalVoice.description}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* Fallback for non-ElevenLabs providers */}
+              {selectedProvider && selectedProvider.slug !== "elevenlabs" && selectedProvider.available_voices.length > 0 && (
                 <div className="space-y-2">
                   <Label>Voz</Label>
                   <Select
@@ -471,6 +695,13 @@ export function VoiceModelSelector({
                       ))}
                     </SelectContent>
                   </Select>
+                </div>
+              )}
+
+              {/* Empty state for ElevenLabs */}
+              {selectedProvider?.slug === "elevenlabs" && !loadingExternalVoices && externalVoices.length === 0 && (
+                <div className="text-sm text-muted-foreground p-4 bg-muted rounded-lg text-center">
+                  Nenhuma voz encontrada. Verifique sua API key do ElevenLabs.
                 </div>
               )}
             </>
