@@ -28,6 +28,7 @@ import Privacy from "./pages/Privacy";
 import Docs from "./pages/Docs";
 import GenerateLogo from "./pages/GenerateLogo";
 import AIProviders from "./pages/AIProviders";
+import Diagnostics from "./pages/Diagnostics";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -74,6 +75,7 @@ const App = () => (
                       <Route path="/integrations" element={<Integrations />} />
                       <Route path="/settings" element={<Settings />} />
                       <Route path="/settings/ai-providers" element={<AIProviders />} />
+                      <Route path="/settings/diagnostics" element={<Diagnostics />} />
                       <Route path="/analytics" element={<Dashboard />} />
                       <Route path="/playground" element={<Playground />} />
                       <Route path="*" element={<NotFound />} />
