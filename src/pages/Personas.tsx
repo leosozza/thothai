@@ -17,35 +17,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useWorkspace } from "@/hooks/useWorkspace";
-
-// ElevenLabs voices
-const ELEVENLABS_VOICES = [
-  // Femininas
-  { id: "EXAVITQu4vr4xnSDxMaL", name: "Sarah", gender: "Feminino", style: "Suave" },
-  { id: "XrExE9yKIg1WjnnlVkGX", name: "Matilda", gender: "Feminino", style: "Natural" },
-  { id: "cgSgspJ2msm6clMCkdW9", name: "Jessica", gender: "Feminino", style: "Expressiva" },
-  { id: "FGY2WhTYpPnrIDTdsKH5", name: "Laura", gender: "Feminino", style: "Profissional" },
-  { id: "pFZP5JQG7iQjIQuC4Bku", name: "Lily", gender: "Feminino", style: "Calorosa" },
-  { id: "Xb7hH8MSUJpSbSDYk0k2", name: "Alice", gender: "Feminino", style: "Britânica" },
-  // Masculinas
-  { id: "CwhRBWXzGAHq8TQ4Fs17", name: "Roger", gender: "Masculino", style: "Confiante" },
-  { id: "IKne3meq5aSn9XLyUdCD", name: "Charlie", gender: "Masculino", style: "Casual" },
-  { id: "nPczCjzI2devNBz1zQrb", name: "Brian", gender: "Masculino", style: "Narrador" },
-  { id: "JBFqnCBsd6RMkjVDRZzb", name: "George", gender: "Masculino", style: "Britânico" },
-  { id: "TX3LPaxmHKxFdv7VOQHJ", name: "Liam", gender: "Masculino", style: "Articulado" },
-  { id: "onwK4e9ZLuTAKqWW03F9", name: "Daniel", gender: "Masculino", style: "Profundo" },
-  { id: "cjVigY5qzO86Huf0OWal", name: "Eric", gender: "Masculino", style: "Amigável" },
-];
+import { AIModelSelector } from "@/components/personas/AIModelSelector";
+import { VoiceModelSelector } from "@/components/personas/VoiceModelSelector";
 import {
   Plus,
   Bot,
@@ -58,6 +34,7 @@ import {
   MessageSquare,
   Upload,
   XCircle,
+  Brain,
 } from "lucide-react";
 
 interface Persona {
@@ -68,12 +45,18 @@ interface Persona {
   system_prompt: string;
   voice_enabled: boolean;
   voice_id: string | null;
+  voice_provider_id: string | null;
+  use_native_voice: boolean;
   temperature: number;
   welcome_message: string | null;
   is_default: boolean;
   department_id: string | null;
   bitrix_bot_enabled: boolean;
   bitrix_bot_id: number | null;
+  // AI fields
+  use_native_credits: boolean;
+  ai_provider_id: string | null;
+  ai_model: string | null;
 }
 
 interface BitrixIntegration {
@@ -96,15 +79,24 @@ export default function Personas() {
   const [publishingPersonaId, setPublishingPersonaId] = useState<string | null>(null);
   const { workspace } = useWorkspace();
 
-  // Form states
+  // Form states - Basic
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
   const [welcomeMessage, setWelcomeMessage] = useState("");
   const [temperature, setTemperature] = useState([0.7]);
-  const [voiceEnabled, setVoiceEnabled] = useState(false);
-  const [voiceId, setVoiceId] = useState<string | null>(null);
   const [isDefault, setIsDefault] = useState(false);
+
+  // Form states - AI
+  const [useNativeCredits, setUseNativeCredits] = useState(true);
+  const [aiProviderId, setAiProviderId] = useState<string | null>(null);
+  const [aiModel, setAiModel] = useState("google/gemini-2.5-flash");
+
+  // Form states - Voice
+  const [voiceEnabled, setVoiceEnabled] = useState(false);
+  const [useNativeVoice, setUseNativeVoice] = useState(true);
+  const [voiceProviderId, setVoiceProviderId] = useState<string | null>(null);
+  const [voiceId, setVoiceId] = useState<string | null>(null);
 
   useEffect(() => {
     if (workspace) {
@@ -141,7 +133,11 @@ export default function Personas() {
         .order("created_at", { ascending: true });
 
       if (error) throw error;
-      setPersonas(data || []);
+      setPersonas((data || []).map(p => ({
+        ...p,
+        use_native_voice: p.use_native_voice ?? true,
+        use_native_credits: p.use_native_credits ?? true,
+      })) as Persona[]);
     } catch (error) {
       console.error("Error fetching personas:", error);
     } finally {
@@ -155,10 +151,17 @@ export default function Personas() {
     setSystemPrompt("");
     setWelcomeMessage("");
     setTemperature([0.7]);
-    setVoiceEnabled(false);
-    setVoiceId(null);
     setIsDefault(false);
     setEditingPersona(null);
+    // AI
+    setUseNativeCredits(true);
+    setAiProviderId(null);
+    setAiModel("google/gemini-2.5-flash");
+    // Voice
+    setVoiceEnabled(false);
+    setUseNativeVoice(true);
+    setVoiceProviderId(null);
+    setVoiceId(null);
   };
 
   const handleOpenCreate = () => {
@@ -173,9 +176,16 @@ export default function Personas() {
     setSystemPrompt(persona.system_prompt);
     setWelcomeMessage(persona.welcome_message || "");
     setTemperature([persona.temperature]);
-    setVoiceEnabled(persona.voice_enabled);
-    setVoiceId(persona.voice_id);
     setIsDefault(persona.is_default);
+    // AI
+    setUseNativeCredits(persona.use_native_credits ?? true);
+    setAiProviderId(persona.ai_provider_id || null);
+    setAiModel(persona.ai_model || "google/gemini-2.5-flash");
+    // Voice
+    setVoiceEnabled(persona.voice_enabled);
+    setUseNativeVoice(persona.use_native_voice ?? true);
+    setVoiceProviderId(persona.voice_provider_id || null);
+    setVoiceId(persona.voice_id);
     setDialogOpen(true);
   };
 
@@ -278,9 +288,16 @@ export default function Personas() {
         system_prompt: systemPrompt.trim(),
         welcome_message: welcomeMessage.trim() || null,
         temperature: temperature[0],
-        voice_enabled: voiceEnabled,
-        voice_id: voiceEnabled ? voiceId : null,
         is_default: isDefault,
+        // AI
+        use_native_credits: useNativeCredits,
+        ai_provider_id: useNativeCredits ? null : aiProviderId,
+        ai_model: aiModel,
+        // Voice
+        voice_enabled: voiceEnabled,
+        use_native_voice: voiceEnabled ? useNativeVoice : true,
+        voice_provider_id: voiceEnabled && !useNativeVoice ? voiceProviderId : null,
+        voice_id: voiceEnabled ? voiceId : null,
       };
 
       if (editingPersona) {
@@ -312,7 +329,6 @@ export default function Personas() {
   const handleDelete = async (id: string) => {
     const persona = personas.find(p => p.id === id);
     
-    // If persona is published as bot, unpublish first
     if (persona?.bitrix_bot_id && bitrixIntegration) {
       try {
         toast.loading("Removendo bot do Bitrix24...", { id: "delete-bot" });
@@ -326,7 +342,6 @@ export default function Personas() {
         toast.dismiss("delete-bot");
       } catch (error) {
         console.error("Error unpublishing before delete:", error);
-        // Continue with delete anyway
       }
     }
 
@@ -344,13 +359,11 @@ export default function Personas() {
 
   const handleSetDefault = async (persona: Persona) => {
     try {
-      // Remove default from all
       await supabase
         .from("personas")
         .update({ is_default: false })
         .eq("workspace_id", workspace?.id);
 
-      // Set new default
       const { error } = await supabase
         .from("personas")
         .update({ is_default: true })
@@ -452,6 +465,12 @@ export default function Personas() {
                       <span className="text-muted-foreground">Temp:</span>
                       <span className="font-medium">{persona.temperature}</span>
                     </div>
+                    {persona.ai_model && (
+                      <Badge variant="outline" className="gap-1">
+                        <Brain className="h-3 w-3" />
+                        {persona.ai_model.split("/").pop()}
+                      </Badge>
+                    )}
                     {persona.voice_enabled && (
                       <Badge variant="outline" className="gap-1">
                         <Volume2 className="h-3 w-3" />
@@ -550,6 +569,7 @@ export default function Personas() {
             </DialogHeader>
 
             <div className="space-y-6 py-4">
+              {/* Basic Info */}
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="name">Nome *</Label>
@@ -596,72 +616,54 @@ export default function Personas() {
                 />
               </div>
 
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label>Temperatura: {temperature[0]}</Label>
-                    <span className="text-xs text-muted-foreground">
-                      Menor = mais preciso, Maior = mais criativo
-                    </span>
-                  </div>
-                  <Slider
-                    value={temperature}
-                    onValueChange={setTemperature}
-                    min={0}
-                    max={1}
-                    step={0.1}
-                  />
-                </div>
-
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <Label>Respostas por voz</Label>
-                      <p className="text-xs text-muted-foreground">
-                        Habilitar Text-to-Speech para esta persona
-                      </p>
-                    </div>
-                    <Switch checked={voiceEnabled} onCheckedChange={setVoiceEnabled} />
-                  </div>
-
-                  {voiceEnabled && (
-                    <div className="space-y-2 pl-4 border-l-2 border-primary/20">
-                      <Label>Voz da Persona</Label>
-                      <Select value={voiceId || ""} onValueChange={setVoiceId}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Selecione uma voz" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">Vozes Femininas</div>
-                          {ELEVENLABS_VOICES.filter(v => v.gender === "Feminino").map((voice) => (
-                            <SelectItem key={voice.id} value={voice.id}>
-                              {voice.name} - {voice.style}
-                            </SelectItem>
-                          ))}
-                          <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground mt-1">Vozes Masculinas</div>
-                          {ELEVENLABS_VOICES.filter(v => v.gender === "Masculino").map((voice) => (
-                            <SelectItem key={voice.id} value={voice.id}>
-                              {voice.name} - {voice.style}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <p className="text-xs text-muted-foreground">
-                        Escolha a voz que será usada para esta persona
-                      </p>
-                    </div>
-                  )}
-                </div>
-
+              {/* Temperature */}
+              <div className="space-y-2">
                 <div className="flex items-center justify-between">
-                  <div>
-                    <Label>Persona padrão</Label>
-                    <p className="text-xs text-muted-foreground">
-                      Usar como persona padrão para novos atendimentos
-                    </p>
-                  </div>
-                  <Switch checked={isDefault} onCheckedChange={setIsDefault} />
+                  <Label>Temperatura: {temperature[0]}</Label>
+                  <span className="text-xs text-muted-foreground">
+                    Menor = mais preciso, Maior = mais criativo
+                  </span>
                 </div>
+                <Slider
+                  value={temperature}
+                  onValueChange={setTemperature}
+                  min={0}
+                  max={1}
+                  step={0.1}
+                />
+              </div>
+
+              {/* AI Model Selector */}
+              <AIModelSelector
+                selectedProviderId={aiProviderId}
+                selectedModel={aiModel}
+                useNativeCredits={useNativeCredits}
+                onProviderChange={(id) => setAiProviderId(id)}
+                onModelChange={setAiModel}
+                onUseNativeCreditsChange={setUseNativeCredits}
+              />
+
+              {/* Voice Model Selector */}
+              <VoiceModelSelector
+                voiceEnabled={voiceEnabled}
+                onVoiceEnabledChange={setVoiceEnabled}
+                selectedVoiceProviderId={voiceProviderId}
+                selectedVoiceId={voiceId}
+                useNativeVoice={useNativeVoice}
+                onProviderChange={setVoiceProviderId}
+                onVoiceChange={setVoiceId}
+                onUseNativeVoiceChange={setUseNativeVoice}
+              />
+
+              {/* Default Persona */}
+              <div className="flex items-center justify-between p-4 rounded-lg bg-muted/50 border">
+                <div>
+                  <Label>Persona padrão</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Usar como persona padrão para novos atendimentos
+                  </p>
+                </div>
+                <Switch checked={isDefault} onCheckedChange={setIsDefault} />
               </div>
             </div>
 
