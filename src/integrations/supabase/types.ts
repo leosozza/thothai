@@ -1093,6 +1093,7 @@ export type Database = {
           created_at: string
           department_id: string | null
           description: string | null
+          elevenlabs_agent_id: string | null
           fallback_message: string | null
           id: string
           is_active: boolean | null
@@ -1118,6 +1119,7 @@ export type Database = {
           created_at?: string
           department_id?: string | null
           description?: string | null
+          elevenlabs_agent_id?: string | null
           fallback_message?: string | null
           id?: string
           is_active?: boolean | null
@@ -1143,6 +1145,7 @@ export type Database = {
           created_at?: string
           department_id?: string | null
           description?: string | null
+          elevenlabs_agent_id?: string | null
           fallback_message?: string | null
           id?: string
           is_active?: boolean | null
