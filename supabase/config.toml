@@ -80,3 +80,6 @@ verify_jwt = true
 
 [functions.bitrix24-link-portal]
 verify_jwt = true
+
+[functions.process-document]
+verify_jwt = true

@@ -193,16 +193,20 @@ export default function Training() {
       }
 
       // Insert document record
-      const { error } = await supabase.from("knowledge_documents").insert({
-        workspace_id: workspace?.id,
-        title: docTitle.trim(),
-        content: activeTab === "manual" ? docContent.trim() : null,
-        source_type: activeTab,
-        source_url: activeTab === "url" ? urlInput.trim() : null,
-        file_path: filePath,
-        file_type: fileType,
-        status: "pending",
-      });
+      const { data: insertedDoc, error } = await supabase
+        .from("knowledge_documents")
+        .insert({
+          workspace_id: workspace?.id,
+          title: docTitle.trim(),
+          content: activeTab === "manual" ? docContent.trim() : null,
+          source_type: activeTab,
+          source_url: activeTab === "url" ? urlInput.trim() : null,
+          file_path: filePath,
+          file_type: fileType,
+          status: "pending",
+        })
+        .select("id")
+        .single();
 
       if (error) throw error;
 
@@ -217,6 +221,23 @@ export default function Training() {
       setUploadProgress(0);
       setDialogOpen(false);
       fetchDocuments();
+
+      // Trigger async processing
+      if (insertedDoc?.id) {
+        supabase.functions
+          .invoke("process-document", {
+            body: { document_id: insertedDoc.id },
+          })
+          .then(({ error: processError }) => {
+            if (processError) {
+              console.error("Process error:", processError);
+              toast.error("Erro ao processar documento");
+            } else {
+              toast.success("Documento processado com sucesso!");
+              fetchDocuments();
+            }
+          });
+      }
     } catch (error) {
       console.error("Error adding document:", error);
       toast.error(error instanceof Error ? error.message : "Erro ao adicionar documento");
