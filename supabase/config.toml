@@ -107,3 +107,6 @@ verify_jwt = true
 
 [functions.elevenlabs-conversation-init]
 verify_jwt = false
+
+[functions.elevenlabs-batch-calls]
+verify_jwt = true

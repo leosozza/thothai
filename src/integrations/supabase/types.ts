@@ -74,6 +74,147 @@ export type Database = {
         }
         Relationships: []
       }
+      batch_call_recipients: {
+        Row: {
+          batch_id: string
+          called_at: string | null
+          conversation_id: string | null
+          created_at: string | null
+          duration_seconds: number | null
+          dynamic_variables: Json | null
+          elevenlabs_recipient_id: string | null
+          first_message_override: string | null
+          id: string
+          name: string | null
+          phone_number: string
+          result_summary: string | null
+          status: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          batch_id: string
+          called_at?: string | null
+          conversation_id?: string | null
+          created_at?: string | null
+          duration_seconds?: number | null
+          dynamic_variables?: Json | null
+          elevenlabs_recipient_id?: string | null
+          first_message_override?: string | null
+          id?: string
+          name?: string | null
+          phone_number: string
+          result_summary?: string | null
+          status?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          batch_id?: string
+          called_at?: string | null
+          conversation_id?: string | null
+          created_at?: string | null
+          duration_seconds?: number | null
+          dynamic_variables?: Json | null
+          elevenlabs_recipient_id?: string | null
+          first_message_override?: string | null
+          id?: string
+          name?: string | null
+          phone_number?: string
+          result_summary?: string | null
+          status?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "batch_call_recipients_batch_id_fkey"
+            columns: ["batch_id"]
+            isOneToOne: false
+            referencedRelation: "batch_calls"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      batch_calls: {
+        Row: {
+          calls_completed: number | null
+          calls_dispatched: number | null
+          calls_failed: number | null
+          completed_at: string | null
+          created_at: string | null
+          description: string | null
+          elevenlabs_batch_id: string | null
+          id: string
+          name: string
+          persona_id: string | null
+          scheduled_time: string | null
+          started_at: string | null
+          status: string | null
+          telephony_number_id: string | null
+          total_recipients: number | null
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          calls_completed?: number | null
+          calls_dispatched?: number | null
+          calls_failed?: number | null
+          completed_at?: string | null
+          created_at?: string | null
+          description?: string | null
+          elevenlabs_batch_id?: string | null
+          id?: string
+          name: string
+          persona_id?: string | null
+          scheduled_time?: string | null
+          started_at?: string | null
+          status?: string | null
+          telephony_number_id?: string | null
+          total_recipients?: number | null
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          calls_completed?: number | null
+          calls_dispatched?: number | null
+          calls_failed?: number | null
+          completed_at?: string | null
+          created_at?: string | null
+          description?: string | null
+          elevenlabs_batch_id?: string | null
+          id?: string
+          name?: string
+          persona_id?: string | null
+          scheduled_time?: string | null
+          started_at?: string | null
+          status?: string | null
+          telephony_number_id?: string | null
+          total_recipients?: number | null
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "batch_calls_persona_id_fkey"
+            columns: ["persona_id"]
+            isOneToOne: false
+            referencedRelation: "personas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "batch_calls_telephony_number_id_fkey"
+            columns: ["telephony_number_id"]
+            isOneToOne: false
+            referencedRelation: "telephony_numbers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "batch_calls_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       bitrix_channel_mappings: {
         Row: {
           created_at: string
