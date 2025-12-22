@@ -6,7 +6,27 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Parse PHP-style form data (e.g., data[MESSAGES][0][text]=hello)
+// Thoth Ibis WhatsApp icon - embedded as SVG data URI (no external dependency)
+// Green WhatsApp-style background with Ibis bird inside speech bubble
+const THOTH_IBIS_ICON_SVG = `data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%2325D366'/%3E%3Ccircle cx='50' cy='45' r='30' fill='none' stroke='white' stroke-width='4'/%3E%3Cpath d='M35 75 L50 90 L50 75' fill='white'/%3E%3Cg fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M50 65 C42 62, 36 52, 38 40 C40 30, 46 26, 52 26 C58 26, 64 32, 64 42 C64 52, 58 62, 50 65'/%3E%3Cpath d='M48 26 C45 22, 38 18, 32 14'/%3E%3Ccircle cx='30' cy='12' r='5'/%3E%3Cpath d='M25 12 C22 16, 18 22, 16 28'/%3E%3Ccircle cx='29' cy='11' r='1.5' fill='white'/%3E%3C/g%3E%3C/svg%3E`;
+
+const THOTH_IBIS_ICON_DISABLED_SVG = `data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%23999999'/%3E%3Ccircle cx='50' cy='45' r='30' fill='none' stroke='white' stroke-width='4'/%3E%3Cpath d='M35 75 L50 90 L50 75' fill='white'/%3E%3Cg fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M50 65 C42 62, 36 52, 38 40 C40 30, 46 26, 52 26 C58 26, 64 32, 64 42 C64 52, 58 62, 50 65'/%3E%3Cpath d='M48 26 C45 22, 38 18, 32 14'/%3E%3Ccircle cx='30' cy='12' r='5'/%3E%3Cpath d='M25 12 C22 16, 18 22, 16 28'/%3E%3Ccircle cx='29' cy='11' r='1.5' fill='white'/%3E%3C/g%3E%3C/svg%3E`;
+
+// Icon object for imconnector.register API
+const THOTH_CONNECTOR_ICON = {
+  DATA_IMAGE: THOTH_IBIS_ICON_SVG,
+  COLOR: "#25D366",
+  SIZE: "90%",
+  POSITION: "center"
+};
+
+const THOTH_CONNECTOR_ICON_DISABLED = {
+  DATA_IMAGE: THOTH_IBIS_ICON_DISABLED_SVG,
+  COLOR: "#999999",
+  SIZE: "90%",
+  POSITION: "center"
+};
+
 function parsePhpStyleFormData(formDataString: string): Record<string, any> {
   const result: Record<string, any> = {};
   const params = new URLSearchParams(formDataString);
@@ -844,9 +864,7 @@ async function handleCompleteSetup(supabase: any, payload: any, supabaseUrl: str
             auth: accessToken,
             ID: connectorId,
             NAME: "Thoth WhatsApp",
-            ICON: {
-              DATA_IMAGE: "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0OCIgaGVpZ2h0PSI0OCIgdmlld0JveD0iMCAwIDQ4IDQ4Ij48cGF0aCBmaWxsPSIjMjVEMzY2IiBkPSJNMjQgNEMxMi45NTQgNCgICAyNC4wMzggMjQuMDM4IDQ0IDI0LjAzOCA0NGgtLjAzMkM1LjY2NSA0NCA0IDM0LjMzNSA0IDI0eiIvPjwvc3ZnPg=="
-            },
+            ICON: THOTH_CONNECTOR_ICON,
             PLACEMENT_HANDLER: eventsUrl
           })
         });
@@ -2444,20 +2462,12 @@ async function handleReconfigureConnector(supabase: any, payload: any, supabaseU
     console.log("accessToken length:", accessToken?.length || 0);
     console.log("accessToken first 20 chars:", accessToken?.substring(0, 20) || "N/A");
     
-    // Thoth Ibis icon - Ibis inside speech bubble on WhatsApp green background
-    const thothIbisSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="20" fill="#25D366"/><circle cx="50" cy="45" r="30" fill="none" stroke="white" stroke-width="4"/><path d="M35 75 L50 90 L50 75" fill="white"/><g fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M50 65 C42 62, 36 52, 38 40 C40 30, 46 26, 52 26 C58 26, 64 32, 64 42 C64 52, 58 62, 50 65"/><path d="M48 26 C45 22, 38 18, 32 14"/><circle cx="30" cy="12" r="5"/><path d="M25 12 C22 16, 18 22, 16 28"/><circle cx="29" cy="11" r="1.5" fill="white"/></g></svg>`;
-    const whatsappSvgIcon = btoa(thothIbisSvg);
-    
+    // Use global THOTH_CONNECTOR_ICON constant
     const registerPayload = {
       auth: accessToken,
       ID: connectorId,
       NAME: "Thoth WhatsApp",
-      ICON: {
-        DATA_IMAGE: `data:image/svg+xml;base64,${whatsappSvgIcon}`,
-        COLOR: "#25D366",
-        SIZE: "90%",
-        POSITION: "center"
-      },
+      ICON: THOTH_CONNECTOR_ICON,
       // Point to dedicated PLACEMENT_HANDLER
       PLACEMENT_HANDLER: `${supabaseUrl}/functions/v1/bitrix24-connector-settings`
     };
@@ -2837,10 +2847,7 @@ async function handleAutoSetup(supabase: any, payload: any, supabaseUrl: string)
     // IMPORTANT: PLACEMENT_HANDLER is for the UI settings page, NOT for receiving events
     console.log("Step 1: Registering connector with PLACEMENT_HANDLER pointing to settings UI...");
     
-    // Thoth Ibis icon
-    const thothIbisSvg = "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0OCIgaGVpZ2h0PSI0OCIgdmlld0JveD0iMCAwIDQ4IDQ4Ij48cmVjdCB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIHJ4PSIxMiIgZmlsbD0iIzI1RDM2NiIvPjxwYXRoIGQ9Ik0zNCAyOGMtMS41IDItNCAxLTYgMHMtMy41LTMtNS01Yy0xLTEuNS0xLjUtMy41LTEtNS41LjUtMiAyLTMuNSA0LTRzNC0uNSA1LjUuNWMxLjUgMSAyLjUgMi41IDIuNSA0LjUgMCAxLjUtLjUgMy0xLjUgNC41TDMyIDI0bDItNHoiIGZpbGw9IiNmZmYiLz48Y2lyY2xlIGN4PSIzMCIgY3k9IjE2IiByPSIyIiBmaWxsPSIjMjVEMzY2Ii8+PHBhdGggZD0iTTE4IDM0Yy0yIDAtNC0xLTUtMy0xLTIgMC00IDItNWwyLTFjMSAwIDIgMSAyIDJ2M2MwIDEtLjUgMi0xIDIuNXMtMS41LjUtMiAuNXoiIGZpbGw9IiNmZmYiLz48L3N2Zz4=";
-    const thothIbisSvgDisabled = "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0OCIgaGVpZ2h0PSI0OCIgdmlld0JveD0iMCAwIDQ4IDQ4Ij48cmVjdCB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIHJ4PSIxMiIgZmlsbD0iIzk5OTk5OSIvPjxwYXRoIGQ9Ik0zNCAyOGMtMS41IDItNCAxLTYgMHMtMy41LTMtNS01Yy0xLTEuNS0xLjUtMy41LTEtNS41LjUtMiAyLTMuNSA0LTRzNC0uNSA1LjUuNWMxLjUgMSAyLjUgMi41IDIuNSA0LjUgMCAxLjUtLjUgMy0xLjUgNC41TDMyIDI0bDItNHoiIGZpbGw9IiNmZmYiLz48Y2lyY2xlIGN4PSIzMCIgY3k9IjE2IiByPSIyIiBmaWxsPSIjOTk5OTk5Ii8+PHBhdGggZD0iTTE4IDM0Yy0yIDAtNC0xLTUtMy0xLTIgMC00IDItNWwyLTFjMSAwIDIgMSAyIDJ2M2MwIDEtLjUgMi0xIDIuNXMtMS41LjUtMiAuNXoiIGZpbGw9IiNmZmYiLz48L3N2Zz4=";
-    
+    // Use global THOTH_CONNECTOR_ICON constants
     try {
       const registerResponse = await fetch(`${clientEndpoint}imconnector.register`, {
         method: "POST",
@@ -2849,18 +2856,8 @@ async function handleAutoSetup(supabase: any, payload: any, supabaseUrl: string)
           auth: accessToken,
           ID: connectorId,
           NAME: "Thoth WhatsApp",
-          ICON: {
-            DATA_IMAGE: `data:image/svg+xml;base64,${thothIbisSvg}`,
-            COLOR: "#25D366",
-            SIZE: "90%",
-            POSITION: "center"
-          },
-          ICON_DISABLED: {
-            DATA_IMAGE: `data:image/svg+xml;base64,${thothIbisSvgDisabled}`,
-            COLOR: "#999999",
-            SIZE: "90%",
-            POSITION: "center"
-          },
+          ICON: THOTH_CONNECTOR_ICON,
+          ICON_DISABLED: THOTH_CONNECTOR_ICON_DISABLED,
           // PLACEMENT_HANDLER is for UI settings page (when user clicks connector in Contact Center)
           PLACEMENT_HANDLER: placementHandlerUrl,
           // Indicate this is not for group chats
@@ -3916,14 +3913,11 @@ async function handleVerifyIntegration(supabase: any, payload: any, supabaseUrl:
     // IMPORTANT: Do this FIRST before any cleanup to ensure we have a working connector
     const mainConnectorExists = verification.connectors.some(c => c.id === connectorId);
     
-    // Thoth Ibis icon - URL from Supabase Storage
-    const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "https://ybqwwipwimnkonnebbys.supabase.co";
-    const THOTH_WHATSAPP_ICON_URL = `${SUPABASE_URL}/storage/v1/object/public/assets/thoth-whatsapp-icon.png`;
-    
+    // Use global THOTH_CONNECTOR_ICON constants (defined at top of file)
     if (!mainConnectorExists && auto_fix) {
       console.log("AUTO-FIX: Main connector not registered, registering now...");
       try {
-        // Use URL to the ibis icon in Supabase Storage
+        // Use embedded SVG icon (no external dependency)
         const registerResponse = await fetch(`${clientEndpoint}imconnector.register`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -3931,7 +3925,8 @@ async function handleVerifyIntegration(supabase: any, payload: any, supabaseUrl:
             auth: accessToken,
             ID: connectorId,
             NAME: "Thoth WhatsApp",
-            ICON: THOTH_WHATSAPP_ICON_URL,
+            ICON: THOTH_CONNECTOR_ICON,
+            ICON_DISABLED: THOTH_CONNECTOR_ICON_DISABLED,
             PLACEMENT_HANDLER: webhookUrl,
             CHAT_GROUP: "N"
           })
