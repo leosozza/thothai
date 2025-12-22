@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -42,6 +42,7 @@ import {
   File,
   Link,
   History,
+  CheckCircle,
 } from "lucide-react";
 
 interface KnowledgeDocument {
@@ -50,6 +51,7 @@ interface KnowledgeDocument {
   content: string | null;
   source_type: string;
   source_url: string | null;
+  file_path: string | null;
   file_type: string | null;
   status: string;
   chunks_count: number;
@@ -70,6 +72,9 @@ const statusConfig: Record<string, { label: string; color: string }> = {
   failed: { label: "Falhou", color: "bg-red-500" },
 };
 
+const ACCEPTED_FILE_TYPES = ".pdf,.doc,.docx,.xls,.xlsx,.txt,.csv";
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+
 export default function Training() {
   const [documents, setDocuments] = useState<KnowledgeDocument[]>([]);
   const [loading, setLoading] = useState(true);
@@ -78,6 +83,12 @@ export default function Training() {
   const [searchTerm, setSearchTerm] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { workspace } = useWorkspace();
+
+  // File upload states
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
 
   // Form states
   const [docTitle, setDocTitle] = useState("");
@@ -107,34 +118,108 @@ export default function Training() {
     }
   };
 
+  // File upload handlers
+  const handleFileSelect = (file: File) => {
+    if (file.size > MAX_FILE_SIZE) {
+      toast.error("Arquivo muito grande. Máximo 10MB.");
+      return;
+    }
+    setSelectedFile(file);
+    if (!docTitle.trim()) {
+      setDocTitle(file.name.replace(/\.[^/.]+$/, "")); // Remove extension for title
+    }
+  };
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) handleFileSelect(file);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) handleFileSelect(file);
+  };
+
   const handleAddDocument = async () => {
     if (!docTitle.trim()) {
       toast.error("Digite um título");
       return;
     }
 
+    // For document tab, require file
+    if (activeTab === "document" && !selectedFile) {
+      toast.error("Selecione um arquivo");
+      return;
+    }
+
     setIsSubmitting(true);
+    setUploadProgress(0);
+
     try {
+      let filePath: string | null = null;
+      let fileType: string | null = null;
+
+      // Upload file if present
+      if (selectedFile && workspace) {
+        const fileExt = selectedFile.name.split(".").pop();
+        const fileName = `${Date.now()}_${selectedFile.name}`;
+        filePath = `${workspace.id}/${fileName}`;
+        fileType = selectedFile.type || fileExt || null;
+
+        setUploadProgress(30);
+
+        const { error: uploadError } = await supabase.storage
+          .from("knowledge-documents")
+          .upload(filePath, selectedFile);
+
+        if (uploadError) {
+          console.error("Upload error:", uploadError);
+          throw new Error("Erro ao fazer upload do arquivo");
+        }
+
+        setUploadProgress(70);
+      }
+
+      // Insert document record
       const { error } = await supabase.from("knowledge_documents").insert({
         workspace_id: workspace?.id,
         title: docTitle.trim(),
-        content: docContent.trim() || null,
+        content: activeTab === "manual" ? docContent.trim() : null,
         source_type: activeTab,
         source_url: activeTab === "url" ? urlInput.trim() : null,
+        file_path: filePath,
+        file_type: fileType,
         status: "pending",
       });
 
       if (error) throw error;
 
+      setUploadProgress(100);
       toast.success("Documento adicionado! Processando...");
+      
+      // Reset form
       setDocTitle("");
       setDocContent("");
       setUrlInput("");
+      setSelectedFile(null);
+      setUploadProgress(0);
       setDialogOpen(false);
       fetchDocuments();
     } catch (error) {
       console.error("Error adding document:", error);
-      toast.error("Erro ao adicionar documento");
+      toast.error(error instanceof Error ? error.message : "Erro ao adicionar documento");
     } finally {
       setIsSubmitting(false);
     }
@@ -226,18 +311,73 @@ export default function Training() {
                   </div>
 
                   <TabsContent value="document" className="mt-0 space-y-4">
-                    <div className="border-2 border-dashed rounded-lg p-8 text-center">
-                      <Upload className="h-10 w-10 text-muted-foreground mx-auto mb-4" />
-                      <p className="text-sm text-muted-foreground mb-2">
-                        Arraste arquivos aqui ou clique para selecionar
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        PDF, Word, Excel, TXT (máx. 10MB)
-                      </p>
-                      <Button variant="outline" size="sm" className="mt-4">
-                        Selecionar Arquivo
-                      </Button>
+                    {/* Hidden file input */}
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      onChange={handleFileInputChange}
+                      accept={ACCEPTED_FILE_TYPES}
+                      className="hidden"
+                    />
+                    
+                    {/* Drop zone */}
+                    <div
+                      onClick={() => fileInputRef.current?.click()}
+                      onDragOver={handleDragOver}
+                      onDragLeave={handleDragLeave}
+                      onDrop={handleDrop}
+                      className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
+                        isDragging
+                          ? "border-primary bg-primary/5"
+                          : selectedFile
+                          ? "border-green-500 bg-green-500/5"
+                          : "border-border hover:border-primary/50"
+                      }`}
+                    >
+                      {selectedFile ? (
+                        <>
+                          <CheckCircle className="h-10 w-10 text-green-500 mx-auto mb-4" />
+                          <p className="text-sm font-medium mb-1">{selectedFile.name}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
+                          </p>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="mt-4"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedFile(null);
+                            }}
+                          >
+                            Trocar Arquivo
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <Upload className={`h-10 w-10 mx-auto mb-4 ${isDragging ? "text-primary" : "text-muted-foreground"}`} />
+                          <p className="text-sm text-muted-foreground mb-2">
+                            {isDragging ? "Solte o arquivo aqui" : "Arraste arquivos aqui ou clique para selecionar"}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            PDF, Word, Excel, TXT (máx. 10MB)
+                          </p>
+                          <Button variant="outline" size="sm" className="mt-4">
+                            Selecionar Arquivo
+                          </Button>
+                        </>
+                      )}
                     </div>
+                    
+                    {/* Upload progress */}
+                    {isSubmitting && uploadProgress > 0 && (
+                      <div className="space-y-2">
+                        <Progress value={uploadProgress} className="h-2" />
+                        <p className="text-xs text-muted-foreground text-center">
+                          {uploadProgress < 70 ? "Enviando arquivo..." : uploadProgress < 100 ? "Salvando..." : "Concluído!"}
+                        </p>
+                      </div>
+                    )}
                   </TabsContent>
 
                   <TabsContent value="url" className="mt-0 space-y-4">
