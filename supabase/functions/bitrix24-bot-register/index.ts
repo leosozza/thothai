@@ -179,7 +179,7 @@ serve(async (req) => {
         }
 
         const botCode = generateBotCode(persona.name, persona.id);
-        const botName = persona.name;
+        const botName = `ThothAI - ${persona.name}`;
         const botDescription = persona.description || `Assistente IA - ${persona.name}`;
 
         const botPayload = {
