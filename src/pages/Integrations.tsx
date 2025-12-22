@@ -72,6 +72,7 @@ import { VoiceTestButton } from "@/components/calls/VoiceTestButton";
 import { TelephonyProviderCard } from "@/components/integrations/TelephonyProviderCard";
 import { TelephonyNumbersCard } from "@/components/integrations/TelephonyNumbersCard";
 import { TransferRulesCard } from "@/components/integrations/TransferRulesCard";
+import { TelephonyGuideCard } from "@/components/integrations/TelephonyGuideCard";
 
 interface Integration {
   id: string;
@@ -2051,11 +2052,8 @@ export default function Integrations() {
           </TabsContent>
 
           <TabsContent value="telephony" className="mt-6 space-y-6">
-            <div className="bg-muted/50 rounded-lg p-4 mb-4">
-              <p className="text-sm text-muted-foreground">
-                Configure provedores de telefonia (WaVoIP, Twilio, Telnyx) integrados com ElevenLabs Conversational AI para atendimento automatizado por voz.
-              </p>
-            </div>
+            {/* Telephony Guide */}
+            <TelephonyGuideCard />
 
             {/* Telephony Providers Section */}
             <div className="space-y-4">
