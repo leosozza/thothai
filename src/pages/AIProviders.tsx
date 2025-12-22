@@ -105,15 +105,8 @@ const tierConfig = {
   }
 };
 
-// Labels amigáveis para exibição do provider_source
-const providerSourceLabels: Record<string, { label: string; color: string }> = {
-  openrouter: { label: "OpenRouter", color: "text-green-600" },
-  lovable: { label: "Lovable AI", color: "text-pink-600" },
-  deepseek: { label: "DeepSeek", color: "text-blue-600" },
-  anthropic: { label: "Anthropic", color: "text-orange-600" },
-  groq: { label: "Groq", color: "text-yellow-600" },
-  "google-free": { label: "Google AI", color: "text-red-600" },
-};
+// Slugs permitidos para API própria (exibição ao cliente)
+const allowedOwnApiProviders = ["anthropic", "deepseek", "google", "openai", "groq"];
 
 export default function AIProviders() {
   const { t } = useTranslation();
@@ -335,9 +328,9 @@ export default function AIProviders() {
             >
               <div className="flex-1 min-w-0">
                 <p className="font-medium text-sm truncate">{model.display_name}</p>
-                <p className={`text-xs truncate ${providerSourceLabels[model.provider_source]?.color || "text-muted-foreground"}`}>
-                  via {providerSourceLabels[model.provider_source]?.label || model.provider_source}
-                </p>
+                {model.description && (
+                  <p className="text-xs text-muted-foreground truncate">{model.description}</p>
+                )}
               </div>
               <Badge variant="outline" className="text-xs ml-2 shrink-0">
                 {config.multiplier}
@@ -514,7 +507,9 @@ export default function AIProviders() {
             </Card>
 
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {providers.map(renderProviderCard)}
+              {providers
+                .filter(p => allowedOwnApiProviders.includes(p.slug))
+                .map(renderProviderCard)}
             </div>
 
             {providers.length === 0 && (
