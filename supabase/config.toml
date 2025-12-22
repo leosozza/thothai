@@ -104,3 +104,6 @@ verify_jwt = true
 
 [functions.elevenlabs-configure-transfer]
 verify_jwt = true
+
+[functions.elevenlabs-conversation-init]
+verify_jwt = false
