@@ -24,12 +24,13 @@ export type Database = {
           docs_url: string | null
           id: string
           is_active: boolean | null
-          is_free: boolean | null
           is_native: boolean | null
           key_generation_guide: string | null
           logo_url: string | null
           name: string
           slug: string
+          tier: string | null
+          token_cost_multiplier: number | null
           updated_at: string | null
         }
         Insert: {
@@ -41,12 +42,13 @@ export type Database = {
           docs_url?: string | null
           id?: string
           is_active?: boolean | null
-          is_free?: boolean | null
           is_native?: boolean | null
           key_generation_guide?: string | null
           logo_url?: string | null
           name: string
           slug: string
+          tier?: string | null
+          token_cost_multiplier?: number | null
           updated_at?: string | null
         }
         Update: {
@@ -58,12 +60,13 @@ export type Database = {
           docs_url?: string | null
           id?: string
           is_active?: boolean | null
-          is_free?: boolean | null
           is_native?: boolean | null
           key_generation_guide?: string | null
           logo_url?: string | null
           name?: string
           slug?: string
+          tier?: string | null
+          token_cost_multiplier?: number | null
           updated_at?: string | null
         }
         Relationships: []
@@ -819,6 +822,45 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      native_ai_models: {
+        Row: {
+          created_at: string | null
+          description: string | null
+          display_name: string
+          id: string
+          is_active: boolean | null
+          name: string
+          provider_source: string
+          tier: string
+          token_cost_multiplier: number
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          description?: string | null
+          display_name: string
+          id?: string
+          is_active?: boolean | null
+          name: string
+          provider_source: string
+          tier?: string
+          token_cost_multiplier?: number
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          description?: string | null
+          display_name?: string
+          id?: string
+          is_active?: boolean | null
+          name?: string
+          provider_source?: string
+          tier?: string
+          token_cost_multiplier?: number
+          updated_at?: string | null
+        }
+        Relationships: []
       }
       personas: {
         Row: {

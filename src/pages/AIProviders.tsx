@@ -17,7 +17,10 @@ import {
   EyeOff,
   Trash2,
   Info,
-  Coins
+  Coins,
+  Zap,
+  Crown,
+  Star
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -43,14 +46,27 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+
+interface NativeAIModel {
+  id: string;
+  name: string;
+  display_name: string;
+  tier: "basic" | "professional" | "expert";
+  token_cost_multiplier: number;
+  provider_source: string;
+  description: string | null;
+  is_active: boolean;
+}
 
 interface AIProvider {
   id: string;
   name: string;
   slug: string;
   base_url: string;
-  is_free: boolean;
   is_native: boolean;
+  tier: string;
+  token_cost_multiplier: number;
   logo_url: string | null;
   docs_url: string | null;
   key_generation_guide: string | null;
@@ -65,10 +81,35 @@ interface WorkspaceCredential {
   last_used_at: string | null;
 }
 
+const tierConfig = {
+  basic: {
+    label: "Basic",
+    multiplier: "1x",
+    color: "bg-green-500/10 text-green-600 border-green-500/30",
+    icon: Zap,
+    description: "Modelos leves e gratuitos"
+  },
+  professional: {
+    label: "Professional",
+    multiplier: "2x",
+    color: "bg-blue-500/10 text-blue-600 border-blue-500/30",
+    icon: Star,
+    description: "Equilíbrio entre custo e performance"
+  },
+  expert: {
+    label: "Expert",
+    multiplier: "5x",
+    color: "bg-purple-500/10 text-purple-600 border-purple-500/30",
+    icon: Crown,
+    description: "Máxima capacidade e qualidade"
+  }
+};
+
 export default function AIProviders() {
   const { t } = useTranslation();
   const { workspace } = useWorkspace();
   const [providers, setProviders] = useState<AIProvider[]>([]);
+  const [nativeModels, setNativeModels] = useState<NativeAIModel[]>([]);
   const [credentials, setCredentials] = useState<WorkspaceCredential[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedProvider, setSelectedProvider] = useState<AIProvider | null>(null);
@@ -90,18 +131,27 @@ export default function AIProviders() {
     try {
       setLoading(true);
       
-      // Fetch all active providers
+      // Fetch native AI models
+      const { data: nativeData, error: nativeError } = await supabase
+        .from("native_ai_models")
+        .select("*")
+        .eq("is_active", true)
+        .order("tier")
+        .order("display_name");
+
+      if (nativeError) throw nativeError;
+      setNativeModels((nativeData || []) as NativeAIModel[]);
+
+      // Fetch external providers (non-native)
       const { data: providersData, error: providersError } = await supabase
         .from("ai_providers")
         .select("*")
         .eq("is_active", true)
-        .order("is_native", { ascending: false })
-        .order("is_free", { ascending: false })
+        .eq("is_native", false)
         .order("name");
 
       if (providersError) throw providersError;
 
-      // Parse available_models from JSONB
       const parsedProviders = (providersData || []).map(p => ({
         ...p,
         available_models: Array.isArray(p.available_models) 
@@ -157,7 +207,6 @@ export default function AIProviders() {
     setTestResult(null);
     
     try {
-      // Simple test call to verify API key works
       const response = await supabase.functions.invoke("ai-gateway", {
         body: {
           messages: [{ role: "user", content: "Hello" }],
@@ -192,7 +241,6 @@ export default function AIProviders() {
       const existingCred = getCredential(selectedProvider.id);
       
       if (existingCred) {
-        // Update existing
         const { error } = await supabase
           .from("workspace_ai_credentials")
           .update({
@@ -204,7 +252,6 @@ export default function AIProviders() {
 
         if (error) throw error;
       } else {
-        // Insert new
         const { error } = await supabase
           .from("workspace_ai_credentials")
           .insert({
@@ -251,8 +298,47 @@ export default function AIProviders() {
     }
   };
 
+  const getModelsByTier = (tier: "basic" | "professional" | "expert") => {
+    return nativeModels.filter(m => m.tier === tier);
+  };
+
+  const renderTierSection = (tier: "basic" | "professional" | "expert") => {
+    const config = tierConfig[tier];
+    const models = getModelsByTier(tier);
+    const TierIcon = config.icon;
+
+    return (
+      <div className="space-y-3">
+        <div className="flex items-center gap-2">
+          <Badge className={`${config.color} border`}>
+            <TierIcon className="h-3 w-3 mr-1" />
+            {config.label}
+          </Badge>
+          <span className="text-sm text-muted-foreground">({config.multiplier} tokens)</span>
+        </div>
+        <p className="text-sm text-muted-foreground">{config.description}</p>
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {models.map(model => (
+            <div 
+              key={model.id}
+              className="flex items-center justify-between p-3 rounded-lg border bg-card hover:bg-accent/50 transition-colors"
+            >
+              <div className="flex-1 min-w-0">
+                <p className="font-medium text-sm truncate">{model.display_name}</p>
+                <p className="text-xs text-muted-foreground truncate">{model.provider_source}</p>
+              </div>
+              <Badge variant="outline" className="text-xs ml-2 shrink-0">
+                {config.multiplier}
+              </Badge>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   const renderProviderCard = (provider: AIProvider) => {
-    const connected = provider.is_native || hasCredential(provider.id);
+    const connected = hasCredential(provider.id);
     const credential = getCredential(provider.id);
 
     return (
@@ -262,54 +348,37 @@ export default function AIProviders() {
           connected ? "border-primary/50 bg-primary/5" : ""
         }`}
       >
-        {provider.is_native && (
-          <div className="absolute top-0 right-0 bg-primary text-primary-foreground px-3 py-1 text-xs font-medium rounded-bl-lg">
-            <Sparkles className="h-3 w-3 inline mr-1" />
-            Nativo
-          </div>
-        )}
-        
         <CardHeader className="pb-3">
           <div className="flex items-start justify-between">
             <div className="flex items-center gap-3">
-              <div className="h-12 w-12 rounded-lg bg-muted flex items-center justify-center">
-                <Bot className="h-6 w-6 text-muted-foreground" />
+              <div className="h-10 w-10 rounded-lg bg-muted flex items-center justify-center">
+                <Bot className="h-5 w-5 text-muted-foreground" />
               </div>
               <div>
-                <CardTitle className="text-lg">{provider.name}</CardTitle>
-                <CardDescription className="flex items-center gap-2 mt-1">
-                  {provider.is_free && (
-                    <Badge variant="secondary" className="text-xs">
-                      Plano Gratuito
-                    </Badge>
-                  )}
-                  {connected && (
-                    <Badge variant="default" className="text-xs bg-green-600">
-                      <Check className="h-3 w-3 mr-1" />
-                      Conectado
-                    </Badge>
-                  )}
-                </CardDescription>
+                <CardTitle className="text-base">{provider.name}</CardTitle>
+                {connected && (
+                  <Badge variant="default" className="text-xs bg-green-600 mt-1">
+                    <Check className="h-3 w-3 mr-1" />
+                    Conectado
+                  </Badge>
+                )}
               </div>
             </div>
           </div>
         </CardHeader>
 
-        <CardContent className="space-y-4">
-          <div>
-            <p className="text-sm text-muted-foreground mb-2">Modelos disponíveis:</p>
-            <div className="flex flex-wrap gap-1">
-              {provider.available_models.slice(0, 4).map((model, i) => (
-                <Badge key={i} variant="outline" className="text-xs">
-                  {model}
-                </Badge>
-              ))}
-              {provider.available_models.length > 4 && (
-                <Badge variant="outline" className="text-xs">
-                  +{provider.available_models.length - 4}
-                </Badge>
-              )}
-            </div>
+        <CardContent className="space-y-3">
+          <div className="flex flex-wrap gap-1">
+            {provider.available_models.slice(0, 3).map((model, i) => (
+              <Badge key={i} variant="outline" className="text-xs">
+                {model}
+              </Badge>
+            ))}
+            {provider.available_models.length > 3 && (
+              <Badge variant="outline" className="text-xs">
+                +{provider.available_models.length - 3}
+              </Badge>
+            )}
           </div>
 
           {credential?.last_used_at && (
@@ -319,12 +388,7 @@ export default function AIProviders() {
           )}
 
           <div className="flex items-center gap-2 pt-2">
-            {provider.is_native ? (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Coins className="h-4 w-4" />
-                <span>Usa créditos nativos</span>
-              </div>
-            ) : connected ? (
+            {connected ? (
               <>
                 <Button 
                   variant="outline" 
@@ -332,7 +396,7 @@ export default function AIProviders() {
                   onClick={() => openAddKeyDialog(provider)}
                 >
                   <Key className="h-4 w-4 mr-1" />
-                  Atualizar Key
+                  Atualizar
                 </Button>
                 <Button 
                   variant="ghost" 
@@ -349,7 +413,7 @@ export default function AIProviders() {
                 onClick={() => openAddKeyDialog(provider)}
               >
                 <Plus className="h-4 w-4 mr-1" />
-                Adicionar API Key
+                Adicionar Key
               </Button>
             )}
 
@@ -386,26 +450,69 @@ export default function AIProviders() {
         <div>
           <h1 className="text-2xl font-semibold">Provedores de IA</h1>
           <p className="text-muted-foreground mt-1">
-            Configure as API keys dos provedores de IA que você deseja usar.
+            Escolha entre IAs nativas (usa créditos) ou configure suas próprias API keys.
           </p>
         </div>
 
-        <Card className="bg-primary/5 border-primary/20">
-          <CardContent className="flex items-start gap-4 py-4">
-            <Info className="h-5 w-5 text-primary mt-0.5" />
-            <div className="text-sm">
-              <p className="font-medium text-primary">Como funciona?</p>
-              <p className="text-muted-foreground mt-1">
-                Você pode usar o <strong>Lovable AI</strong> (créditos nativos) ou configurar suas próprias API keys.
-                Cada persona pode usar um provedor diferente. As API keys são armazenadas de forma segura.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+        <Tabs defaultValue="native" className="w-full">
+          <TabsList className="grid w-full grid-cols-2 max-w-md">
+            <TabsTrigger value="native" className="gap-2">
+              <Sparkles className="h-4 w-4" />
+              IAs Nativas
+            </TabsTrigger>
+            <TabsTrigger value="own" className="gap-2">
+              <Key className="h-4 w-4" />
+              API Key Própria
+            </TabsTrigger>
+          </TabsList>
 
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {providers.map(renderProviderCard)}
-        </div>
+          <TabsContent value="native" className="mt-6 space-y-6">
+            <Card className="bg-primary/5 border-primary/20">
+              <CardContent className="flex items-start gap-4 py-4">
+                <Coins className="h-5 w-5 text-primary mt-0.5" />
+                <div className="text-sm">
+                  <p className="font-medium text-primary">Como funcionam os créditos?</p>
+                  <p className="text-muted-foreground mt-1">
+                    Modelos <strong>Basic</strong> consomem 1x tokens, <strong>Professional</strong> 2x tokens, 
+                    e <strong>Expert</strong> 5x tokens. Compre créditos para usar estes modelos.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            <div className="space-y-8">
+              {renderTierSection("basic")}
+              {renderTierSection("professional")}
+              {renderTierSection("expert")}
+            </div>
+          </TabsContent>
+
+          <TabsContent value="own" className="mt-6 space-y-6">
+            <Card className="bg-muted/50 border-muted-foreground/20">
+              <CardContent className="flex items-start gap-4 py-4">
+                <Info className="h-5 w-5 text-muted-foreground mt-0.5" />
+                <div className="text-sm">
+                  <p className="font-medium">Use sua própria API Key</p>
+                  <p className="text-muted-foreground mt-1">
+                    Configure sua chave de API de cada provedor. <strong>Sem consumo de créditos</strong> - 
+                    você paga diretamente ao provedor.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {providers.map(renderProviderCard)}
+            </div>
+
+            {providers.length === 0 && (
+              <div className="text-center py-12 text-muted-foreground">
+                <Bot className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>Nenhum provedor externo disponível no momento.</p>
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
       </div>
 
       {/* Add/Edit API Key Dialog */}
@@ -507,8 +614,8 @@ export default function AIProviders() {
           <AlertDialogHeader>
             <AlertDialogTitle>Remover API Key?</AlertDialogTitle>
             <AlertDialogDescription>
-              Isso irá remover a API key do {selectedProvider?.name}. 
-              As personas que usam este provedor passarão a usar o Lovable AI.
+              Tem certeza que deseja remover a API key do <strong>{selectedProvider?.name}</strong>?
+              Esta ação não pode ser desfeita.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
