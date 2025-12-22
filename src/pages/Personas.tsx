@@ -17,9 +17,35 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useWorkspace } from "@/hooks/useWorkspace";
+
+// ElevenLabs voices
+const ELEVENLABS_VOICES = [
+  // Femininas
+  { id: "EXAVITQu4vr4xnSDxMaL", name: "Sarah", gender: "Feminino", style: "Suave" },
+  { id: "XrExE9yKIg1WjnnlVkGX", name: "Matilda", gender: "Feminino", style: "Natural" },
+  { id: "cgSgspJ2msm6clMCkdW9", name: "Jessica", gender: "Feminino", style: "Expressiva" },
+  { id: "FGY2WhTYpPnrIDTdsKH5", name: "Laura", gender: "Feminino", style: "Profissional" },
+  { id: "pFZP5JQG7iQjIQuC4Bku", name: "Lily", gender: "Feminino", style: "Calorosa" },
+  { id: "Xb7hH8MSUJpSbSDYk0k2", name: "Alice", gender: "Feminino", style: "Britânica" },
+  // Masculinas
+  { id: "CwhRBWXzGAHq8TQ4Fs17", name: "Roger", gender: "Masculino", style: "Confiante" },
+  { id: "IKne3meq5aSn9XLyUdCD", name: "Charlie", gender: "Masculino", style: "Casual" },
+  { id: "nPczCjzI2devNBz1zQrb", name: "Brian", gender: "Masculino", style: "Narrador" },
+  { id: "JBFqnCBsd6RMkjVDRZzb", name: "George", gender: "Masculino", style: "Britânico" },
+  { id: "TX3LPaxmHKxFdv7VOQHJ", name: "Liam", gender: "Masculino", style: "Articulado" },
+  { id: "onwK4e9ZLuTAKqWW03F9", name: "Daniel", gender: "Masculino", style: "Profundo" },
+  { id: "cjVigY5qzO86Huf0OWal", name: "Eric", gender: "Masculino", style: "Amigável" },
+];
 import {
   Plus,
   Bot,
@@ -77,6 +103,7 @@ export default function Personas() {
   const [welcomeMessage, setWelcomeMessage] = useState("");
   const [temperature, setTemperature] = useState([0.7]);
   const [voiceEnabled, setVoiceEnabled] = useState(false);
+  const [voiceId, setVoiceId] = useState<string | null>(null);
   const [isDefault, setIsDefault] = useState(false);
 
   useEffect(() => {
@@ -129,6 +156,7 @@ export default function Personas() {
     setWelcomeMessage("");
     setTemperature([0.7]);
     setVoiceEnabled(false);
+    setVoiceId(null);
     setIsDefault(false);
     setEditingPersona(null);
   };
@@ -146,6 +174,7 @@ export default function Personas() {
     setWelcomeMessage(persona.welcome_message || "");
     setTemperature([persona.temperature]);
     setVoiceEnabled(persona.voice_enabled);
+    setVoiceId(persona.voice_id);
     setIsDefault(persona.is_default);
     setDialogOpen(true);
   };
@@ -250,6 +279,7 @@ export default function Personas() {
         welcome_message: welcomeMessage.trim() || null,
         temperature: temperature[0],
         voice_enabled: voiceEnabled,
+        voice_id: voiceEnabled ? voiceId : null,
         is_default: isDefault,
       };
 
@@ -583,14 +613,44 @@ export default function Personas() {
                   />
                 </div>
 
-                <div className="flex items-center justify-between">
-                  <div>
-                    <Label>Respostas por voz</Label>
-                    <p className="text-xs text-muted-foreground">
-                      Habilitar Text-to-Speech para esta persona
-                    </p>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <Label>Respostas por voz</Label>
+                      <p className="text-xs text-muted-foreground">
+                        Habilitar Text-to-Speech para esta persona
+                      </p>
+                    </div>
+                    <Switch checked={voiceEnabled} onCheckedChange={setVoiceEnabled} />
                   </div>
-                  <Switch checked={voiceEnabled} onCheckedChange={setVoiceEnabled} />
+
+                  {voiceEnabled && (
+                    <div className="space-y-2 pl-4 border-l-2 border-primary/20">
+                      <Label>Voz da Persona</Label>
+                      <Select value={voiceId || ""} onValueChange={setVoiceId}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione uma voz" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">Vozes Femininas</div>
+                          {ELEVENLABS_VOICES.filter(v => v.gender === "Feminino").map((voice) => (
+                            <SelectItem key={voice.id} value={voice.id}>
+                              {voice.name} - {voice.style}
+                            </SelectItem>
+                          ))}
+                          <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground mt-1">Vozes Masculinas</div>
+                          {ELEVENLABS_VOICES.filter(v => v.gender === "Masculino").map((voice) => (
+                            <SelectItem key={voice.id} value={voice.id}>
+                              {voice.name} - {voice.style}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">
+                        Escolha a voz que será usada para esta persona
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex items-center justify-between">
