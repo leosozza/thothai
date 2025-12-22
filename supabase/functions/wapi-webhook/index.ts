@@ -6,6 +6,53 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+async function transcribeAudioFromUrl(audioUrl: string, languageCode: string = "por") {
+  const ELEVENLABS_API_KEY = Deno.env.get("ELEVENLABS_API_KEY");
+  if (!ELEVENLABS_API_KEY) {
+    console.log("ELEVENLABS_API_KEY not configured; skipping transcription");
+    return null;
+  }
+
+  console.log("Fetching audio for transcription:", audioUrl);
+  const audioResponse = await fetch(audioUrl);
+  if (!audioResponse.ok) {
+    const t = await audioResponse.text().catch(() => "");
+    throw new Error(`Failed to fetch audio from URL (${audioResponse.status}): ${t}`);
+  }
+
+  const audioBuffer = await audioResponse.arrayBuffer();
+  const audioBlob = new Blob([audioBuffer], { type: "audio/ogg" });
+
+  console.log("Transcribing audio, size:", audioBlob.size, "bytes, language:", languageCode);
+
+  const apiFormData = new FormData();
+  apiFormData.append("file", audioBlob, "audio.ogg");
+  apiFormData.append("model_id", "scribe_v1");
+  apiFormData.append("language_code", languageCode);
+  apiFormData.append("tag_audio_events", "false");
+  apiFormData.append("diarize", "false");
+
+  const response = await fetch("https://api.elevenlabs.io/v1/speech-to-text", {
+    method: "POST",
+    headers: {
+      "xi-api-key": ELEVENLABS_API_KEY,
+    },
+    body: apiFormData,
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => "");
+    console.error("ElevenLabs STT error:", response.status, errorText);
+    throw new Error(`ElevenLabs STT error (${response.status}): ${errorText}`);
+  }
+
+  const result = await response.json().catch(() => null) as { text?: string } | null;
+  const text = (result?.text || "").trim();
+
+  console.log("Transcription:", text ? text.substring(0, 120) : "<empty>");
+  return text || null;
+}
+
 serve(async (req) => {
   // Handle CORS preflight
   if (req.method === "OPTIONS") {
