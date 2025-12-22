@@ -105,6 +105,16 @@ const tierConfig = {
   }
 };
 
+// Labels amigáveis para exibição do provider_source
+const providerSourceLabels: Record<string, { label: string; color: string }> = {
+  openrouter: { label: "OpenRouter", color: "text-green-600" },
+  lovable: { label: "Lovable AI", color: "text-pink-600" },
+  deepseek: { label: "DeepSeek", color: "text-blue-600" },
+  anthropic: { label: "Anthropic", color: "text-orange-600" },
+  groq: { label: "Groq", color: "text-yellow-600" },
+  "google-free": { label: "Google AI", color: "text-red-600" },
+};
+
 export default function AIProviders() {
   const { t } = useTranslation();
   const { workspace } = useWorkspace();
@@ -325,7 +335,9 @@ export default function AIProviders() {
             >
               <div className="flex-1 min-w-0">
                 <p className="font-medium text-sm truncate">{model.display_name}</p>
-                <p className="text-xs text-muted-foreground truncate">{model.provider_source}</p>
+                <p className={`text-xs truncate ${providerSourceLabels[model.provider_source]?.color || "text-muted-foreground"}`}>
+                  via {providerSourceLabels[model.provider_source]?.label || model.provider_source}
+                </p>
               </div>
               <Badge variant="outline" className="text-xs ml-2 shrink-0">
                 {config.multiplier}
