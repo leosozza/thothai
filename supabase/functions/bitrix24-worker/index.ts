@@ -689,31 +689,58 @@ async function processInternalBotMessage(
   
   console.log("Processing internal bot message:", { botId, dialogId, userId, userType });
   
-  // Check if bot is enabled
-  if (!config.bot_enabled) {
-    console.log("Bot is disabled for this integration");
+  // NEW: Find persona by bitrix_bot_id (each persona is a separate bot)
+  let persona = null;
+  
+  if (botId) {
+    const { data: personaByBotId } = await supabase
+      .from("personas")
+      .select("*")
+      .eq("workspace_id", integration.workspace_id)
+      .eq("bitrix_bot_id", parseInt(botId))
+      .maybeSingle();
+    
+    if (personaByBotId) {
+      persona = personaByBotId;
+      console.log("Found persona by bitrix_bot_id:", persona.name);
+    }
+  }
+  
+  // Fallback: use config.bot_persona_id (legacy support)
+  if (!persona && config.bot_persona_id) {
+    const { data: personaById } = await supabase
+      .from("personas")
+      .select("*")
+      .eq("id", config.bot_persona_id)
+      .maybeSingle();
+    
+    if (personaById) {
+      persona = personaById;
+      console.log("Found persona by bot_persona_id (legacy):", persona.name);
+    }
+  }
+  
+  // Fallback: use default persona for workspace
+  if (!persona) {
+    const { data: defaultPersona } = await supabase
+      .from("personas")
+      .select("*")
+      .eq("workspace_id", integration.workspace_id)
+      .eq("is_default", true)
+      .maybeSingle();
+    
+    if (defaultPersona) {
+      persona = defaultPersona;
+      console.log("Using default persona:", persona.name);
+    }
+  }
+  
+  if (!persona) {
+    console.log("No persona found for bot_id:", botId);
     return;
   }
   
-  // Get the persona
-  const personaId = config.bot_persona_id;
-  if (!personaId) {
-    console.log("No bot_persona_id configured");
-    return;
-  }
-  
-  const { data: persona, error: personaError } = await supabase
-    .from("personas")
-    .select("*")
-    .eq("id", personaId)
-    .single();
-  
-  if (personaError || !persona) {
-    console.log("Persona not found:", personaId);
-    return;
-  }
-  
-  console.log("Using persona:", persona.name);
+  console.log("Using persona:", persona.name, "(bot_id:", persona.bitrix_bot_id, ")");
   
   // Get or create contact and conversation for bot interactions
   // Use dialogId as unique identifier for the chat
@@ -849,7 +876,7 @@ async function processInternalBotMessage(
       bitrix24_user_id: userId,
       bitrix24_bot_id: botId,
       message_type: "bot", // Important: indicates this is an internal bot message
-      persona_id: personaId,
+      persona_id: persona.id,
     }),
   });
   

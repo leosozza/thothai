@@ -726,6 +726,7 @@ export type Database = {
         Row: {
           avatar_url: string | null
           bitrix_bot_enabled: boolean | null
+          bitrix_bot_id: number | null
           created_at: string
           department_id: string | null
           description: string | null
@@ -744,6 +745,7 @@ export type Database = {
         Insert: {
           avatar_url?: string | null
           bitrix_bot_enabled?: boolean | null
+          bitrix_bot_id?: number | null
           created_at?: string
           department_id?: string | null
           description?: string | null
@@ -762,6 +764,7 @@ export type Database = {
         Update: {
           avatar_url?: string | null
           bitrix_bot_enabled?: boolean | null
+          bitrix_bot_id?: number | null
           created_at?: string
           department_id?: string | null
           description?: string | null

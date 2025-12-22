@@ -30,6 +30,8 @@ import {
   Loader2,
   Sparkles,
   MessageSquare,
+  Upload,
+  XCircle,
 } from "lucide-react";
 
 interface Persona {
@@ -45,6 +47,7 @@ interface Persona {
   is_default: boolean;
   department_id: string | null;
   bitrix_bot_enabled: boolean;
+  bitrix_bot_id: number | null;
 }
 
 interface BitrixIntegration {
@@ -64,7 +67,7 @@ export default function Personas() {
   const [editingPersona, setEditingPersona] = useState<Persona | null>(null);
   const [saving, setSaving] = useState(false);
   const [bitrixIntegration, setBitrixIntegration] = useState<BitrixIntegration | null>(null);
-  const [togglingBitrix, setTogglingBitrix] = useState(false);
+  const [publishingPersonaId, setPublishingPersonaId] = useState<string | null>(null);
   const { workspace } = useWorkspace();
 
   // Form states
@@ -75,7 +78,6 @@ export default function Personas() {
   const [temperature, setTemperature] = useState([0.7]);
   const [voiceEnabled, setVoiceEnabled] = useState(false);
   const [isDefault, setIsDefault] = useState(false);
-  const [bitrixBotEnabled, setBitrixBotEnabled] = useState(false);
 
   useEffect(() => {
     if (workspace) {
@@ -128,7 +130,6 @@ export default function Personas() {
     setTemperature([0.7]);
     setVoiceEnabled(false);
     setIsDefault(false);
-    setBitrixBotEnabled(false);
     setEditingPersona(null);
   };
 
@@ -146,123 +147,90 @@ export default function Personas() {
     setTemperature([persona.temperature]);
     setVoiceEnabled(persona.voice_enabled);
     setIsDefault(persona.is_default);
-    setBitrixBotEnabled(persona.bitrix_bot_enabled || false);
     setDialogOpen(true);
   };
 
-  const handleToggleBitrixBot = async (personaId: string, enable: boolean) => {
-    if (!bitrixIntegration) return;
+  const handlePublishToBitrix = async (personaId: string) => {
+    if (!bitrixIntegration) {
+      toast.error("Integração Bitrix24 não encontrada");
+      return;
+    }
     
-    setTogglingBitrix(true);
+    setPublishingPersonaId(personaId);
     try {
       const persona = personas.find(p => p.id === personaId);
       if (!persona) throw new Error("Persona não encontrada");
 
-      if (enable) {
-        // Disable any other persona that's currently the Bitrix bot
-        await supabase
-          .from("personas")
-          .update({ bitrix_bot_enabled: false })
-          .eq("workspace_id", workspace?.id)
-          .eq("bitrix_bot_enabled", true);
+      toast.loading(`Publicando "${persona.name}" no Bitrix24...`, { id: "publish-bot" });
+      
+      const { data, error } = await supabase.functions.invoke("bitrix24-bot-register", {
+        body: {
+          action: "register_persona",
+          integration_id: bitrixIntegration.id,
+          persona_id: personaId,
+        },
+      });
 
-        // ALWAYS check database for current bot_id (not local state)
-        console.log("[Bitrix Bot] Checking database for existing bot_id...");
-        const { data: currentIntegration, error: fetchError } = await supabase
-          .from("integrations")
-          .select("config")
-          .eq("id", bitrixIntegration.id)
-          .single();
+      toast.dismiss("publish-bot");
 
-        if (fetchError) {
-          console.error("[Bitrix Bot] Error fetching integration:", fetchError);
-          throw fetchError;
-        }
-
-        const currentBotId = (currentIntegration?.config as Record<string, unknown>)?.bot_id;
-        console.log("[Bitrix Bot] Current bot_id from database:", currentBotId);
-
-        // Register bot if not already registered
-        if (!currentBotId) {
-          console.log("[Bitrix Bot] No bot_id found, registering bot...");
-          toast.loading("Registrando bot no Bitrix24...", { id: "bot-register" });
-          
-          const { data: registerData, error: registerError } = await supabase.functions.invoke(
-            "bitrix24-bot-register",
-            {
-              body: {
-                action: "register",
-                integration_id: bitrixIntegration.id,
-                bot_name: persona.name,
-                bot_description: persona.description || `Assistente IA - ${persona.name}`,
-              },
-            }
-          );
-
-          toast.dismiss("bot-register");
-
-          console.log("[Bitrix Bot] Register response:", registerData, "Error:", registerError);
-
-          if (registerError) {
-            console.error("[Bitrix Bot] Function invoke error:", registerError);
-            throw new Error(registerError.message || "Erro ao chamar função de registro");
-          }
-
-          if (registerData?.error) {
-            console.error("[Bitrix Bot] Register returned error:", registerData.error);
-            throw new Error(registerData.error);
-          }
-
-          if (!registerData?.bot_id) {
-            console.error("[Bitrix Bot] No bot_id returned:", registerData);
-            throw new Error("Bot registrado mas bot_id não retornado");
-          }
-
-          console.log("[Bitrix Bot] Bot registered successfully with ID:", registerData.bot_id);
-          toast.success(`Bot registrado com ID: ${registerData.bot_id}`);
-          
-          // Update local state with new bot_id
-          bitrixIntegration.config.bot_id = registerData.bot_id;
-        } else {
-          console.log("[Bitrix Bot] Bot already registered with ID:", currentBotId);
-        }
+      if (error) {
+        console.error("Publish error:", error);
+        throw new Error(error.message || "Erro ao publicar bot");
       }
 
-      // Update the persona
-      const { error: personaError } = await supabase
-        .from("personas")
-        .update({ bitrix_bot_enabled: enable })
-        .eq("id", personaId);
+      if (data?.error) {
+        throw new Error(data.error);
+      }
 
-      if (personaError) throw personaError;
-
-      // Update the Bitrix24 integration config
-      const newConfig = {
-        ...bitrixIntegration.config,
-        bot_enabled: enable,
-        bot_persona_id: enable ? personaId : null,
-      };
-
-      const { error: integrationError } = await supabase
-        .from("integrations")
-        .update({ config: newConfig })
-        .eq("id", bitrixIntegration.id);
-
-      if (integrationError) throw integrationError;
-
-      // Update local state
-      setBitrixIntegration({ ...bitrixIntegration, config: newConfig });
-      
-      toast.success(enable 
-        ? "Chatbot ativado para todos os canais do Contact Center" 
-        : "Chatbot desativado do Bitrix24"
-      );
+      toast.success(`"${persona.name}" publicado no Bitrix24! (Bot ID: ${data.bot_id})`);
       fetchPersonas();
     } catch (error) {
-      console.error("[Bitrix Bot] Error toggling:", error);
-      toast.error(error instanceof Error ? error.message : "Erro ao atualizar configuração do Bitrix24");
+      console.error("Error publishing persona:", error);
+      toast.error(error instanceof Error ? error.message : "Erro ao publicar no Bitrix24");
     } finally {
-      setTogglingBitrix(false);
+      setPublishingPersonaId(null);
+    }
+  };
+
+  const handleUnpublishFromBitrix = async (personaId: string) => {
+    if (!bitrixIntegration) {
+      toast.error("Integração Bitrix24 não encontrada");
+      return;
+    }
+    
+    setPublishingPersonaId(personaId);
+    try {
+      const persona = personas.find(p => p.id === personaId);
+      if (!persona) throw new Error("Persona não encontrada");
+
+      toast.loading(`Removendo "${persona.name}" do Bitrix24...`, { id: "unpublish-bot" });
+      
+      const { data, error } = await supabase.functions.invoke("bitrix24-bot-register", {
+        body: {
+          action: "unregister_persona",
+          integration_id: bitrixIntegration.id,
+          persona_id: personaId,
+        },
+      });
+
+      toast.dismiss("unpublish-bot");
+
+      if (error) {
+        console.error("Unpublish error:", error);
+        throw new Error(error.message || "Erro ao remover bot");
+      }
+
+      if (data?.error) {
+        throw new Error(data.error);
+      }
+
+      toast.success(`"${persona.name}" removido do Bitrix24`);
+      fetchPersonas();
+    } catch (error) {
+      console.error("Error unpublishing persona:", error);
+      toast.error(error instanceof Error ? error.message : "Erro ao remover do Bitrix24");
+    } finally {
+      setPublishingPersonaId(null);
     }
   };
 
@@ -312,6 +280,26 @@ export default function Personas() {
   };
 
   const handleDelete = async (id: string) => {
+    const persona = personas.find(p => p.id === id);
+    
+    // If persona is published as bot, unpublish first
+    if (persona?.bitrix_bot_id && bitrixIntegration) {
+      try {
+        toast.loading("Removendo bot do Bitrix24...", { id: "delete-bot" });
+        await supabase.functions.invoke("bitrix24-bot-register", {
+          body: {
+            action: "unregister_persona",
+            integration_id: bitrixIntegration.id,
+            persona_id: id,
+          },
+        });
+        toast.dismiss("delete-bot");
+      } catch (error) {
+        console.error("Error unpublishing before delete:", error);
+        // Continue with delete anyway
+      }
+    }
+
     try {
       const { error } = await supabase.from("personas").delete().eq("id", id);
 
@@ -358,7 +346,7 @@ export default function Personas() {
               Personas da IA
             </h2>
             <p className="text-muted-foreground">
-              Crie diferentes personalidades para sua IA.
+              Crie diferentes personalidades para sua IA. Cada persona pode ser publicada como um bot no Bitrix24.
             </p>
           </div>
           <Button className="gap-2" onClick={handleOpenCreate}>
@@ -366,6 +354,20 @@ export default function Personas() {
             Nova Persona
           </Button>
         </div>
+
+        {/* Bitrix24 Info */}
+        {bitrixIntegration && (
+          <Card className="bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800">
+            <CardContent className="py-3 px-4">
+              <div className="flex items-center gap-2 text-sm text-blue-700 dark:text-blue-300">
+                <MessageSquare className="h-4 w-4" />
+                <span>
+                  Bitrix24 conectado. Publique suas personas como bots no Contact Center.
+                </span>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Personas Grid */}
         {loading ? (
@@ -426,13 +428,50 @@ export default function Personas() {
                         Voz
                       </Badge>
                     )}
-                    {persona.bitrix_bot_enabled && (
-                      <Badge variant="secondary" className="gap-1 bg-blue-500/10 text-blue-600 border-blue-200">
+                    {persona.bitrix_bot_id && (
+                      <Badge variant="secondary" className="gap-1 bg-green-500/10 text-green-600 border-green-200">
                         <MessageSquare className="h-3 w-3" />
-                        Bitrix24
+                        Bot ID: {persona.bitrix_bot_id}
                       </Badge>
                     )}
                   </div>
+
+                  {/* Bitrix24 Publish/Unpublish */}
+                  {bitrixIntegration && (
+                    <div className="pt-2 border-t">
+                      {persona.bitrix_bot_id ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="w-full gap-2 text-red-600 hover:text-red-700 hover:bg-red-50"
+                          onClick={() => handleUnpublishFromBitrix(persona.id)}
+                          disabled={publishingPersonaId === persona.id}
+                        >
+                          {publishingPersonaId === persona.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <XCircle className="h-4 w-4" />
+                          )}
+                          Despublicar do Bitrix24
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="w-full gap-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                          onClick={() => handlePublishToBitrix(persona.id)}
+                          disabled={publishingPersonaId === persona.id}
+                        >
+                          {publishingPersonaId === persona.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Upload className="h-4 w-4" />
+                          )}
+                          Publicar no Bitrix24
+                        </Button>
+                      )}
+                    </div>
+                  )}
 
                   <div className="flex gap-2">
                     <Button
@@ -563,25 +602,6 @@ export default function Personas() {
                   </div>
                   <Switch checked={isDefault} onCheckedChange={setIsDefault} />
                 </div>
-
-                {bitrixIntegration && editingPersona && (
-                  <div className="flex items-center justify-between p-3 rounded-lg bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800">
-                    <div>
-                      <Label className="flex items-center gap-2">
-                        <MessageSquare className="h-4 w-4 text-blue-600" />
-                        Chatbot no Contact Center
-                      </Label>
-                      <p className="text-xs text-muted-foreground">
-                        Ativar para todos os canais (Instagram, Widget, Telegram, etc.)
-                      </p>
-                    </div>
-                    <Switch 
-                      checked={editingPersona.bitrix_bot_enabled || false}
-                      onCheckedChange={(checked) => handleToggleBitrixBot(editingPersona.id, checked)}
-                      disabled={togglingBitrix}
-                    />
-                  </div>
-                )}
               </div>
             </div>
 
