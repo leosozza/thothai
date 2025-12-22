@@ -6,6 +6,67 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+/**
+ * Search knowledge base for relevant chunks
+ */
+async function searchKnowledge(
+  supabase: any, 
+  workspaceId: string, 
+  query: string, 
+  limit: number = 5
+): Promise<string[]> {
+  try {
+    // Get all completed documents for this workspace
+    const { data: documents } = await supabase
+      .from("knowledge_documents")
+      .select("id")
+      .eq("workspace_id", workspaceId)
+      .eq("status", "completed");
+
+    if (!documents || documents.length === 0) {
+      return [];
+    }
+
+    const documentIds = documents.map((d: any) => d.id);
+
+    // Get chunks from these documents
+    const { data: chunks } = await supabase
+      .from("knowledge_chunks")
+      .select("content")
+      .in("document_id", documentIds)
+      .limit(limit * 3); // Get more to filter
+
+    if (!chunks || chunks.length === 0) {
+      return [];
+    }
+
+    // Simple keyword matching (in production, use embeddings)
+    const queryWords = query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+    
+    const scoredChunks = chunks.map((chunk: any) => {
+      const content = chunk.content.toLowerCase();
+      let score = 0;
+      for (const word of queryWords) {
+        if (content.includes(word)) {
+          score += 1;
+        }
+      }
+      return { content: chunk.content, score };
+    });
+
+    // Sort by relevance and take top chunks
+    scoredChunks.sort((a: any, b: any) => b.score - a.score);
+    
+    return scoredChunks
+      .filter((c: any) => c.score > 0)
+      .slice(0, limit)
+      .map((c: any) => c.content);
+  } catch (error) {
+    console.error("Error searching knowledge:", error);
+    return [];
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -46,6 +107,20 @@ serve(async (req) => {
       }
     }
 
+    // Search knowledge base for relevant context
+    let knowledgeContext = "";
+    if (workspace_id && content) {
+      const relevantChunks = await searchKnowledge(supabase, workspace_id, content);
+      
+      if (relevantChunks.length > 0) {
+        knowledgeContext = `\n\n## Base de Conhecimento\nUse as seguintes informações para responder quando relevante:\n\n${relevantChunks.join("\n\n---\n\n")}`;
+        console.log(`Found ${relevantChunks.length} relevant knowledge chunks`);
+      }
+    }
+
+    // Build system prompt with knowledge context
+    const fullSystemPrompt = systemPrompt + knowledgeContext;
+
     // Fetch conversation history (last 10 messages for context)
     const { data: history } = await supabase
       .from("messages")
@@ -55,7 +130,7 @@ serve(async (req) => {
       .limit(10);
 
     const messages = [
-      { role: "system", content: systemPrompt },
+      { role: "system", content: fullSystemPrompt },
     ];
 
     // Add conversation history in chronological order
@@ -76,7 +151,7 @@ serve(async (req) => {
       messages.push({ role: "user", content });
     }
 
-    console.log("Sending to AI with", messages.length, "messages");
+    console.log("Sending to AI with", messages.length, "messages (knowledge context:", knowledgeContext.length > 0 ? "yes" : "no", ")");
 
     // Call Lovable AI Gateway
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {

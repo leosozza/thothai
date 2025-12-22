@@ -6,6 +6,67 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+/**
+ * Search knowledge base for relevant chunks
+ */
+async function searchKnowledge(
+  supabase: any, 
+  workspaceId: string, 
+  query: string, 
+  limit: number = 5
+): Promise<string[]> {
+  try {
+    // Get all completed documents for this workspace
+    const { data: documents } = await supabase
+      .from("knowledge_documents")
+      .select("id")
+      .eq("workspace_id", workspaceId)
+      .eq("status", "completed");
+
+    if (!documents || documents.length === 0) {
+      return [];
+    }
+
+    const documentIds = documents.map((d: any) => d.id);
+
+    // Get chunks from these documents
+    const { data: chunks } = await supabase
+      .from("knowledge_chunks")
+      .select("content")
+      .in("document_id", documentIds)
+      .limit(limit * 3); // Get more to filter
+
+    if (!chunks || chunks.length === 0) {
+      return [];
+    }
+
+    // Simple keyword matching (in production, use embeddings)
+    const queryWords = query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
+    
+    const scoredChunks = chunks.map((chunk: any) => {
+      const content = chunk.content.toLowerCase();
+      let score = 0;
+      for (const word of queryWords) {
+        if (content.includes(word)) {
+          score += 1;
+        }
+      }
+      return { content: chunk.content, score };
+    });
+
+    // Sort by relevance and take top chunks
+    scoredChunks.sort((a: any, b: any) => b.score - a.score);
+    
+    return scoredChunks
+      .filter((c: any) => c.score > 0)
+      .slice(0, limit)
+      .map((c: any) => c.content);
+  } catch (error) {
+    console.error("Error searching knowledge:", error);
+    return [];
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -24,11 +85,12 @@ serve(async (req) => {
       bitrix24_bot_id,
       bitrix24_dialog_id,
       line_id,
+      persona_id,
       message_type = "connector" // "connector" or "bot"
     } = await req.json();
     
     console.log("=== AI PROCESS BITRIX24 ===");
-    console.log("Input:", { conversation_id, contact_id, content, workspace_id, line_id, message_type });
+    console.log("Input:", { conversation_id, contact_id, content, workspace_id, line_id, message_type, persona_id });
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
@@ -43,42 +105,61 @@ serve(async (req) => {
     let systemPrompt = "Você é um assistente prestativo e profissional. Responda de forma clara e objetiva.";
     let personaName = "Assistente";
     let temperature = 0.7;
+    let actualWorkspaceId = workspace_id;
 
-    // First check if integration has a specific persona configured
-    // For bot messages, use bot_persona_id; for connector, use persona_id
-    if (integration_id) {
+    // If persona_id is provided directly (from bitrix24-worker), use it
+    if (persona_id) {
+      const { data: persona } = await supabase
+        .from("personas")
+        .select("*")
+        .eq("id", persona_id)
+        .single();
+
+      if (persona) {
+        systemPrompt = persona.system_prompt || systemPrompt;
+        personaName = persona.name || personaName;
+        temperature = persona.temperature || temperature;
+        actualWorkspaceId = persona.workspace_id || workspace_id;
+        console.log("Using persona from persona_id:", personaName);
+      }
+    } else if (integration_id) {
+      // Check if integration has a specific persona configured
       const { data: integration } = await supabase
         .from("integrations")
-        .select("config")
+        .select("config, workspace_id")
         .eq("id", integration_id)
         .single();
 
-      const personaIdToUse = message_type === "bot" 
-        ? integration?.config?.bot_persona_id 
-        : integration?.config?.persona_id;
+      if (integration) {
+        actualWorkspaceId = integration.workspace_id || workspace_id;
+        
+        const personaIdToUse = message_type === "bot" 
+          ? integration.config?.bot_persona_id 
+          : integration.config?.persona_id;
 
-      if (personaIdToUse) {
-        const { data: persona } = await supabase
-          .from("personas")
-          .select("*")
-          .eq("id", personaIdToUse)
-          .single();
+        if (personaIdToUse) {
+          const { data: persona } = await supabase
+            .from("personas")
+            .select("*")
+            .eq("id", personaIdToUse)
+            .single();
 
-        if (persona) {
-          systemPrompt = persona.system_prompt || systemPrompt;
-          personaName = persona.name || personaName;
-          temperature = persona.temperature || temperature;
-          console.log("Using integration persona:", personaName, "for message_type:", message_type);
+          if (persona) {
+            systemPrompt = persona.system_prompt || systemPrompt;
+            personaName = persona.name || personaName;
+            temperature = persona.temperature || temperature;
+            console.log("Using integration persona:", personaName, "for message_type:", message_type);
+          }
         }
       }
     }
 
     // Fallback to workspace default persona
-    if (personaName === "Assistente" && workspace_id) {
+    if (personaName === "Assistente" && actualWorkspaceId) {
       const { data: persona } = await supabase
         .from("personas")
         .select("*")
-        .eq("workspace_id", workspace_id)
+        .eq("workspace_id", actualWorkspaceId)
         .eq("is_default", true)
         .single();
 
@@ -90,7 +171,21 @@ serve(async (req) => {
       }
     }
 
-    // 2. Fetch conversation history (last 10 messages for context)
+    // 2. Search knowledge base for relevant context
+    let knowledgeContext = "";
+    if (actualWorkspaceId && content) {
+      const relevantChunks = await searchKnowledge(supabase, actualWorkspaceId, content);
+      
+      if (relevantChunks.length > 0) {
+        knowledgeContext = `\n\n## Base de Conhecimento\nUse as seguintes informações para responder quando relevante:\n\n${relevantChunks.join("\n\n---\n\n")}`;
+        console.log(`Found ${relevantChunks.length} relevant knowledge chunks`);
+      }
+    }
+
+    // 3. Build system prompt with knowledge context
+    const fullSystemPrompt = systemPrompt + knowledgeContext;
+
+    // 4. Fetch conversation history (last 10 messages for context)
     const { data: history } = await supabase
       .from("messages")
       .select("content, direction, is_from_bot")
@@ -99,7 +194,7 @@ serve(async (req) => {
       .limit(10);
 
     const messages = [
-      { role: "system", content: systemPrompt },
+      { role: "system", content: fullSystemPrompt },
     ];
 
     // Add conversation history in chronological order
@@ -120,7 +215,7 @@ serve(async (req) => {
       messages.push({ role: "user", content });
     }
 
-    console.log("Sending to AI with", messages.length, "messages");
+    console.log("Sending to AI with", messages.length, "messages (knowledge context:", knowledgeContext.length > 0 ? "yes" : "no", ")");
 
     // 3. Call Lovable AI Gateway
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
