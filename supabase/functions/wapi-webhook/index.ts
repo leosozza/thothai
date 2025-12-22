@@ -124,14 +124,6 @@ serve(async (req) => {
         const pushName = payload.sender?.pushName || "";
         const profilePic = payload.sender?.profilePicture || payload.chat?.profilePicture;
 
-        // Extract message content from W-API format
-        const msgContent = payload.msgContent?.conversation ||
-          payload.msgContent?.extendedTextMessage?.text ||
-          payload.msgContent?.imageMessage?.caption ||
-          payload.msgContent?.videoMessage?.caption ||
-          payload.msgContent?.documentMessage?.caption ||
-          "";
-
         // Determine message type
         let messageType = "text";
         if (payload.msgContent?.imageMessage) messageType = "image";
@@ -139,6 +131,31 @@ serve(async (req) => {
         else if (payload.msgContent?.videoMessage) messageType = "video";
         else if (payload.msgContent?.documentMessage) messageType = "document";
         else if (payload.msgContent?.stickerMessage) messageType = "sticker";
+
+        // Extract message content from W-API format
+        let msgContent = payload.msgContent?.conversation ||
+          payload.msgContent?.extendedTextMessage?.text ||
+          payload.msgContent?.imageMessage?.caption ||
+          payload.msgContent?.videoMessage?.caption ||
+          payload.msgContent?.documentMessage?.caption ||
+          "";
+
+        // Transcribe audio messages using ElevenLabs STT
+        let audioTranscription: string | null = null;
+        let audioUrl: string | null = null;
+        if (messageType === "audio" && payload.msgContent?.audioMessage?.url) {
+          audioUrl = payload.msgContent.audioMessage.url;
+          try {
+            console.log("Transcribing audio message...");
+            audioTranscription = await transcribeAudioFromUrl(audioUrl!);
+            if (audioTranscription) {
+              msgContent = audioTranscription; // Use transcription as message content for AI
+              console.log("Audio transcribed successfully:", audioTranscription.substring(0, 100));
+            }
+          } catch (transcribeErr) {
+            console.error("Audio transcription failed:", transcribeErr);
+          }
+        }
 
         console.log(`Message from ${contactPhone}: ${msgContent} (type: ${messageType})`);
 
@@ -234,6 +251,8 @@ serve(async (req) => {
             direction: isFromMe ? "outgoing" : "incoming",
             message_type: messageType,
             content: msgContent,
+            media_url: audioUrl,
+            audio_transcription: audioTranscription,
             status: isFromMe ? "sent" : "delivered",
             is_from_bot: false,
           })
@@ -328,6 +347,7 @@ serve(async (req) => {
                   content: msgContent,
                   workspace_id: instance.workspace_id,
                   is_first_message: isFirstMessage,
+                  original_message_type: messageType, // Pass original type so AI knows to respond with audio
                 }),
               });
 

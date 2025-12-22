@@ -34,6 +34,7 @@ serve(async (req) => {
       message_type, // Alternative naming
       mediaUrl,
       media_url, // Alternative naming
+      audio_base64, // Base64 encoded audio from TTS
       workspaceId,
       workspace_id, // Alternative naming
       internal_call // Flag for internal edge function calls
@@ -143,7 +144,16 @@ serve(async (req) => {
     };
 
     // Handle different message types
-    if (finalMessageType === "audio" && finalMediaUrl) {
+    if (finalMessageType === "audio" && audio_base64) {
+      // Audio from base64 (TTS generated)
+      endpoint = "message/send-audio-base64";
+      body = { 
+        phone: formattedPhone, 
+        audioBase64: audio_base64,
+        mimetype: "audio/mpeg"
+      };
+      console.log("Sending audio from base64, length:", audio_base64.length);
+    } else if (finalMessageType === "audio" && finalMediaUrl) {
       endpoint = "message/send-audio";
       body = { phone: formattedPhone, audioUrl: finalMediaUrl };
     } else if (finalMessageType === "image" && finalMediaUrl) {

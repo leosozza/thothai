@@ -19,10 +19,10 @@ verify_jwt = false
 verify_jwt = false
 
 [functions.elevenlabs-stt]
-verify_jwt = true
+verify_jwt = false
 
 [functions.elevenlabs-tts]
-verify_jwt = true
+verify_jwt = false
 
 [functions.elevenlabs-agent-token]
 verify_jwt = true
