@@ -92,3 +92,12 @@ verify_jwt = true
 
 [functions.elevenlabs-call-webhook]
 verify_jwt = false
+
+[functions.wavoip-connect]
+verify_jwt = true
+
+[functions.twilio-connect]
+verify_jwt = true
+
+[functions.telnyx-connect]
+verify_jwt = true

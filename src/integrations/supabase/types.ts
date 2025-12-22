@@ -1223,6 +1223,114 @@ export type Database = {
         }
         Relationships: []
       }
+      telephony_numbers: {
+        Row: {
+          capabilities: Json | null
+          created_at: string | null
+          elevenlabs_agent_id: string | null
+          friendly_name: string | null
+          id: string
+          is_active: boolean | null
+          persona_id: string | null
+          phone_number: string
+          provider_id: string
+          provider_number_id: string | null
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          capabilities?: Json | null
+          created_at?: string | null
+          elevenlabs_agent_id?: string | null
+          friendly_name?: string | null
+          id?: string
+          is_active?: boolean | null
+          persona_id?: string | null
+          phone_number: string
+          provider_id: string
+          provider_number_id?: string | null
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          capabilities?: Json | null
+          created_at?: string | null
+          elevenlabs_agent_id?: string | null
+          friendly_name?: string | null
+          id?: string
+          is_active?: boolean | null
+          persona_id?: string | null
+          phone_number?: string
+          provider_id?: string
+          provider_number_id?: string | null
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "telephony_numbers_persona_id_fkey"
+            columns: ["persona_id"]
+            isOneToOne: false
+            referencedRelation: "personas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "telephony_numbers_provider_id_fkey"
+            columns: ["provider_id"]
+            isOneToOne: false
+            referencedRelation: "telephony_providers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "telephony_numbers_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      telephony_providers: {
+        Row: {
+          config: Json
+          created_at: string | null
+          id: string
+          is_active: boolean | null
+          name: string
+          provider_type: string
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          config?: Json
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          name: string
+          provider_type: string
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          config?: Json
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          name?: string
+          provider_type?: string
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "telephony_providers_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       voice_providers: {
         Row: {
           auth_header: string | null

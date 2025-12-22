@@ -69,6 +69,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { VoiceTestButton } from "@/components/calls/VoiceTestButton";
+import { TelephonyProviderCard } from "@/components/integrations/TelephonyProviderCard";
+import { TelephonyNumbersCard } from "@/components/integrations/TelephonyNumbersCard";
 
 
 interface Integration {
