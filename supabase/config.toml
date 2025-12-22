@@ -101,3 +101,6 @@ verify_jwt = true
 
 [functions.telnyx-connect]
 verify_jwt = true
+
+[functions.elevenlabs-configure-transfer]
+verify_jwt = true

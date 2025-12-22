@@ -22,6 +22,14 @@ interface ElevenLabsWebhookPayload {
       message: string;
       timestamp?: number;
     }>;
+    // Transfer data
+    transfer_destination?: {
+      type: "phone" | "sip_uri";
+      phone_number?: string;
+      sip_uri?: string;
+    };
+    transfer_type?: "conference" | "sip_refer" | "warm";
+    transfer_reason?: string;
   };
   call_details?: {
     phone_number?: string;
@@ -193,20 +201,30 @@ serve(async (req) => {
         });
       }
 
-      case "human_takeover": {
-        // Find the call
+      case "human_takeover":
+      case "transfer": {
+        // Find the call with workspace info
         const { data: call } = await supabase
           .from("calls")
-          .select("id")
+          .select("id, workspace_id, phone_number, summary, transcript")
           .eq("elevenlabs_conversation_id", conversation_id)
           .single();
 
         if (call) {
+          const transferDestination = data?.transfer_destination;
+          const transferType = data?.transfer_type || "conference";
+          const transferReason = data?.transfer_reason || "Solicitação de atendente humano";
+
           await supabase
             .from("calls")
             .update({
               human_takeover: true,
               human_takeover_at: new Date().toISOString(),
+              metadata: {
+                transfer_destination: transferDestination,
+                transfer_type: transferType,
+                transfer_reason: transferReason,
+              },
             })
             .eq("id", call.id);
 
@@ -214,8 +232,15 @@ serve(async (req) => {
             call_id: call.id,
             event_type: "human_takeover",
             role: "system",
-            content: "Chamada transferida para atendente humano",
+            content: `Chamada transferida: ${transferReason}`,
+            metadata: {
+              destination: transferDestination,
+              transfer_type: transferType,
+            },
           });
+
+          // Register transfer in Bitrix24 if configured
+          await registerBitrixTransfer(supabase, call, transferDestination, transferReason);
         }
 
         return new Response(JSON.stringify({ success: true }), {
@@ -321,5 +346,85 @@ ${callData?.transcript || "Sem transcrição disponível"}
     }
   } catch (error) {
     console.error("Error creating Bitrix24 activity:", error);
+  }
+}
+
+// Register transfer in Bitrix24 telephony
+async function registerBitrixTransfer(
+  supabase: any,
+  call: any,
+  transferDestination: any,
+  transferReason: string
+) {
+  try {
+    if (!call.workspace_id) return;
+
+    // Check if Bitrix24 integration is configured
+    const { data: integration } = await supabase
+      .from("integrations")
+      .select("id, config")
+      .eq("workspace_id", call.workspace_id)
+      .eq("type", "bitrix24")
+      .eq("is_active", true)
+      .single();
+
+    if (!integration?.config?.access_token || !integration?.config?.domain) {
+      console.log("No active Bitrix24 integration for transfer registration");
+      return;
+    }
+
+    const { domain, access_token } = integration.config;
+
+    // Register the external call start in Bitrix24
+    // This shows a call card to the operator receiving the transfer
+    const registerData = {
+      PHONE_NUMBER: call.phone_number || "Desconhecido",
+      TYPE: 2, // Incoming
+      LINE_NUMBER: "ThothAI",
+      SHOW: 1, // Show call card
+      CRM_CREATE: 1, // Create contact/lead if not exists
+    };
+
+    console.log("Registering transfer in Bitrix24:", registerData);
+
+    const registerResponse = await fetch(
+      `https://${domain}/rest/telephony.externalcall.register?auth=${access_token}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(registerData),
+      }
+    );
+
+    const registerResult = await registerResponse.json();
+
+    if (registerResult.result?.CALL_ID) {
+      console.log("Bitrix24 external call registered:", registerResult.result.CALL_ID);
+
+      // Attach transcription if available
+      if (call.transcript) {
+        await fetch(
+          `https://${domain}/rest/telephony.externalCall.attachTranscription?auth=${access_token}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              CALL_ID: registerResult.result.CALL_ID,
+              MESSAGES: [
+                {
+                  SIDE: "Client",
+                  TEXT: `[Resumo da IA] ${transferReason}\n\n${call.summary || ""}\n\n[Transcrição]\n${call.transcript}`,
+                },
+              ],
+            }),
+          }
+        );
+        console.log("Transcription attached to Bitrix24 call");
+      }
+    } else {
+      console.error("Error registering Bitrix24 external call:", registerResult);
+    }
+  } catch (error) {
+    console.error("Error registering Bitrix24 transfer:", error);
   }
 }

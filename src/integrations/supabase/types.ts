@@ -1331,6 +1331,66 @@ export type Database = {
           },
         ]
       }
+      telephony_transfer_rules: {
+        Row: {
+          condition: string
+          created_at: string | null
+          destination: string
+          destination_type: string
+          id: string
+          is_active: boolean | null
+          name: string
+          persona_id: string | null
+          priority: number | null
+          transfer_type: string
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          condition: string
+          created_at?: string | null
+          destination: string
+          destination_type: string
+          id?: string
+          is_active?: boolean | null
+          name: string
+          persona_id?: string | null
+          priority?: number | null
+          transfer_type?: string
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          condition?: string
+          created_at?: string | null
+          destination?: string
+          destination_type?: string
+          id?: string
+          is_active?: boolean | null
+          name?: string
+          persona_id?: string | null
+          priority?: number | null
+          transfer_type?: string
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "telephony_transfer_rules_persona_id_fkey"
+            columns: ["persona_id"]
+            isOneToOne: false
+            referencedRelation: "personas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "telephony_transfer_rules_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       voice_providers: {
         Row: {
           auth_header: string | null

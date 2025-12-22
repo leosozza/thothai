@@ -71,7 +71,7 @@ import {
 import { VoiceTestButton } from "@/components/calls/VoiceTestButton";
 import { TelephonyProviderCard } from "@/components/integrations/TelephonyProviderCard";
 import { TelephonyNumbersCard } from "@/components/integrations/TelephonyNumbersCard";
-
+import { TransferRulesCard } from "@/components/integrations/TransferRulesCard";
 
 interface Integration {
   id: string;
@@ -2126,6 +2126,9 @@ export default function Integrations() {
 
             {/* Telephony Numbers Management */}
             <TelephonyNumbersCard />
+
+            {/* Transfer Rules */}
+            <TransferRulesCard />
 
             {/* Configured Agents Card */}
             <Card>
