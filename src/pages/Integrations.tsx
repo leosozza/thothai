@@ -57,6 +57,8 @@ import {
   Bot,
   AlertTriangle,
   Bug,
+  Mic,
+  Cog,
 } from "lucide-react";
 import {
   Table,
@@ -95,47 +97,103 @@ interface ChannelMapping {
 }
 
 const integrationTypes = [
+  // === CANAIS ===
   {
     type: "wapi",
     name: "WhatsApp QR Code",
     description: "Configure a conexão do WhatsApp via QR Code para enviar e receber mensagens.",
     icon: MessageSquare,
     color: "bg-green-500",
+    category: "channels",
     fields: [
       { key: "api_key", label: "API Key", type: "password", placeholder: "Sua chave de API" },
       { key: "instance_id", label: "Instance ID", type: "text", placeholder: "ID da instância" },
     ],
     docs: null,
   },
+  // === PROVEDORES DE IA ===
+  {
+    type: "anthropic",
+    name: "Anthropic (Claude)",
+    description: "Modelos Claude para conversação avançada e análise de texto.",
+    icon: Bot,
+    color: "bg-amber-500",
+    category: "ai",
+    fields: [
+      { key: "api_key", label: "API Key", type: "password", placeholder: "sk-ant-..." },
+    ],
+    docs: "https://docs.anthropic.com",
+  },
   {
     type: "openai",
     name: "OpenAI",
-    description: "Use modelos GPT para respostas avançadas de IA.",
+    description: "Modelos GPT para respostas avançadas de IA.",
     icon: Zap,
     color: "bg-purple-500",
+    category: "ai",
     fields: [
       { key: "api_key", label: "API Key", type: "password", placeholder: "sk-..." },
     ],
     docs: "https://platform.openai.com/docs",
   },
   {
+    type: "deepseek",
+    name: "DeepSeek",
+    description: "Modelos de IA com foco em raciocínio avançado e código.",
+    icon: Bot,
+    color: "bg-blue-600",
+    category: "ai",
+    fields: [
+      { key: "api_key", label: "API Key", type: "password", placeholder: "sk-..." },
+    ],
+    docs: "https://platform.deepseek.com",
+  },
+  {
+    type: "google",
+    name: "Google (Gemini)",
+    description: "Modelos Gemini para multimodalidade e raciocínio avançado.",
+    icon: Bot,
+    color: "bg-blue-500",
+    category: "ai",
+    fields: [
+      { key: "api_key", label: "API Key", type: "password", placeholder: "Sua chave Google AI" },
+    ],
+    docs: "https://ai.google.dev",
+  },
+  {
+    type: "groq",
+    name: "Groq",
+    description: "IA ultra-rápida com inferência em hardware especializado.",
+    icon: Zap,
+    color: "bg-orange-500",
+    category: "ai",
+    fields: [
+      { key: "api_key", label: "API Key", type: "password", placeholder: "gsk_..." },
+    ],
+    docs: "https://console.groq.com",
+  },
+  // === PROVEDORES DE VOZ ===
+  {
     type: "elevenlabs",
     name: "ElevenLabs",
     description: "Text-to-Speech para respostas em áudio com vozes naturais.",
     icon: MessageSquare,
-    color: "bg-blue-500",
+    color: "bg-indigo-500",
+    category: "voice",
     fields: [
       { key: "api_key", label: "API Key", type: "password", placeholder: "Sua chave ElevenLabs" },
       { key: "voice_id", label: "Voice ID", type: "text", placeholder: "ID da voz padrão" },
     ],
     docs: "https://elevenlabs.io/docs",
   },
+  // === AUTOMAÇÃO ===
   {
     type: "webhook",
     name: "Webhook",
     description: "Envie eventos para URLs externas via webhooks.",
     icon: Webhook,
     color: "bg-orange-500",
+    category: "automation",
     fields: [
       { key: "url", label: "Webhook URL", type: "text", placeholder: "https://..." },
       { key: "secret", label: "Secret (opcional)", type: "password", placeholder: "Chave secreta" },
@@ -148,6 +206,7 @@ const integrationTypes = [
     description: "Integre com workflows do n8n para automações avançadas.",
     icon: Zap,
     color: "bg-red-500",
+    category: "automation",
     fields: [
       { key: "webhook_url", label: "Webhook URL", type: "text", placeholder: "URL do webhook n8n" },
     ],
@@ -1300,27 +1359,31 @@ export default function Integrations() {
           </p>
         </div>
 
-        <Tabs defaultValue="wapi">
-          <TabsList>
-            <TabsTrigger value="wapi" className="gap-2">
+        <Tabs defaultValue="channels">
+          <TabsList className="flex-wrap">
+            <TabsTrigger value="channels" className="gap-2">
               <MessageSquare className="h-4 w-4" />
-              W-API
+              Canais
             </TabsTrigger>
             <TabsTrigger value="crm" className="gap-2">
               <Building2 className="h-4 w-4" />
               CRM
             </TabsTrigger>
             <TabsTrigger value="ai" className="gap-2">
-              <Zap className="h-4 w-4" />
-              IA & Voz
+              <Bot className="h-4 w-4" />
+              IA
             </TabsTrigger>
-            <TabsTrigger value="webhooks" className="gap-2">
-              <Webhook className="h-4 w-4" />
-              Webhooks
+            <TabsTrigger value="voice" className="gap-2">
+              <Mic className="h-4 w-4" />
+              Voz
+            </TabsTrigger>
+            <TabsTrigger value="automation" className="gap-2">
+              <Cog className="h-4 w-4" />
+              Automação
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="wapi" className="mt-6">
+          <TabsContent value="channels" className="mt-6">
             <Card>
               <CardHeader>
                 <div className="flex items-center justify-between">
@@ -1743,8 +1806,14 @@ export default function Integrations() {
           </TabsContent>
 
           <TabsContent value="ai" className="mt-6 space-y-4">
+            <div className="bg-muted/50 rounded-lg p-4 mb-4">
+              <p className="text-sm text-muted-foreground">
+                Configure sua própria chave de API para usar modelos de IA externos. 
+                Isso permite usar sua própria conta nos provedores ao invés da IA nativa do ThothAI.
+              </p>
+            </div>
             {integrationTypes
-              .filter((t) => ["openai", "elevenlabs"].includes(t.type))
+              .filter((t) => t.category === "ai")
               .map((intType) => {
                 const status = getIntegrationStatus(intType.type);
                 return (
@@ -1753,7 +1822,7 @@ export default function Integrations() {
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-4">
                           <div className={`h-12 w-12 rounded-xl ${intType.color}/10 flex items-center justify-center`}>
-                            <intType.icon className={`h-6 w-6 text-${intType.color.replace("bg-", "")}`} />
+                            <intType.icon className={`h-6 w-6`} style={{ color: `hsl(var(--${intType.color.replace("bg-", "").split("-")[0]}))` }} />
                           </div>
                           <div>
                             <CardTitle>{intType.name}</CardTitle>
@@ -1778,20 +1847,93 @@ export default function Integrations() {
                         </div>
                       </div>
                     </CardHeader>
-                    <CardContent>
+                    <CardContent className="flex gap-2">
                       <Button variant="outline" onClick={() => handleOpenConfig(intType)}>
                         <Settings className="h-4 w-4 mr-2" />
                         {status ? "Editar" : "Configurar"}
                       </Button>
+                      {intType.docs && (
+                        <Button variant="ghost" size="sm" asChild>
+                          <a href={intType.docs} target="_blank" rel="noopener noreferrer">
+                            <ExternalLink className="h-4 w-4 mr-1" />
+                            Docs
+                          </a>
+                        </Button>
+                      )}
                     </CardContent>
                   </Card>
                 );
               })}
           </TabsContent>
 
-          <TabsContent value="webhooks" className="mt-6 space-y-4">
+          <TabsContent value="voice" className="mt-6 space-y-4">
+            <div className="bg-muted/50 rounded-lg p-4 mb-4">
+              <p className="text-sm text-muted-foreground">
+                Configure provedores de voz para habilitar respostas em áudio e síntese de voz natural nas suas personas.
+              </p>
+            </div>
             {integrationTypes
-              .filter((t) => ["webhook", "n8n"].includes(t.type))
+              .filter((t) => t.category === "voice")
+              .map((intType) => {
+                const status = getIntegrationStatus(intType.type);
+                return (
+                  <Card key={intType.type}>
+                    <CardHeader>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-4">
+                          <div className={`h-12 w-12 rounded-xl ${intType.color}/10 flex items-center justify-center`}>
+                            <Mic className="h-6 w-6 text-indigo-500" />
+                          </div>
+                          <div>
+                            <CardTitle>{intType.name}</CardTitle>
+                            <CardDescription>{intType.description}</CardDescription>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          {status && (
+                            <Switch
+                              checked={status.is_active}
+                              onCheckedChange={() => handleToggleIntegration(status)}
+                            />
+                          )}
+                          {status ? (
+                            <Badge variant="outline" className="gap-1.5">
+                              <span className="h-2 w-2 rounded-full bg-green-500" />
+                              Conectado
+                            </Badge>
+                          ) : (
+                            <Badge variant="secondary">Não configurado</Badge>
+                          )}
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="flex gap-2">
+                      <Button variant="outline" onClick={() => handleOpenConfig(intType)}>
+                        <Settings className="h-4 w-4 mr-2" />
+                        {status ? "Editar" : "Configurar"}
+                      </Button>
+                      {intType.docs && (
+                        <Button variant="ghost" size="sm" asChild>
+                          <a href={intType.docs} target="_blank" rel="noopener noreferrer">
+                            <ExternalLink className="h-4 w-4 mr-1" />
+                            Docs
+                          </a>
+                        </Button>
+                      )}
+                    </CardContent>
+                  </Card>
+                );
+              })}
+          </TabsContent>
+
+          <TabsContent value="automation" className="mt-6 space-y-4">
+            <div className="bg-muted/50 rounded-lg p-4 mb-4">
+              <p className="text-sm text-muted-foreground">
+                Configure webhooks e integrações de automação para conectar o ThothAI com seus sistemas externos.
+              </p>
+            </div>
+            {integrationTypes
+              .filter((t) => t.category === "automation")
               .map((intType) => {
                 const status = getIntegrationStatus(intType.type);
                 return (
@@ -1825,11 +1967,19 @@ export default function Integrations() {
                         </div>
                       </div>
                     </CardHeader>
-                    <CardContent>
+                    <CardContent className="flex gap-2">
                       <Button variant="outline" onClick={() => handleOpenConfig(intType)}>
                         <Settings className="h-4 w-4 mr-2" />
                         {status ? "Editar" : "Configurar"}
                       </Button>
+                      {intType.docs && (
+                        <Button variant="ghost" size="sm" asChild>
+                          <a href={intType.docs} target="_blank" rel="noopener noreferrer">
+                            <ExternalLink className="h-4 w-4 mr-1" />
+                            Docs
+                          </a>
+                        </Button>
+                      )}
                     </CardContent>
                   </Card>
                 );
