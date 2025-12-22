@@ -49,7 +49,7 @@ verify_jwt = false
 verify_jwt = true
 
 [functions.bitrix24-bot-register]
-verify_jwt = true
+verify_jwt = false
 
 [functions.bitrix24-test]
 verify_jwt = false
