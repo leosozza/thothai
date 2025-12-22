@@ -100,12 +100,13 @@ export function AIModelSelector({
 
       setNativeModels((nativeData || []) as NativeAIModel[]);
 
-      // Fetch external providers (non-native)
+      // Fetch external providers (non-native, public only)
       const { data: providersData } = await supabase
         .from("ai_providers")
         .select("id, name, slug, available_models")
         .eq("is_active", true)
         .eq("is_native", false)
+        .eq("is_public", true)
         .order("name");
 
       const parsed = (providersData || []).map(p => ({
@@ -301,12 +302,7 @@ export function AIModelSelector({
               <SelectContent>
                 {getModelsByTier(selectedTier).map(model => (
                   <SelectItem key={model.id} value={model.name}>
-                    <div className="flex items-center gap-2">
-                      <span>{model.display_name}</span>
-                      <span className="text-xs text-muted-foreground">
-                        ({model.provider_source})
-                      </span>
-                    </div>
+                    {model.display_name}
                   </SelectItem>
                 ))}
               </SelectContent>

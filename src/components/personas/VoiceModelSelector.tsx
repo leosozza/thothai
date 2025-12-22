@@ -132,15 +132,48 @@ export function VoiceModelSelector({
 
       setVoiceProviders(parsed);
 
-      // Fetch configured credentials
+      // Fetch configured credentials from multiple sources
       if (workspace?.id) {
-        const { data: creds } = await supabase
+        // 1. Get from workspace_voice_credentials (new system)
+        const { data: newCreds } = await supabase
           .from("workspace_voice_credentials")
           .select("provider_id")
           .eq("workspace_id", workspace.id)
           .eq("is_active", true);
 
-        setConfiguredProviderIds((creds || []).map(c => c.provider_id));
+        const newCredProviderIds = (newCreds || []).map(c => c.provider_id);
+
+        // 2. Get from integrations table (legacy system - elevenlabs, azure_tts, etc.)
+        const { data: legacyIntegrations } = await supabase
+          .from("integrations")
+          .select("id, type, config, is_active")
+          .eq("workspace_id", workspace.id)
+          .eq("is_active", true)
+          .in("type", ["elevenlabs", "azure_tts", "google_tts", "openai_whisper"]);
+
+        // Map legacy integration types to voice provider slugs
+        const legacyTypeToSlug: Record<string, string> = {
+          "elevenlabs": "elevenlabs",
+          "azure_tts": "azure",
+          "google_tts": "google",
+          "openai_whisper": "openai",
+        };
+
+        // Find provider IDs for legacy integrations
+        const legacyProviderIds: string[] = [];
+        for (const integration of legacyIntegrations || []) {
+          const slug = legacyTypeToSlug[integration.type];
+          if (slug) {
+            const provider = parsed.find(p => p.slug === slug);
+            if (provider) {
+              legacyProviderIds.push(provider.id);
+            }
+          }
+        }
+
+        // Combine both sources (deduplicated)
+        const allProviderIds = [...new Set([...newCredProviderIds, ...legacyProviderIds])];
+        setConfiguredProviderIds(allProviderIds);
       }
     } catch (error) {
       console.error("Error fetching voice data:", error);
