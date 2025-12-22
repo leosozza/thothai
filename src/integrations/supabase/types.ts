@@ -862,6 +862,60 @@ export type Database = {
         }
         Relationships: []
       }
+      native_voice_models: {
+        Row: {
+          created_at: string | null
+          description: string | null
+          display_name: string
+          gender: string | null
+          id: string
+          is_active: boolean | null
+          language: string | null
+          name: string
+          provider_source: string
+          sample_audio_url: string | null
+          tier: string | null
+          token_cost_multiplier: number | null
+          type: string
+          updated_at: string | null
+          voice_id: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          description?: string | null
+          display_name: string
+          gender?: string | null
+          id?: string
+          is_active?: boolean | null
+          language?: string | null
+          name: string
+          provider_source: string
+          sample_audio_url?: string | null
+          tier?: string | null
+          token_cost_multiplier?: number | null
+          type: string
+          updated_at?: string | null
+          voice_id?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          description?: string | null
+          display_name?: string
+          gender?: string | null
+          id?: string
+          is_active?: boolean | null
+          language?: string | null
+          name?: string
+          provider_source?: string
+          sample_audio_url?: string | null
+          tier?: string | null
+          token_cost_multiplier?: number | null
+          type?: string
+          updated_at?: string | null
+          voice_id?: string | null
+        }
+        Relationships: []
+      }
       personas: {
         Row: {
           ai_model: string | null
@@ -980,6 +1034,66 @@ export type Database = {
           id?: string
           updated_at?: string
           user_id?: string
+        }
+        Relationships: []
+      }
+      voice_providers: {
+        Row: {
+          auth_header: string | null
+          auth_prefix: string | null
+          available_voices: Json | null
+          base_url: string | null
+          created_at: string | null
+          docs_url: string | null
+          id: string
+          is_active: boolean | null
+          is_native: boolean | null
+          key_generation_guide: string | null
+          logo_url: string | null
+          name: string
+          slug: string
+          tier: string | null
+          token_cost_multiplier: number | null
+          type: string
+          updated_at: string | null
+        }
+        Insert: {
+          auth_header?: string | null
+          auth_prefix?: string | null
+          available_voices?: Json | null
+          base_url?: string | null
+          created_at?: string | null
+          docs_url?: string | null
+          id?: string
+          is_active?: boolean | null
+          is_native?: boolean | null
+          key_generation_guide?: string | null
+          logo_url?: string | null
+          name: string
+          slug: string
+          tier?: string | null
+          token_cost_multiplier?: number | null
+          type: string
+          updated_at?: string | null
+        }
+        Update: {
+          auth_header?: string | null
+          auth_prefix?: string | null
+          available_voices?: Json | null
+          base_url?: string | null
+          created_at?: string | null
+          docs_url?: string | null
+          id?: string
+          is_active?: boolean | null
+          is_native?: boolean | null
+          key_generation_guide?: string | null
+          logo_url?: string | null
+          name?: string
+          slug?: string
+          tier?: string | null
+          token_cost_multiplier?: number | null
+          type?: string
+          updated_at?: string | null
         }
         Relationships: []
       }
@@ -1132,6 +1246,60 @@ export type Database = {
         Relationships: [
           {
             foreignKeyName: "workspace_tokens_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      workspace_voice_credentials: {
+        Row: {
+          api_key_encrypted: string
+          created_at: string | null
+          default_voice_id: string | null
+          id: string
+          is_active: boolean | null
+          last_used_at: string | null
+          provider_id: string
+          region: string | null
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          api_key_encrypted: string
+          created_at?: string | null
+          default_voice_id?: string | null
+          id?: string
+          is_active?: boolean | null
+          last_used_at?: string | null
+          provider_id: string
+          region?: string | null
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          api_key_encrypted?: string
+          created_at?: string | null
+          default_voice_id?: string | null
+          id?: string
+          is_active?: boolean | null
+          last_used_at?: string | null
+          provider_id?: string
+          region?: string | null
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workspace_voice_credentials_provider_id_fkey"
+            columns: ["provider_id"]
+            isOneToOne: false
+            referencedRelation: "voice_providers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workspace_voice_credentials_workspace_id_fkey"
             columns: ["workspace_id"]
             isOneToOne: false
             referencedRelation: "workspaces"

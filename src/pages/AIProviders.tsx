@@ -20,7 +20,11 @@ import {
   Coins,
   Zap,
   Crown,
-  Star
+  Star,
+  Mic,
+  Volume2,
+  Play,
+  Pause
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -81,6 +85,42 @@ interface WorkspaceCredential {
   last_used_at: string | null;
 }
 
+interface NativeVoiceModel {
+  id: string;
+  name: string;
+  display_name: string;
+  provider_source: string;
+  type: "tts" | "stt";
+  tier: "basic" | "professional" | "expert";
+  token_cost_multiplier: number;
+  voice_id: string | null;
+  language: string;
+  gender: string | null;
+  description: string | null;
+  sample_audio_url: string | null;
+  is_active: boolean;
+}
+
+interface VoiceProvider {
+  id: string;
+  name: string;
+  slug: string;
+  type: "tts" | "stt";
+  base_url: string | null;
+  is_native: boolean;
+  tier: string;
+  docs_url: string | null;
+  is_active: boolean;
+}
+
+interface WorkspaceVoiceCredential {
+  id: string;
+  provider_id: string;
+  is_active: boolean;
+  last_used_at: string | null;
+  default_voice_id: string | null;
+}
+
 const tierConfig = {
   basic: {
     label: "Basic",
@@ -108,6 +148,27 @@ const tierConfig = {
 // Slugs permitidos para API própria (exibição ao cliente)
 const allowedOwnApiProviders = ["anthropic", "deepseek", "google", "openai", "groq"];
 
+const voiceTierConfig = {
+  basic: {
+    label: "Basic",
+    multiplier: "1x",
+    color: "bg-green-500/10 text-green-600 border-green-500/30",
+    icon: Zap,
+  },
+  professional: {
+    label: "Professional", 
+    multiplier: "2x",
+    color: "bg-blue-500/10 text-blue-600 border-blue-500/30",
+    icon: Star,
+  },
+  expert: {
+    label: "Expert",
+    multiplier: "5x", 
+    color: "bg-purple-500/10 text-purple-600 border-purple-500/30",
+    icon: Crown,
+  }
+};
+
 export default function AIProviders() {
   const { t } = useTranslation();
   const { workspace } = useWorkspace();
@@ -123,6 +184,14 @@ export default function AIProviders() {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<"success" | "error" | null>(null);
+  
+  // Voice state
+  const [voiceModels, setVoiceModels] = useState<NativeVoiceModel[]>([]);
+  const [voiceProviders, setVoiceProviders] = useState<VoiceProvider[]>([]);
+  const [voiceCredentials, setVoiceCredentials] = useState<WorkspaceVoiceCredential[]>([]);
+  const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null);
+  const [voiceFilter, setVoiceFilter] = useState<"all" | "tts" | "stt">("all");
+  const [genderFilter, setGenderFilter] = useState<"all" | "male" | "female">("all");
 
   useEffect(() => {
     if (workspace?.id) {
@@ -164,6 +233,27 @@ export default function AIProviders() {
 
       setProviders(parsedProviders);
 
+      // Fetch native voice models
+      const { data: voiceData, error: voiceError } = await supabase
+        .from("native_voice_models")
+        .select("*")
+        .eq("is_active", true)
+        .order("tier")
+        .order("display_name");
+
+      if (voiceError) throw voiceError;
+      setVoiceModels((voiceData || []) as NativeVoiceModel[]);
+
+      // Fetch voice providers
+      const { data: voiceProvidersData, error: voiceProvidersError } = await supabase
+        .from("voice_providers")
+        .select("*")
+        .eq("is_active", true)
+        .order("name");
+
+      if (voiceProvidersError) throw voiceProvidersError;
+      setVoiceProviders((voiceProvidersData || []) as VoiceProvider[]);
+
       // Fetch workspace credentials
       if (workspace?.id) {
         const { data: credsData, error: credsError } = await supabase
@@ -173,6 +263,15 @@ export default function AIProviders() {
 
         if (credsError) throw credsError;
         setCredentials(credsData || []);
+
+        // Fetch voice credentials
+        const { data: voiceCredsData, error: voiceCredsError } = await supabase
+          .from("workspace_voice_credentials")
+          .select("id, provider_id, is_active, last_used_at, default_voice_id")
+          .eq("workspace_id", workspace.id);
+
+        if (voiceCredsError) throw voiceCredsError;
+        setVoiceCredentials((voiceCredsData || []) as WorkspaceVoiceCredential[]);
       }
     } catch (error) {
       console.error("Error fetching AI providers:", error);
@@ -460,7 +559,7 @@ export default function AIProviders() {
         </div>
 
         <Tabs defaultValue="native" className="w-full">
-          <TabsList className="grid w-full grid-cols-2 max-w-md">
+          <TabsList className="grid w-full grid-cols-3 max-w-lg">
             <TabsTrigger value="native" className="gap-2">
               <Sparkles className="h-4 w-4" />
               ThothAI
@@ -468,6 +567,10 @@ export default function AIProviders() {
             <TabsTrigger value="own" className="gap-2">
               <Key className="h-4 w-4" />
               API Key Própria
+            </TabsTrigger>
+            <TabsTrigger value="voice" className="gap-2">
+              <Mic className="h-4 w-4" />
+              Voz
             </TabsTrigger>
           </TabsList>
 
@@ -516,6 +619,179 @@ export default function AIProviders() {
               <div className="text-center py-12 text-muted-foreground">
                 <Bot className="h-12 w-12 mx-auto mb-4 opacity-50" />
                 <p>Nenhum provedor externo disponível no momento.</p>
+              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="voice" className="mt-6 space-y-6">
+            <Card className="bg-primary/5 border-primary/20">
+              <CardContent className="flex items-start gap-4 py-4">
+                <Volume2 className="h-5 w-5 text-primary mt-0.5" />
+                <div className="text-sm">
+                  <p className="font-medium text-primary">Vozes Nativas ThothAI</p>
+                  <p className="text-muted-foreground mt-1">
+                    Use vozes de alta qualidade para <strong>Text-to-Speech (TTS)</strong> e 
+                    <strong> Speech-to-Text (STT)</strong> com créditos ThothAI. 
+                    Ideal para humanizar respostas no WhatsApp.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Filters */}
+            <div className="flex flex-wrap gap-2">
+              <div className="flex gap-1 bg-muted rounded-lg p-1">
+                <Button
+                  variant={voiceFilter === "all" ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => setVoiceFilter("all")}
+                >
+                  Todos
+                </Button>
+                <Button
+                  variant={voiceFilter === "tts" ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => setVoiceFilter("tts")}
+                >
+                  <Volume2 className="h-3 w-3 mr-1" />
+                  TTS
+                </Button>
+                <Button
+                  variant={voiceFilter === "stt" ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => setVoiceFilter("stt")}
+                >
+                  <Mic className="h-3 w-3 mr-1" />
+                  STT
+                </Button>
+              </div>
+              <div className="flex gap-1 bg-muted rounded-lg p-1">
+                <Button
+                  variant={genderFilter === "all" ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => setGenderFilter("all")}
+                >
+                  Todos
+                </Button>
+                <Button
+                  variant={genderFilter === "female" ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => setGenderFilter("female")}
+                >
+                  Feminino
+                </Button>
+                <Button
+                  variant={genderFilter === "male" ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => setGenderFilter("male")}
+                >
+                  Masculino
+                </Button>
+              </div>
+            </div>
+
+            {/* Voice Models by Tier */}
+            <div className="space-y-8">
+              {(["basic", "professional", "expert"] as const).map(tier => {
+                const config = voiceTierConfig[tier];
+                const TierIcon = config.icon;
+                const filteredVoices = voiceModels.filter(v => 
+                  v.tier === tier &&
+                  (voiceFilter === "all" || v.type === voiceFilter) &&
+                  (genderFilter === "all" || v.gender === genderFilter)
+                );
+
+                if (filteredVoices.length === 0) return null;
+
+                return (
+                  <div key={tier} className="space-y-3">
+                    <div className="flex items-center gap-2">
+                      <Badge className={`${config.color} border`}>
+                        <TierIcon className="h-3 w-3 mr-1" />
+                        {config.label}
+                      </Badge>
+                      <span className="text-sm text-muted-foreground">({config.multiplier} tokens)</span>
+                    </div>
+                    
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      {filteredVoices.map(voice => (
+                        <Card 
+                          key={voice.id} 
+                          className="overflow-hidden hover:shadow-md transition-shadow"
+                        >
+                          <CardContent className="p-4">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2">
+                                  {voice.type === "tts" ? (
+                                    <Volume2 className="h-4 w-4 text-blue-500 shrink-0" />
+                                  ) : (
+                                    <Mic className="h-4 w-4 text-green-500 shrink-0" />
+                                  )}
+                                  <p className="font-medium text-sm truncate">{voice.display_name}</p>
+                                </div>
+                                <div className="flex items-center gap-2 mt-1">
+                                  <Badge variant="outline" className="text-xs">
+                                    {voice.type.toUpperCase()}
+                                  </Badge>
+                                  {voice.gender && (
+                                    <Badge variant="outline" className="text-xs">
+                                      {voice.gender === "female" ? "♀" : voice.gender === "male" ? "♂" : "◉"}
+                                    </Badge>
+                                  )}
+                                  <span className="text-xs text-muted-foreground">{voice.language}</span>
+                                </div>
+                                {voice.description && (
+                                  <p className="text-xs text-muted-foreground mt-2 line-clamp-2">
+                                    {voice.description}
+                                  </p>
+                                )}
+                              </div>
+                              
+                              {voice.type === "tts" && voice.sample_audio_url && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="shrink-0"
+                                  onClick={() => {
+                                    if (playingVoiceId === voice.id) {
+                                      setPlayingVoiceId(null);
+                                    } else {
+                                      setPlayingVoiceId(voice.id);
+                                      // Would play audio here
+                                    }
+                                  }}
+                                >
+                                  {playingVoiceId === voice.id ? (
+                                    <Pause className="h-4 w-4" />
+                                  ) : (
+                                    <Play className="h-4 w-4" />
+                                  )}
+                                </Button>
+                              )}
+                            </div>
+                            
+                            <div className="flex items-center justify-between mt-3 pt-3 border-t">
+                              <span className="text-xs text-muted-foreground">
+                                {voice.provider_source}
+                              </span>
+                              <Badge variant="secondary" className="text-xs">
+                                {config.multiplier}
+                              </Badge>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {voiceModels.length === 0 && (
+              <div className="text-center py-12 text-muted-foreground">
+                <Mic className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                <p>Nenhum modelo de voz disponível no momento.</p>
               </div>
             )}
           </TabsContent>
