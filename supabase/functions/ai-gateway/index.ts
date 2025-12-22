@@ -71,6 +71,27 @@ const PLATFORM_PROVIDER_CONFIG: Record<string, {
       "anthropic-version": "2023-06-01",
     },
   },
+  // Fallback for legacy providers - route through OpenRouter
+  groq: {
+    url: "https://openrouter.ai/api/v1/chat/completions",
+    envKey: "OPENROUTER_API_KEY",
+    authHeader: "Authorization",
+    authPrefix: "Bearer",
+    extraHeaders: {
+      "HTTP-Referer": "https://thoth24.com",
+      "X-Title": "Thoth24 AI Platform",
+    },
+  },
+  "google-free": {
+    url: "https://openrouter.ai/api/v1/chat/completions",
+    envKey: "OPENROUTER_API_KEY",
+    authHeader: "Authorization",
+    authPrefix: "Bearer",
+    extraHeaders: {
+      "HTTP-Referer": "https://thoth24.com",
+      "X-Title": "Thoth24 AI Platform",
+    },
+  },
 };
 
 /**
