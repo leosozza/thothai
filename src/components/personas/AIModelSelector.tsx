@@ -202,12 +202,12 @@ export function AIModelSelector({
           {useNativeCredits ? (
             <>
               <Sparkles className="h-3 w-3 mr-1" />
-              IA Nativa
+              ThothAI
             </>
           ) : (
             <>
               <Key className="h-3 w-3 mr-1" />
-              API Key Própria
+              API Própria
             </>
           )}
         </Badge>
@@ -229,7 +229,7 @@ export function AIModelSelector({
             className="flex flex-col items-center justify-between rounded-md border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary cursor-pointer"
           >
             <Sparkles className="mb-2 h-5 w-5" />
-            <span className="text-sm font-medium">IA Nativa</span>
+            <span className="text-sm font-medium">ThothAI</span>
             <span className="text-xs text-muted-foreground">Usa créditos</span>
           </Label>
         </div>
@@ -247,7 +247,7 @@ export function AIModelSelector({
             }`}
           >
             <Key className="mb-2 h-5 w-5" />
-            <span className="text-sm font-medium">API Key Própria</span>
+            <span className="text-sm font-medium">API Própria</span>
             <span className="text-xs text-muted-foreground">
               {configuredProviders.length > 0 
                 ? `${configuredProviders.length} configurado(s)`
