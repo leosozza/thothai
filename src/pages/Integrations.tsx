@@ -68,6 +68,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { VoiceTestButton } from "@/components/calls/VoiceTestButton";
 
 
 interface Integration {
@@ -312,11 +313,13 @@ export default function Integrations() {
   const [activatingLineId, setActivatingLineId] = useState<number | null>(null);
 
   // Chatbot AI states
-  const [personas, setPersonas] = useState<Array<{ id: string; name: string; description: string | null }>>([]);
+  const [personas, setPersonas] = useState<Array<{ id: string; name: string; description: string | null; elevenlabs_agent_id?: string | null; is_active?: boolean }>>([]);
   const [chatbotEnabled, setChatbotEnabled] = useState(false);
   const [selectedPersonaId, setSelectedPersonaId] = useState("");
   const [savingChatbot, setSavingChatbot] = useState(false);
 
+  // Telephony personas (personas with elevenlabs_agent_id)
+  const [telephonyPersonas, setTelephonyPersonas] = useState<Array<{ id: string; name: string; elevenlabs_agent_id: string; is_active: boolean }>>([]);
   // Universal Bot states
   const [botRegistered, setBotRegistered] = useState(false);
   const [botId, setBotId] = useState<number | null>(null);
@@ -363,6 +366,7 @@ export default function Integrations() {
         fetchInstances(),
         fetchChannelMappings(),
         fetchPersonas(),
+        fetchTelephonyPersonas(),
       ]);
       if (showToast) {
         toast.success("Status atualizado!");
@@ -598,6 +602,23 @@ export default function Integrations() {
       }
     } catch (error) {
       console.error("Error fetching personas:", error);
+    }
+  };
+
+  // Fetch telephony personas (those with elevenlabs_agent_id configured)
+  const fetchTelephonyPersonas = async () => {
+    if (!workspace?.id) return;
+    try {
+      const { data, error } = await supabase
+        .from("personas")
+        .select("id, name, elevenlabs_agent_id, is_active")
+        .eq("workspace_id", workspace.id)
+        .not("elevenlabs_agent_id", "is", null);
+
+      if (error) throw error;
+      setTelephonyPersonas((data || []).filter(p => p.elevenlabs_agent_id) as Array<{ id: string; name: string; elevenlabs_agent_id: string; is_active: boolean }>);
+    } catch (error) {
+      console.error("Error fetching telephony personas:", error);
     }
   };
 
@@ -1418,6 +1439,10 @@ export default function Integrations() {
               <Cog className="h-4 w-4" />
               Automação
             </TabsTrigger>
+            <TabsTrigger value="telephony" className="gap-2">
+              <Phone className="h-4 w-4" />
+              Telefonia
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="channels" className="mt-6">
@@ -2021,6 +2046,182 @@ export default function Integrations() {
                   </Card>
                 );
               })}
+          </TabsContent>
+
+          <TabsContent value="telephony" className="mt-6 space-y-4">
+            <div className="bg-muted/50 rounded-lg p-4 mb-4">
+              <p className="text-sm text-muted-foreground">
+                Configure agentes de voz com ElevenLabs Conversational AI para atendimento telefônico automatizado.
+              </p>
+            </div>
+
+            {/* ElevenLabs Conversational AI Card */}
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="h-12 w-12 rounded-xl bg-indigo-500/10 flex items-center justify-center">
+                      <Phone className="h-6 w-6 text-indigo-500" />
+                    </div>
+                    <div>
+                      <CardTitle>ElevenLabs Conversational AI</CardTitle>
+                      <CardDescription>
+                        Agentes de voz para chamadas telefônicas automatizadas
+                      </CardDescription>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    {getIntegrationStatus("elevenlabs") ? (
+                      <Badge variant="outline" className="gap-1.5">
+                        <span className="h-2 w-2 rounded-full bg-green-500" />
+                        API Conectada
+                      </Badge>
+                    ) : (
+                      <Badge variant="secondary">API não configurada</Badge>
+                    )}
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {!getIntegrationStatus("elevenlabs") && (
+                  <Alert>
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertTitle>Configuração necessária</AlertTitle>
+                    <AlertDescription>
+                      Configure sua API Key do ElevenLabs na aba "Voz" para habilitar a telefonia.
+                    </AlertDescription>
+                  </Alert>
+                )}
+                <div className="flex gap-2">
+                  <Button variant="outline" asChild>
+                    <a href="https://elevenlabs.io/agents" target="_blank" rel="noopener noreferrer">
+                      <ExternalLink className="h-4 w-4 mr-2" />
+                      Criar Agente no ElevenLabs
+                    </a>
+                  </Button>
+                  <Button variant="ghost" asChild>
+                    <a href="https://elevenlabs.io/docs/conversational-ai" target="_blank" rel="noopener noreferrer">
+                      <ExternalLink className="h-4 w-4 mr-2" />
+                      Documentação
+                    </a>
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Configured Agents Card */}
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="h-12 w-12 rounded-xl bg-green-500/10 flex items-center justify-center">
+                      <Bot className="h-6 w-6 text-green-500" />
+                    </div>
+                    <div>
+                      <CardTitle>Agentes Configurados ({telephonyPersonas.length})</CardTitle>
+                      <CardDescription>
+                        Personas com ElevenLabs Agent ID vinculado
+                      </CardDescription>
+                    </div>
+                  </div>
+                  <Button variant="outline" size="sm" onClick={() => fetchTelephonyPersonas()}>
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    Atualizar
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {telephonyPersonas.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Phone className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                    <p className="text-sm">Nenhuma persona com telefonia configurada.</p>
+                    <p className="text-xs mt-2">
+                      Configure o ElevenLabs Agent ID nas suas personas na página de{" "}
+                      <a href="/personas" className="text-primary hover:underline">Personas</a>.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {telephonyPersonas.map((persona) => (
+                      <div
+                        key={persona.id}
+                        className="flex items-center justify-between p-4 border rounded-lg"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div className={`h-10 w-10 rounded-full flex items-center justify-center ${persona.is_active ? "bg-green-500/10" : "bg-muted"}`}>
+                            <Bot className={`h-5 w-5 ${persona.is_active ? "text-green-500" : "text-muted-foreground"}`} />
+                          </div>
+                          <div>
+                            <p className="font-medium">{persona.name}</p>
+                            <p className="text-xs text-muted-foreground font-mono">
+                              Agent: {persona.elevenlabs_agent_id.substring(0, 20)}...
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge variant={persona.is_active ? "outline" : "secondary"}>
+                            {persona.is_active ? "Ativo" : "Inativo"}
+                          </Badge>
+                          {persona.elevenlabs_agent_id && (
+                            <VoiceTestButton
+                              agentId={persona.elevenlabs_agent_id}
+                              personaName={persona.name}
+                              compact
+                            />
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Webhook Configuration Card */}
+            <Card>
+              <CardHeader>
+                <div className="flex items-center gap-4">
+                  <div className="h-12 w-12 rounded-xl bg-orange-500/10 flex items-center justify-center">
+                    <Webhook className="h-6 w-6 text-orange-500" />
+                  </div>
+                  <div>
+                    <CardTitle>Webhook de Chamadas</CardTitle>
+                    <CardDescription>
+                      Configure este webhook no painel do ElevenLabs para receber eventos de chamadas
+                    </CardDescription>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center gap-2 p-3 bg-muted rounded-lg">
+                  <code className="text-xs flex-1 break-all font-mono">
+                    {`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/elevenlabs-call-webhook`}
+                  </code>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      navigator.clipboard.writeText(
+                        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/elevenlabs-call-webhook`
+                      );
+                      toast.success("URL copiada!");
+                    }}
+                  >
+                    <Copy className="h-4 w-4" />
+                  </Button>
+                </div>
+                <div className="text-sm text-muted-foreground space-y-2">
+                  <p className="font-medium">Instruções:</p>
+                  <ol className="list-decimal list-inside space-y-1 text-xs">
+                    <li>Acesse o painel do ElevenLabs Agents</li>
+                    <li>Selecione seu agente de voz</li>
+                    <li>Vá em Settings → Webhooks</li>
+                    <li>Cole a URL acima no campo de webhook</li>
+                    <li>Ative os eventos: call.started, call.ended, transcript</li>
+                  </ol>
+                </div>
+              </CardContent>
+            </Card>
           </TabsContent>
         </Tabs>
 
