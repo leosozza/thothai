@@ -450,7 +450,7 @@ export default function AIProviders() {
         <div>
           <h1 className="text-2xl font-semibold">Provedores de IA</h1>
           <p className="text-muted-foreground mt-1">
-            Escolha entre IAs nativas (usa créditos) ou configure suas próprias API keys.
+            Escolha entre IAs nativas ThothAI (usa créditos) ou configure suas próprias API keys.
           </p>
         </div>
 
@@ -458,7 +458,7 @@ export default function AIProviders() {
           <TabsList className="grid w-full grid-cols-2 max-w-md">
             <TabsTrigger value="native" className="gap-2">
               <Sparkles className="h-4 w-4" />
-              IAs Nativas
+              ThothAI
             </TabsTrigger>
             <TabsTrigger value="own" className="gap-2">
               <Key className="h-4 w-4" />
@@ -471,10 +471,10 @@ export default function AIProviders() {
               <CardContent className="flex items-start gap-4 py-4">
                 <Coins className="h-5 w-5 text-primary mt-0.5" />
                 <div className="text-sm">
-                  <p className="font-medium text-primary">Como funcionam os créditos?</p>
+                  <p className="font-medium text-primary">Como funcionam os créditos ThothAI?</p>
                   <p className="text-muted-foreground mt-1">
-                    Modelos <strong>Basic</strong> consomem 1x tokens, <strong>Professional</strong> 2x tokens, 
-                    e <strong>Expert</strong> 5x tokens. Compre créditos para usar estes modelos.
+                    Use créditos ThothAI para acessar diversos modelos de IA. Modelos <strong>Basic</strong> consomem 1x tokens, 
+                    <strong> Professional</strong> 2x tokens, e <strong>Expert</strong> 5x tokens.
                   </p>
                 </div>
               </CardContent>

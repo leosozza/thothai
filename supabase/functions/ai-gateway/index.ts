@@ -32,6 +32,47 @@ interface NativeModelConfig {
   provider_source: string;
 }
 
+// Configuration for platform-managed providers (ThothAI native models)
+const PLATFORM_PROVIDER_CONFIG: Record<string, {
+  url: string;
+  envKey: string;
+  authHeader: string;
+  authPrefix: string;
+  extraHeaders?: Record<string, string>;
+}> = {
+  openrouter: {
+    url: "https://openrouter.ai/api/v1/chat/completions",
+    envKey: "OPENROUTER_API_KEY",
+    authHeader: "Authorization",
+    authPrefix: "Bearer",
+    extraHeaders: {
+      "HTTP-Referer": "https://thoth24.com",
+      "X-Title": "Thoth24 AI Platform",
+    },
+  },
+  lovable: {
+    url: "https://ai.gateway.lovable.dev/v1/chat/completions",
+    envKey: "LOVABLE_API_KEY",
+    authHeader: "Authorization",
+    authPrefix: "Bearer",
+  },
+  deepseek: {
+    url: "https://api.deepseek.com/v1/chat/completions",
+    envKey: "DEEPSEEK_API_KEY",
+    authHeader: "Authorization",
+    authPrefix: "Bearer",
+  },
+  anthropic: {
+    url: "https://api.anthropic.com/v1/messages",
+    envKey: "ANTHROPIC_API_KEY",
+    authHeader: "x-api-key",
+    authPrefix: "",
+    extraHeaders: {
+      "anthropic-version": "2023-06-01",
+    },
+  },
+};
+
 /**
  * Format messages for Anthropic API (different format)
  */
@@ -52,32 +93,50 @@ function formatForAnthropic(messages: Array<{ role: string; content: string }>) 
  * Call AI provider with appropriate formatting
  */
 async function callProvider(
-  provider: ProviderConfig,
+  providerSource: string,
   apiKey: string,
   messages: Array<{ role: string; content: string }>,
   model: string,
   temperature: number,
-  maxTokens: number
+  maxTokens: number,
+  customProvider?: ProviderConfig
 ): Promise<{ content: string; usage: any }> {
   
-  const headers: Record<string, string> = {
+  const platformConfig = PLATFORM_PROVIDER_CONFIG[providerSource];
+  const isAnthropic = providerSource === "anthropic" || customProvider?.slug === "anthropic";
+  
+  let url: string;
+  let headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
-  
-  // Set auth header based on provider config
-  if (provider.auth_prefix) {
-    headers[provider.auth_header] = `${provider.auth_prefix} ${apiKey}`;
+
+  // Use platform config or custom provider config
+  if (platformConfig && !customProvider) {
+    url = platformConfig.url;
+    if (platformConfig.authPrefix) {
+      headers[platformConfig.authHeader] = `${platformConfig.authPrefix} ${apiKey}`;
+    } else {
+      headers[platformConfig.authHeader] = apiKey;
+    }
+    if (platformConfig.extraHeaders) {
+      headers = { ...headers, ...platformConfig.extraHeaders };
+    }
+  } else if (customProvider) {
+    url = customProvider.base_url;
+    if (customProvider.auth_prefix) {
+      headers[customProvider.auth_header] = `${customProvider.auth_prefix} ${apiKey}`;
+    } else {
+      headers[customProvider.auth_header] = apiKey;
+    }
   } else {
-    headers[provider.auth_header] = apiKey;
+    throw new Error(`Unknown provider source: ${providerSource}`);
   }
 
   let body: any;
-  let url = provider.base_url;
 
   // Special handling for Anthropic (different API format)
-  if (provider.slug === "anthropic") {
+  if (isAnthropic) {
     const formatted = formatForAnthropic(messages);
-    headers["anthropic-version"] = "2023-06-01";
     body = {
       model,
       system: formatted.system,
@@ -85,20 +144,8 @@ async function callProvider(
       max_tokens: maxTokens,
       temperature,
     };
-  } 
-  // Google AI (uses key as query param)
-  else if (provider.slug === "google") {
-    url = `${provider.base_url}?key=${apiKey}`;
-    delete headers[provider.auth_header];
-    body = {
-      model,
-      messages,
-      max_tokens: maxTokens,
-      temperature,
-    };
-  }
-  // Standard OpenAI-compatible format
-  else {
+  } else {
+    // Standard OpenAI-compatible format (OpenRouter, Lovable, DeepSeek)
     body = {
       model,
       messages,
@@ -107,7 +154,7 @@ async function callProvider(
     };
   }
 
-  console.log(`[ai-gateway] Calling ${provider.name} with model ${model}`);
+  console.log(`[ai-gateway] Calling ${providerSource} with model ${model} at ${url}`);
   
   const response = await fetch(url, {
     method: "POST",
@@ -117,8 +164,8 @@ async function callProvider(
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error(`[ai-gateway] ${provider.name} error:`, response.status, errorText);
-    throw new Error(`${provider.name} API error: ${response.status} - ${errorText}`);
+    console.error(`[ai-gateway] ${providerSource} error:`, response.status, errorText);
+    throw new Error(`${providerSource} API error: ${response.status} - ${errorText}`);
   }
 
   const data = await response.json();
@@ -127,7 +174,7 @@ async function callProvider(
   let content: string;
   let usage: any = {};
 
-  if (provider.slug === "anthropic") {
+  if (isAnthropic) {
     content = data.content?.[0]?.text || "";
     usage = {
       prompt_tokens: data.usage?.input_tokens || 0,
@@ -175,6 +222,7 @@ serve(async (req) => {
     let useNativeCredits = true;
     let systemPrompt: string | null = null;
     let personaTemperature = temperature;
+    let providerSource = "lovable"; // Default to Lovable
 
     if (persona_id) {
       const { data: persona } = await supabase
@@ -207,7 +255,7 @@ serve(async (req) => {
 
     console.log(`[ai-gateway] Provider: ${providerSlug}, Model: ${model}, UseNative: ${useNativeCredits}`);
 
-    // Get native model config for token cost calculation
+    // Get native model config for token cost calculation and provider routing
     let nativeModelConfig: NativeModelConfig | null = null;
     if (useNativeCredits) {
       const { data: nativeModel } = await supabase
@@ -219,43 +267,57 @@ serve(async (req) => {
       
       if (nativeModel) {
         nativeModelConfig = nativeModel as NativeModelConfig;
-        console.log(`[ai-gateway] Native model: ${nativeModel.name}, tier: ${nativeModel.tier}, multiplier: ${nativeModel.token_cost_multiplier}`);
+        providerSource = nativeModel.provider_source;
+        console.log(`[ai-gateway] Native model: ${nativeModel.name}, tier: ${nativeModel.tier}, provider_source: ${providerSource}, multiplier: ${nativeModel.token_cost_multiplier}`);
       }
-    }
-
-    // Get provider configuration
-    const { data: provider, error: providerError } = await supabase
-      .from("ai_providers")
-      .select("*")
-      .eq("slug", providerSlug)
-      .eq("is_active", true)
-      .single();
-
-    if (providerError || !provider) {
-      throw new Error(`Provider '${providerSlug}' not found or inactive`);
     }
 
     let apiKey: string;
-    let providerConfig: ProviderConfig = {
-      base_url: provider.base_url,
-      auth_header: provider.auth_header || "Authorization",
-      auth_prefix: provider.auth_prefix || "Bearer",
-      slug: provider.slug,
-      name: provider.name,
-    };
+    let customProviderConfig: ProviderConfig | undefined;
 
-    // If using native (Lovable AI) or native credits
-    if (provider.is_native || useNativeCredits) {
-      apiKey = Deno.env.get("LOVABLE_API_KEY")!;
-      if (!apiKey) {
-        throw new Error("LOVABLE_API_KEY is not configured");
+    // Route based on native credits vs custom API key
+    if (useNativeCredits) {
+      // Using ThothAI native credits - get platform API key based on provider_source
+      const platformConfig = PLATFORM_PROVIDER_CONFIG[providerSource];
+      
+      if (!platformConfig) {
+        console.warn(`[ai-gateway] Unknown provider_source: ${providerSource}, falling back to lovable`);
+        providerSource = "lovable";
       }
-      console.log("[ai-gateway] Using Lovable AI native credits");
+      
+      const finalConfig = PLATFORM_PROVIDER_CONFIG[providerSource];
+      apiKey = Deno.env.get(finalConfig.envKey)!;
+      
+      if (!apiKey) {
+        throw new Error(`Platform API key ${finalConfig.envKey} is not configured`);
+      }
+      
+      console.log(`[ai-gateway] Using ThothAI native credits via ${providerSource}`);
     } else {
-      // Get workspace credentials
+      // Using workspace's own API key
       if (!workspace_id) {
         throw new Error("workspace_id is required when using custom API keys");
       }
+
+      // Get provider configuration
+      const { data: provider, error: providerError } = await supabase
+        .from("ai_providers")
+        .select("*")
+        .eq("slug", providerSlug)
+        .eq("is_active", true)
+        .single();
+
+      if (providerError || !provider) {
+        throw new Error(`Provider '${providerSlug}' not found or inactive`);
+      }
+
+      customProviderConfig = {
+        base_url: provider.base_url,
+        auth_header: provider.auth_header || "Authorization",
+        auth_prefix: provider.auth_prefix || "Bearer",
+        slug: provider.slug,
+        name: provider.name,
+      };
 
       const { data: credentials, error: credError } = await supabase
         .from("workspace_ai_credentials")
@@ -270,6 +332,7 @@ serve(async (req) => {
       }
 
       apiKey = credentials.api_key_encrypted; // In production, decrypt this
+      providerSource = provider.slug;
       console.log(`[ai-gateway] Using workspace API key for ${provider.name}`);
 
       // Update last_used_at
@@ -282,12 +345,13 @@ serve(async (req) => {
 
     // Call the AI provider
     const { content, usage } = await callProvider(
-      providerConfig,
+      providerSource,
       apiKey,
       finalMessages,
       model,
       personaTemperature,
-      max_tokens
+      max_tokens,
+      customProviderConfig
     );
 
     const responseTime = Date.now() - startTime;
@@ -305,7 +369,7 @@ serve(async (req) => {
         amount: -tokensToDebit,
         transaction_type: "usage",
         description: `AI: ${model} (${nativeModelConfig?.tier || 'professional'})`,
-        ai_provider: providerSlug,
+        ai_provider: providerSource,
         ai_model: model,
         tokens_used: usage.total_tokens,
       });
@@ -337,7 +401,7 @@ serve(async (req) => {
     return new Response(JSON.stringify({
       success: true,
       content,
-      provider: providerSlug,
+      provider: providerSource,
       model,
       metrics: {
         response_time_ms: responseTime,
