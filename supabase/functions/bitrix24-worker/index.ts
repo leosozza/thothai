@@ -625,29 +625,64 @@ async function processBotMessage(
   console.log("Payload:", JSON.stringify(payload, null, 2));
   
   const data = payload.data || payload;
-  const botId = data.BOT_ID || data.bot_id;
-  const dialogId = data.DIALOG_ID || data.dialog_id;
-  const userId = data.USER_ID || data.user_id;
-  const messageText = data.MESSAGE || data.message || "";
-  const messageId = data.MESSAGE_ID || data.message_id;
+  // FIXED: Message data is in PARAMS, not directly in data
+  const params = data.PARAMS || data.params || {};
   
-  console.log("Bot message details:", { botId, dialogId, userId, messageText: messageText.substring(0, 50), messageId });
+  // BOT is an array with bot at the corresponding bot_id index
+  const botArray = data.BOT || [];
+  const botData = botArray.find((b: any) => b !== null) || {};
+  const botId = botData.BOT_ID || params.BOT_ID || params.bot_id;
+  
+  const dialogId = params.DIALOG_ID || params.dialog_id;
+  const userId = params.FROM_USER_ID || params.USER_ID || params.user_id;
+  const messageText = params.MESSAGE || params.message || "";
+  const messageId = params.MESSAGE_ID || params.message_id;
+  const chatType = params.CHAT_TYPE || params.chat_type;
+  const chatEntityType = params.CHAT_ENTITY_TYPE || params.chat_entity_type;
+  
+  console.log("Bot message details:", { 
+    botId, 
+    dialogId, 
+    userId, 
+    messageText: messageText.substring(0, 50), 
+    messageId,
+    chatType,
+    chatEntityType
+  });
   
   if (!messageText) {
     console.log("Empty message, skipping");
     return;
   }
   
-  // Find integration by bot_id
-  const { data: integration, error: integrationError } = await supabase
-    .from("integrations")
-    .select("*")
-    .eq("type", "bitrix24")
-    .eq("is_active", true)
-    .eq("config->>bot_id", botId?.toString())
-    .maybeSingle();
+  // Find persona by bitrix_bot_id first (each persona is a separate bot)
+  let integration = null;
   
-  if (integrationError || !integration) {
+  if (botId) {
+    // First find persona by bot_id
+    const { data: persona } = await supabase
+      .from("personas")
+      .select("*, workspace_id")
+      .eq("bitrix_bot_id", parseInt(botId))
+      .maybeSingle();
+    
+    if (persona) {
+      console.log("Found persona by bot_id:", persona.name);
+      
+      // Get integration for this workspace
+      const { data: integrationData } = await supabase
+        .from("integrations")
+        .select("*")
+        .eq("type", "bitrix24")
+        .eq("workspace_id", persona.workspace_id)
+        .eq("is_active", true)
+        .maybeSingle();
+      
+      integration = integrationData;
+    }
+  }
+  
+  if (!integration) {
     // Fallback: find any active integration with bot_enabled
     const { data: fallbackIntegration } = await supabase
       .from("integrations")
@@ -662,12 +697,11 @@ async function processBotMessage(
       return;
     }
     
-    // Use fallback
-    await processInternalBotMessage(fallbackIntegration, data, supabase, supabaseUrl, supabaseServiceKey);
-    return;
+    integration = fallbackIntegration;
   }
   
-  await processInternalBotMessage(integration, data, supabase, supabaseUrl, supabaseServiceKey);
+  // Pass both data and params to the processor
+  await processInternalBotMessage(integration, { ...data, PARAMS: params, extractedBotId: botId }, supabase, supabaseUrl, supabaseServiceKey);
 }
 
 /**
@@ -681,13 +715,41 @@ async function processInternalBotMessage(
   supabaseServiceKey: string
 ) {
   const config = integration.config || {};
-  const botId = data.BOT_ID || data.bot_id || config.bot_id;
-  const dialogId = data.DIALOG_ID || data.dialog_id;
-  const userId = data.USER_ID || data.user_id;
-  const messageText = data.MESSAGE || data.message || "";
-  const userType = data.USER_TYPE || data.user_type; // "openline" for external users
   
-  console.log("Processing internal bot message:", { botId, dialogId, userId, userType });
+  // FIXED: Extract from PARAMS which contains the actual message data
+  const params = data.PARAMS || data.params || data;
+  
+  const botId = data.extractedBotId || params.BOT_ID || params.bot_id || config.bot_id;
+  const dialogId = params.DIALOG_ID || params.dialog_id;
+  const userId = params.FROM_USER_ID || params.USER_ID || params.user_id;
+  const messageText = params.MESSAGE || params.message || "";
+  const chatType = params.CHAT_TYPE || params.chat_type; // "L" for lines/openlines
+  const chatEntityType = params.CHAT_ENTITY_TYPE || params.chat_entity_type; // "LINES" for openlines
+  const chatEntityId = params.CHAT_ENTITY_ID || params.chat_entity_id; // e.g. "thoth_whatsapp|2|wa_553584534924|38"
+  
+  // Extract user info if available
+  const userData = data.USER || {};
+  const userName = userData.NAME || userData.FIRST_NAME || `User ${userId}`;
+  const isConnector = userData.IS_CONNECTOR === "Y";
+  const isExtranet = userData.IS_EXTRANET === "Y";
+  
+  console.log("Processing internal bot message:", { 
+    botId, 
+    dialogId, 
+    userId, 
+    userName,
+    messageText: messageText.substring(0, 50),
+    chatType,
+    chatEntityType,
+    chatEntityId,
+    isConnector,
+    isExtranet
+  });
+  
+  if (!messageText) {
+    console.log("Empty message text, skipping");
+    return;
+  }
   
   // NEW: Find persona by bitrix_bot_id (each persona is a separate bot)
   let persona = null;
@@ -744,7 +806,7 @@ async function processInternalBotMessage(
   
   // Get or create contact and conversation for bot interactions
   // Use dialogId as unique identifier for the chat
-  const contactIdentifier = `bitrix_${userType || "user"}_${userId}`;
+  const contactIdentifier = `bitrix_${chatEntityType || "user"}_${userId}`;
   
   // Get first instance for this workspace (for bot conversations)
   const { data: instance } = await supabase
@@ -773,18 +835,23 @@ async function processInternalBotMessage(
     
     if (existingContact) {
       contact = existingContact;
+      console.log("Found existing contact:", contact.id, contact.name);
     } else {
-      // Create new contact
+      // Create new contact with user name from Bitrix24
       const { data: newContact, error: contactError } = await supabase
         .from("contacts")
         .insert({
           instance_id: instance.id,
           phone_number: contactIdentifier,
-          name: `Bitrix ${userType || "User"} ${userId}`,
+          name: userName,
+          push_name: userName,
           metadata: {
             bitrix24_user_id: userId,
             bitrix24_dialog_id: dialogId,
-            channel_type: userType || "internal",
+            bitrix24_chat_entity_id: chatEntityId,
+            channel_type: chatEntityType || "internal",
+            is_connector: isConnector,
+            is_extranet: isExtranet,
             source: "bitrix24_bot"
           }
         })
@@ -793,7 +860,9 @@ async function processInternalBotMessage(
       
       if (!contactError && newContact) {
         contact = newContact;
-        console.log("Created new contact:", contact.id);
+        console.log("Created new contact:", contact.id, contact.name);
+      } else if (contactError) {
+        console.error("Error creating contact:", contactError);
       }
     }
     
