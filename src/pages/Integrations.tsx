@@ -1531,6 +1531,111 @@ export default function Integrations() {
                         Renovar Token
                       </Button>
                     </div>
+
+                    {/* Bot IA para Contact Center */}
+                    <div className="border-t pt-4 mt-4">
+                      <div className="flex items-center justify-between mb-3">
+                        <div className="flex items-center gap-2">
+                          <Bot className="h-5 w-5 text-primary" />
+                          <span className="font-medium">Bot IA para Contact Center</span>
+                        </div>
+                        {botRegistered ? (
+                          <Badge variant="outline" className="text-xs">
+                            <CheckCircle2 className="h-3 w-3 mr-1 text-green-500" />
+                            ID: {botId}
+                          </Badge>
+                        ) : (
+                          <Badge variant="secondary" className="text-xs">Não registrado</Badge>
+                        )}
+                      </div>
+                      
+                      {!botRegistered ? (
+                        <div className="space-y-3">
+                          <p className="text-sm text-muted-foreground">
+                            Registre o bot para que ele apareça na lista de chatbots do Bitrix24 Contact Center.
+                          </p>
+                          <Button 
+                            onClick={handleRegisterBot} 
+                            disabled={registeringBot}
+                            className="w-full sm:w-auto"
+                          >
+                            {registeringBot ? (
+                              <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                            ) : (
+                              <Bot className="h-4 w-4 mr-2" />
+                            )}
+                            Registrar Bot Thoth AI
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="space-y-4">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <Label>Ativar respostas automáticas</Label>
+                              <p className="text-xs text-muted-foreground">
+                                O bot responderá automaticamente às mensagens
+                              </p>
+                            </div>
+                            <Switch 
+                              checked={botEnabled} 
+                              onCheckedChange={setBotEnabled} 
+                            />
+                          </div>
+                          
+                          <div className="space-y-2">
+                            <Label>Persona do Bot</Label>
+                            <Select value={botPersonaId} onValueChange={setBotPersonaId}>
+                              <SelectTrigger>
+                                <SelectValue placeholder="Selecione uma persona" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {personas.map((persona) => (
+                                  <SelectItem key={persona.id} value={persona.id}>
+                                    {persona.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          
+                          <div className="space-y-2">
+                            <Label>Mensagem de Boas-vindas (opcional)</Label>
+                            <Textarea 
+                              value={botWelcomeMessage}
+                              onChange={(e) => setBotWelcomeMessage(e.target.value)}
+                              placeholder="Olá! Sou o assistente virtual. Como posso ajudar?"
+                              rows={2}
+                            />
+                          </div>
+                          
+                          <div className="flex gap-2">
+                            <Button 
+                              onClick={handleSaveBotConfig} 
+                              disabled={savingBotConfig}
+                            >
+                              {savingBotConfig ? (
+                                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                              ) : (
+                                <CheckCircle2 className="h-4 w-4 mr-2" />
+                              )}
+                              Salvar Configurações
+                            </Button>
+                            <Button 
+                              variant="outline"
+                              onClick={handleUnregisterBot}
+                              disabled={unregisteringBot}
+                            >
+                              {unregisteringBot ? (
+                                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                              ) : (
+                                <Trash2 className="h-4 w-4 mr-2" />
+                              )}
+                              Remover Bot
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 ) : (
                   /* Not Connected - Setup Instructions */
