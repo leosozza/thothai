@@ -291,6 +291,134 @@ export type Database = {
           },
         ]
       }
+      call_events: {
+        Row: {
+          call_id: string
+          content: string | null
+          event_type: string
+          id: string
+          metadata: Json | null
+          role: string | null
+          timestamp: string
+        }
+        Insert: {
+          call_id: string
+          content?: string | null
+          event_type: string
+          id?: string
+          metadata?: Json | null
+          role?: string | null
+          timestamp?: string
+        }
+        Update: {
+          call_id?: string
+          content?: string | null
+          event_type?: string
+          id?: string
+          metadata?: Json | null
+          role?: string | null
+          timestamp?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "call_events_call_id_fkey"
+            columns: ["call_id"]
+            isOneToOne: false
+            referencedRelation: "calls"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      calls: {
+        Row: {
+          bitrix_activity_id: string | null
+          caller_name: string | null
+          created_at: string
+          direction: string
+          duration_seconds: number | null
+          elevenlabs_agent_id: string | null
+          elevenlabs_conversation_id: string | null
+          ended_at: string | null
+          human_takeover: boolean | null
+          human_takeover_at: string | null
+          human_takeover_by: string | null
+          id: string
+          metadata: Json | null
+          persona_id: string | null
+          phone_number: string | null
+          sentiment: string | null
+          started_at: string
+          status: string
+          summary: string | null
+          transcript: string | null
+          updated_at: string
+          workspace_id: string
+        }
+        Insert: {
+          bitrix_activity_id?: string | null
+          caller_name?: string | null
+          created_at?: string
+          direction?: string
+          duration_seconds?: number | null
+          elevenlabs_agent_id?: string | null
+          elevenlabs_conversation_id?: string | null
+          ended_at?: string | null
+          human_takeover?: boolean | null
+          human_takeover_at?: string | null
+          human_takeover_by?: string | null
+          id?: string
+          metadata?: Json | null
+          persona_id?: string | null
+          phone_number?: string | null
+          sentiment?: string | null
+          started_at?: string
+          status?: string
+          summary?: string | null
+          transcript?: string | null
+          updated_at?: string
+          workspace_id: string
+        }
+        Update: {
+          bitrix_activity_id?: string | null
+          caller_name?: string | null
+          created_at?: string
+          direction?: string
+          duration_seconds?: number | null
+          elevenlabs_agent_id?: string | null
+          elevenlabs_conversation_id?: string | null
+          ended_at?: string | null
+          human_takeover?: boolean | null
+          human_takeover_at?: string | null
+          human_takeover_by?: string | null
+          id?: string
+          metadata?: Json | null
+          persona_id?: string | null
+          phone_number?: string | null
+          sentiment?: string | null
+          started_at?: string
+          status?: string
+          summary?: string | null
+          transcript?: string | null
+          updated_at?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "calls_persona_id_fkey"
+            columns: ["persona_id"]
+            isOneToOne: false
+            referencedRelation: "personas"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "calls_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       contacts: {
         Row: {
           created_at: string

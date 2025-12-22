@@ -50,6 +50,7 @@ import {
   Sparkles,
   Stethoscope,
   TestTube2,
+  PhoneCall,
 } from "lucide-react";
 
 const mainNavItems = [
@@ -62,6 +63,11 @@ const mainNavItems = [
     title: "Conversas",
     url: "/conversations",
     icon: MessageSquare,
+  },
+  {
+    title: "Chamadas",
+    url: "/calls",
+    icon: PhoneCall,
   },
   {
     title: "Instâncias",

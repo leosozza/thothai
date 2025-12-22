@@ -89,3 +89,6 @@ verify_jwt = true
 
 [functions.process-document]
 verify_jwt = true
+
+[functions.elevenlabs-call-webhook]
+verify_jwt = false
