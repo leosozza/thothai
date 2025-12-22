@@ -25,6 +25,7 @@ export type Database = {
           id: string
           is_active: boolean | null
           is_native: boolean | null
+          is_public: boolean | null
           key_generation_guide: string | null
           logo_url: string | null
           name: string
@@ -43,6 +44,7 @@ export type Database = {
           id?: string
           is_active?: boolean | null
           is_native?: boolean | null
+          is_public?: boolean | null
           key_generation_guide?: string | null
           logo_url?: string | null
           name: string
@@ -61,6 +63,7 @@ export type Database = {
           id?: string
           is_active?: boolean | null
           is_native?: boolean | null
+          is_public?: boolean | null
           key_generation_guide?: string | null
           logo_url?: string | null
           name?: string
