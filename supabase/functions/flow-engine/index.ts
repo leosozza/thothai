@@ -55,7 +55,8 @@ serve(async (req) => {
       contact_id, 
       content, 
       workspace_id,
-      is_first_message = false 
+      is_first_message = false,
+      original_message_type = "text"
     } = await req.json();
 
     console.log("Flow Engine called:", { message_id, content, is_first_message, workspace_id });
@@ -79,7 +80,7 @@ serve(async (req) => {
     if (!flows || flows.length === 0) {
       console.log("No active flows found, falling back to AI");
       return await callAIProcessor(supabaseUrl, supabaseKey, {
-        message_id, conversation_id, instance_id, contact_id, content, workspace_id
+        message_id, conversation_id, instance_id, contact_id, content, workspace_id, original_message_type
       });
     }
 

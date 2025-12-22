@@ -73,9 +73,9 @@ serve(async (req) => {
   }
 
   try {
-    const { message_id, conversation_id, instance_id, contact_id, content, workspace_id } = await req.json();
+    const { message_id, conversation_id, instance_id, contact_id, content, workspace_id, original_message_type = "text" } = await req.json();
     
-    console.log("AI Process Message called:", { message_id, conversation_id, instance_id, content });
+    console.log("AI Process Message called:", { message_id, conversation_id, instance_id, content, original_message_type });
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
@@ -90,6 +90,8 @@ serve(async (req) => {
     let systemPrompt = "Você é um assistente prestativo e profissional. Responda de forma clara e objetiva.";
     let personaName = "Assistente";
     let temperature = 0.7;
+    let voiceId: string | null = null;
+    let voiceEnabled = false;
 
     if (workspace_id) {
       const { data: persona } = await supabase
@@ -103,7 +105,9 @@ serve(async (req) => {
         systemPrompt = persona.system_prompt || systemPrompt;
         personaName = persona.name || personaName;
         temperature = persona.temperature || temperature;
-        console.log("Using persona:", personaName);
+        voiceId = persona.voice_id || null;
+        voiceEnabled = persona.voice_enabled || false;
+        console.log("Using persona:", personaName, "voice_enabled:", voiceEnabled, "voice_id:", voiceId);
       }
     }
 
@@ -207,22 +211,66 @@ serve(async (req) => {
       throw new Error("Contact not found");
     }
 
-    // Send message via WhatsApp
+    // Determine if we should respond with audio
+    const shouldRespondWithAudio = original_message_type === "audio" && voiceEnabled;
+    console.log("Should respond with audio:", shouldRespondWithAudio, "original_type:", original_message_type, "voice_enabled:", voiceEnabled);
+
+    let audioBase64: string | null = null;
+
+    if (shouldRespondWithAudio) {
+      // Generate audio response using ElevenLabs TTS
+      try {
+        console.log("Generating audio response via ElevenLabs TTS...");
+        const ttsResponse = await fetch(`${supabaseUrl}/functions/v1/elevenlabs-tts`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${supabaseKey}`,
+          },
+          body: JSON.stringify({
+            text: aiContent,
+            voice: voiceId || "jessica", // Use persona's voice or default
+          }),
+        });
+
+        if (ttsResponse.ok) {
+          const ttsResult = await ttsResponse.json();
+          audioBase64 = ttsResult.audio_base64;
+          console.log("TTS audio generated successfully, size:", audioBase64?.length || 0);
+        } else {
+          const ttsError = await ttsResponse.text();
+          console.error("TTS failed, falling back to text:", ttsError);
+        }
+      } catch (ttsErr) {
+        console.error("TTS error, falling back to text:", ttsErr);
+      }
+    }
+
+    // Send message via WhatsApp (audio or text)
+    const sendPayload: Record<string, unknown> = {
+      instance_id,
+      phone_number: contact.phone_number,
+      conversation_id,
+      contact_id,
+      workspace_id,
+      internal_call: true,
+    };
+
+    if (audioBase64) {
+      sendPayload.message_type = "audio";
+      sendPayload.audio_base64 = audioBase64;
+      sendPayload.message = aiContent; // Keep text for fallback/storage
+    } else {
+      sendPayload.message = aiContent;
+    }
+
     const sendResponse = await fetch(`${supabaseUrl}/functions/v1/wapi-send-message`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${supabaseKey}`,
       },
-      body: JSON.stringify({
-        instance_id,
-        phone_number: contact.phone_number,
-        message: aiContent,
-        conversation_id,
-        contact_id,
-        workspace_id, // Pass workspace_id to bypass auth check
-        internal_call: true, // Flag for internal edge function calls
-      }),
+      body: JSON.stringify(sendPayload),
     });
 
     if (!sendResponse.ok) {
@@ -231,12 +279,13 @@ serve(async (req) => {
       throw new Error("Failed to send WhatsApp message");
     }
 
-    console.log("AI message sent successfully");
+    console.log("AI message sent successfully", audioBase64 ? "(audio)" : "(text)");
 
     return new Response(JSON.stringify({ 
       success: true, 
       response: aiContent,
-      persona: personaName 
+      persona: personaName,
+      sent_as_audio: !!audioBase64
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
