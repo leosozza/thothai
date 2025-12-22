@@ -25,6 +25,13 @@ interface ProviderConfig {
   name: string;
 }
 
+interface NativeModelConfig {
+  name: string;
+  tier: string;
+  token_cost_multiplier: number;
+  provider_source: string;
+}
+
 /**
  * Format messages for Anthropic API (different format)
  */
@@ -200,6 +207,22 @@ serve(async (req) => {
 
     console.log(`[ai-gateway] Provider: ${providerSlug}, Model: ${model}, UseNative: ${useNativeCredits}`);
 
+    // Get native model config for token cost calculation
+    let nativeModelConfig: NativeModelConfig | null = null;
+    if (useNativeCredits) {
+      const { data: nativeModel } = await supabase
+        .from("native_ai_models")
+        .select("name, tier, token_cost_multiplier, provider_source")
+        .eq("name", model)
+        .eq("is_active", true)
+        .single();
+      
+      if (nativeModel) {
+        nativeModelConfig = nativeModel as NativeModelConfig;
+        console.log(`[ai-gateway] Native model: ${nativeModel.name}, tier: ${nativeModel.tier}, multiplier: ${nativeModel.token_cost_multiplier}`);
+      }
+    }
+
     // Get provider configuration
     const { data: provider, error: providerError } = await supabase
       .from("ai_providers")
@@ -222,7 +245,7 @@ serve(async (req) => {
     };
 
     // If using native (Lovable AI) or native credits
-    if (provider.is_native || (useNativeCredits && providerSlug === "lovable")) {
+    if (provider.is_native || useNativeCredits) {
       apiKey = Deno.env.get("LOVABLE_API_KEY")!;
       if (!apiKey) {
         throw new Error("LOVABLE_API_KEY is not configured");
@@ -269,19 +292,44 @@ serve(async (req) => {
 
     const responseTime = Date.now() - startTime;
 
-    // Log usage for credit tracking (future)
-    if (workspace_id && usage.total_tokens) {
-      console.log(`[ai-gateway] Tokens used: ${usage.total_tokens} for workspace ${workspace_id}`);
+    // Calculate and record credit usage for native models
+    if (workspace_id && useNativeCredits && usage.total_tokens) {
+      const multiplier = nativeModelConfig?.token_cost_multiplier || 2.0; // default to professional
+      const tokensToDebit = Math.ceil(usage.total_tokens * multiplier);
       
-      // Future: Record credit transaction
-      // await supabase.from("credit_transactions").insert({
-      //   workspace_id,
-      //   amount: -calculateCost(usage.total_tokens, model),
-      //   transaction_type: "usage",
-      //   ai_provider: providerSlug,
-      //   ai_model: model,
-      //   tokens_used: usage.total_tokens,
-      // });
+      console.log(`[ai-gateway] Tokens used: ${usage.total_tokens}, multiplier: ${multiplier}, debiting: ${tokensToDebit}`);
+      
+      // Record credit transaction
+      const { error: txError } = await supabase.from("credit_transactions").insert({
+        workspace_id,
+        amount: -tokensToDebit,
+        transaction_type: "usage",
+        description: `AI: ${model} (${nativeModelConfig?.tier || 'professional'})`,
+        ai_provider: providerSlug,
+        ai_model: model,
+        tokens_used: usage.total_tokens,
+      });
+
+      if (txError) {
+        console.error("[ai-gateway] Error recording credit transaction:", txError);
+      }
+
+      // Update workspace credits balance
+      const { data: currentCredits } = await supabase
+        .from("workspace_credits")
+        .select("balance")
+        .eq("workspace_id", workspace_id)
+        .single();
+
+      if (currentCredits) {
+        await supabase
+          .from("workspace_credits")
+          .update({ 
+            balance: (currentCredits.balance || 0) - tokensToDebit,
+            updated_at: new Date().toISOString()
+          })
+          .eq("workspace_id", workspace_id);
+      }
     }
 
     console.log(`[ai-gateway] Response in ${responseTime}ms, tokens: ${usage.total_tokens || 0}`);
@@ -296,6 +344,7 @@ serve(async (req) => {
         prompt_tokens: usage.prompt_tokens || 0,
         completion_tokens: usage.completion_tokens || 0,
         total_tokens: usage.total_tokens || 0,
+        tokens_debited: useNativeCredits ? Math.ceil((usage.total_tokens || 0) * (nativeModelConfig?.token_cost_multiplier || 2.0)) : 0,
       },
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
