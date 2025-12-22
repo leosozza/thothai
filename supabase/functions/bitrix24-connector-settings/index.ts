@@ -599,23 +599,44 @@ serve(async (req) => {
       
       if (accessToken && apiUrl) {
         try {
-          // 1. REGISTER the connector
+          // 1. FETCH ICON AND CONVERT TO BASE64
+          logger.info("Fetching connector icon and converting to base64...");
+          let iconBase64 = "";
+          try {
+            const iconUrl = `${supabaseUrl}/storage/v1/object/public/assets/thoth-whatsapp-icon.png`;
+            const iconResponse = await fetch(iconUrl);
+            if (iconResponse.ok) {
+              const iconBuffer = await iconResponse.arrayBuffer();
+              const iconBytes = new Uint8Array(iconBuffer);
+              let binary = "";
+              for (let i = 0; i < iconBytes.length; i++) {
+                binary += String.fromCharCode(iconBytes[i]);
+              }
+              iconBase64 = `data:image/png;base64,${btoa(binary)}`;
+              logger.info("Icon converted to base64 successfully", { base64_length: iconBase64.length });
+            } else {
+              logger.warn("Failed to fetch icon", { status: iconResponse.status });
+            }
+          } catch (iconError) {
+            logger.warn("Error fetching icon", { error: iconError instanceof Error ? iconError.message : "Unknown" });
+          }
+          
+          // 2. REGISTER the connector with base64 icon
           logger.info("Registering connector in Bitrix24...");
-          const iconUrl = `${supabaseUrl}/storage/v1/object/public/assets/thoth-whatsapp-icon.png`;
           const registerResult = await fetch(`${apiUrl}imconnector.register?auth=${accessToken}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               ID: connectorId,
               NAME: "Thoth WhatsApp",
-              ICON: { DATA_IMAGE: iconUrl },
+              ICON: iconBase64 ? { DATA_IMAGE: iconBase64 } : undefined,
               PLACEMENT_HANDLER: `${supabaseUrl}/functions/v1/bitrix24-connector-settings`,
             }),
           });
           const registerData = await registerResult.json();
           logger.apiResponse(`${apiUrl}imconnector.register`, registerResult.status, registerData);
           
-          // 2. ACTIVATE the connector
+          // 3. ACTIVATE the connector
           logger.info("Activating connector...");
           const activateResult = await fetch(`${apiUrl}imconnector.activate?auth=${accessToken}`, {
             method: "POST",
@@ -629,7 +650,7 @@ serve(async (req) => {
           const activateData = await activateResult.json();
           logger.apiResponse(`${apiUrl}imconnector.activate`, activateResult.status, activateData);
           
-          // 3. SET connector data
+          // 4. SET connector data
           logger.info("Setting connector data...");
           const dataSetResult = await fetch(`${apiUrl}imconnector.connector.data.set?auth=${accessToken}`, {
             method: "POST",
@@ -648,7 +669,55 @@ serve(async (req) => {
           const dataSetData = await dataSetResult.json();
           logger.apiResponse(`${apiUrl}imconnector.connector.data.set`, dataSetResult.status, dataSetData);
           
-          // 4. Update our database
+          // 5. REGISTER THE BOT if not already registered
+          let botId = config.bot_id;
+          if (!botId) {
+            logger.info("Registering AI Bot...");
+            try {
+              const botResult = await fetch(`${apiUrl}imbot.register?auth=${accessToken}`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  CODE: "thoth_ai_bot",
+                  TYPE: "B",
+                  OPENLINE: "Y",
+                  EVENT_MESSAGE_ADD: eventsUrl,
+                  EVENT_WELCOME_MESSAGE: eventsUrl,
+                  PROPERTIES: {
+                    NAME: "Thoth AI",
+                    WORK_POSITION: "Assistente Virtual com IA",
+                    COLOR: "PURPLE",
+                  }
+                }),
+              });
+              const botData = await botResult.json();
+              logger.apiResponse(`${apiUrl}imbot.register`, botResult.status, botData);
+              
+              if (botData.result) {
+                botId = botData.result;
+                logger.info("Bot registered successfully", { bot_id: botId });
+              } else if (botData.error === "BOT_ALREADY_EXISTS" || botData.error_description?.includes("already exists")) {
+                logger.info("Bot already exists, fetching existing bot ID...");
+                // Try to get existing bot
+                const botListResult = await fetch(`${apiUrl}imbot.list?auth=${accessToken}`, {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                });
+                const botListData = await botListResult.json();
+                if (botListData.result && Array.isArray(botListData.result)) {
+                  const existingBot = botListData.result.find((b: any) => b.CODE === "thoth_ai_bot");
+                  if (existingBot) {
+                    botId = existingBot.ID;
+                    logger.info("Found existing bot", { bot_id: botId });
+                  }
+                }
+              }
+            } catch (botError) {
+              logger.warn("Error registering bot", { error: botError instanceof Error ? botError.message : "Unknown" });
+            }
+          }
+          
+          // 6. Update our database with connector and bot info
           await supabase
             .from("integrations")
             .update({
@@ -662,12 +731,14 @@ serve(async (req) => {
                 connector_active: true,
                 connector_configured_at: new Date().toISOString(),
                 activation_verified: true,
+                bot_id: botId || config.bot_id,
+                bot_registered_at: botId && !config.bot_id ? new Date().toISOString() : config.bot_registered_at,
               },
               updated_at: new Date().toISOString()
             })
             .eq("id", integration.id);
           
-          logger.info("Connector registration and activation complete!");
+          logger.info("Connector and bot registration complete!", { bot_id: botId });
           
         } catch (error) {
           logger.error("Error during forced registration", { error: error instanceof Error ? error.message : "Unknown" });
@@ -713,14 +784,31 @@ serve(async (req) => {
           if (!config.registered) {
             logger.info("Connector not registered, registering now...");
             
-            const iconUrl = `${supabaseUrl}/storage/v1/object/public/assets/thoth-whatsapp-icon.png`;
+            // Fetch and convert icon to base64
+            let iconBase64 = "";
+            try {
+              const iconUrl = `${supabaseUrl}/storage/v1/object/public/assets/thoth-whatsapp-icon.png`;
+              const iconResponse = await fetch(iconUrl);
+              if (iconResponse.ok) {
+                const iconBuffer = await iconResponse.arrayBuffer();
+                const iconBytes = new Uint8Array(iconBuffer);
+                let binary = "";
+                for (let i = 0; i < iconBytes.length; i++) {
+                  binary += String.fromCharCode(iconBytes[i]);
+                }
+                iconBase64 = `data:image/png;base64,${btoa(binary)}`;
+              }
+            } catch (iconError) {
+              logger.warn("Error fetching icon for registration", { error: iconError instanceof Error ? iconError.message : "Unknown" });
+            }
+            
             const registerResult = await fetch(`${apiUrl}imconnector.register?auth=${accessToken}`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 ID: connectorId,
                 NAME: "Thoth WhatsApp",
-                ICON: { DATA_IMAGE: iconUrl },
+                ICON: iconBase64 ? { DATA_IMAGE: iconBase64 } : undefined,
                 PLACEMENT_HANDLER: `${supabaseUrl}/functions/v1/bitrix24-connector-settings`,
               }),
             });
