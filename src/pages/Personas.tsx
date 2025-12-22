@@ -22,6 +22,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useWorkspace } from "@/hooks/useWorkspace";
 import { AIModelSelector } from "@/components/personas/AIModelSelector";
 import { VoiceModelSelector } from "@/components/personas/VoiceModelSelector";
+import { KnowledgeSelector } from "@/components/personas/KnowledgeSelector";
 import {
   Plus,
   Bot,
@@ -35,6 +36,7 @@ import {
   Upload,
   XCircle,
   Brain,
+  BookOpen,
 } from "lucide-react";
 
 interface Persona {
@@ -96,6 +98,9 @@ export default function Personas() {
   const [voiceEnabled, setVoiceEnabled] = useState(false);
   const [useNativeVoice, setUseNativeVoice] = useState(true);
   const [voiceProviderId, setVoiceProviderId] = useState<string | null>(null);
+
+  // Form states - Knowledge
+  const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([]);
   const [voiceId, setVoiceId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -162,6 +167,8 @@ export default function Personas() {
     setUseNativeVoice(true);
     setVoiceProviderId(null);
     setVoiceId(null);
+    // Knowledge
+    setSelectedDocumentIds([]);
   };
 
   const handleOpenCreate = () => {
@@ -169,7 +176,7 @@ export default function Personas() {
     setDialogOpen(true);
   };
 
-  const handleOpenEdit = (persona: Persona) => {
+  const handleOpenEdit = async (persona: Persona) => {
     setEditingPersona(persona);
     setName(persona.name);
     setDescription(persona.description || "");
@@ -186,6 +193,12 @@ export default function Personas() {
     setUseNativeVoice(persona.use_native_voice ?? true);
     setVoiceProviderId(persona.voice_provider_id || null);
     setVoiceId(persona.voice_id);
+    // Knowledge - fetch linked documents
+    const { data: linkedDocs } = await supabase
+      .from("persona_knowledge_documents")
+      .select("document_id")
+      .eq("persona_id", persona.id);
+    setSelectedDocumentIds(linkedDocs?.map((d) => d.document_id) || []);
     setDialogOpen(true);
   };
 
@@ -300,6 +313,8 @@ export default function Personas() {
         voice_id: voiceEnabled ? voiceId : null,
       };
 
+      let personaId: string;
+
       if (editingPersona) {
         const { error } = await supabase
           .from("personas")
@@ -307,14 +322,35 @@ export default function Personas() {
           .eq("id", editingPersona.id);
 
         if (error) throw error;
-        toast.success("Persona atualizada!");
+        personaId = editingPersona.id;
       } else {
-        const { error } = await supabase.from("personas").insert(data);
+        const { data: insertedData, error } = await supabase
+          .from("personas")
+          .insert(data)
+          .select("id")
+          .single();
 
         if (error) throw error;
-        toast.success("Persona criada!");
+        personaId = insertedData.id;
       }
 
+      // Sync knowledge documents
+      // Delete existing links
+      await supabase
+        .from("persona_knowledge_documents")
+        .delete()
+        .eq("persona_id", personaId);
+
+      // Insert new links
+      if (selectedDocumentIds.length > 0) {
+        const links = selectedDocumentIds.map((docId) => ({
+          persona_id: personaId,
+          document_id: docId,
+        }));
+        await supabase.from("persona_knowledge_documents").insert(links);
+      }
+
+      toast.success(editingPersona ? "Persona atualizada!" : "Persona criada!");
       setDialogOpen(false);
       resetForm();
       fetchPersonas();
@@ -653,6 +689,12 @@ export default function Personas() {
                 onProviderChange={setVoiceProviderId}
                 onVoiceChange={setVoiceId}
                 onUseNativeVoiceChange={setUseNativeVoice}
+              />
+
+              {/* Knowledge Selector */}
+              <KnowledgeSelector
+                selectedDocumentIds={selectedDocumentIds}
+                onSelectionChange={setSelectedDocumentIds}
               />
 
               {/* Default Persona */}
