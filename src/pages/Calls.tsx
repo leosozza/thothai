@@ -28,10 +28,12 @@ import {
   Headphones,
   MessageSquare,
   RefreshCw,
+  Users,
 } from "lucide-react";
 import { ActiveCallCard } from "@/components/calls/ActiveCallCard";
 import { CallHistoryCard } from "@/components/calls/CallHistoryCard";
 import { CallDetailsDialog } from "@/components/calls/CallDetailsDialog";
+import { BatchCallsPanel } from "@/components/calls/BatchCallsPanel";
 
 interface Call {
   id: string;
