@@ -172,19 +172,56 @@ const integrationTypes = [
     ],
     docs: "https://console.groq.com",
   },
-  // === PROVEDORES DE VOZ ===
+  // === PROVEDORES DE VOZ (STT) ===
+  {
+    type: "openai_whisper",
+    name: "OpenAI Whisper",
+    description: "Speech-to-Text de alta precisão para transcrição de áudio.",
+    icon: Mic,
+    color: "bg-green-600",
+    category: "voice",
+    fields: [
+      { key: "api_key", label: "OpenAI API Key", type: "password", placeholder: "sk-..." },
+    ],
+    docs: "https://platform.openai.com/docs/guides/speech-to-text",
+  },
+  // === PROVEDORES DE VOZ (TTS) ===
   {
     type: "elevenlabs",
     name: "ElevenLabs",
-    description: "Text-to-Speech para respostas em áudio com vozes naturais.",
-    icon: MessageSquare,
+    description: "Text-to-Speech com vozes ultra-realistas e naturais.",
+    icon: Mic,
     color: "bg-indigo-500",
     category: "voice",
     fields: [
       { key: "api_key", label: "API Key", type: "password", placeholder: "Sua chave ElevenLabs" },
-      { key: "voice_id", label: "Voice ID", type: "text", placeholder: "ID da voz padrão" },
     ],
     docs: "https://elevenlabs.io/docs",
+  },
+  {
+    type: "azure_tts",
+    name: "Azure Speech",
+    description: "Text-to-Speech da Microsoft com vozes neurais multilíngues.",
+    icon: Mic,
+    color: "bg-blue-500",
+    category: "voice",
+    fields: [
+      { key: "api_key", label: "Speech Key", type: "password", placeholder: "Sua chave Azure Speech" },
+      { key: "region", label: "Região", type: "text", placeholder: "eastus, westeurope, etc." },
+    ],
+    docs: "https://learn.microsoft.com/azure/ai-services/speech-service/",
+  },
+  {
+    type: "google_tts",
+    name: "Google Cloud TTS",
+    description: "Text-to-Speech do Google com vozes naturais WaveNet.",
+    icon: Mic,
+    color: "bg-red-500",
+    category: "voice",
+    fields: [
+      { key: "api_key", label: "API Key", type: "password", placeholder: "Sua chave Google Cloud" },
+    ],
+    docs: "https://cloud.google.com/text-to-speech/docs",
   },
   // === AUTOMAÇÃO ===
   {
