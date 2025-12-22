@@ -37,7 +37,9 @@ import {
   XCircle,
   Brain,
   BookOpen,
+  Phone,
 } from "lucide-react";
+import { VoiceTestButton } from "@/components/calls/VoiceTestButton";
 
 interface Persona {
   id: string;
@@ -60,6 +62,8 @@ interface Persona {
   use_native_credits: boolean;
   ai_provider_id: string | null;
   ai_model: string | null;
+  // ElevenLabs telephony
+  elevenlabs_agent_id: string | null;
 }
 
 interface BitrixIntegration {
@@ -103,6 +107,9 @@ export default function Personas() {
   // Form states - Knowledge
   const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([]);
   const [voiceId, setVoiceId] = useState<string | null>(null);
+  
+  // Form states - ElevenLabs Telephony
+  const [elevenlabsAgentId, setElevenlabsAgentId] = useState("");
 
   useEffect(() => {
     if (workspace) {
@@ -171,6 +178,8 @@ export default function Personas() {
     setVoiceId(null);
     // Knowledge
     setSelectedDocumentIds([]);
+    // ElevenLabs Telephony
+    setElevenlabsAgentId("");
   };
 
   const handleOpenCreate = () => {
@@ -195,6 +204,8 @@ export default function Personas() {
     setUseNativeVoice(persona.use_native_voice ?? true);
     setVoiceProviderId(persona.voice_provider_id || null);
     setVoiceId(persona.voice_id);
+    // ElevenLabs Telephony
+    setElevenlabsAgentId(persona.elevenlabs_agent_id || "");
     // Knowledge - fetch linked documents
     const { data: linkedDocs } = await supabase
       .from("persona_knowledge_documents")
@@ -313,6 +324,8 @@ export default function Personas() {
         use_native_voice: voiceEnabled ? useNativeVoice : true,
         voice_provider_id: voiceEnabled && !useNativeVoice ? voiceProviderId : null,
         voice_id: voiceEnabled ? voiceId : null,
+        // ElevenLabs Telephony
+        elevenlabs_agent_id: elevenlabsAgentId.trim() || null,
       };
 
       let personaId: string;
@@ -544,6 +557,12 @@ export default function Personas() {
                         Voz
                       </Badge>
                     )}
+                    {persona.elevenlabs_agent_id && (
+                      <Badge variant="outline" className="gap-1 text-green-600 border-green-300">
+                        <Phone className="h-3 w-3" />
+                        Telefonia
+                      </Badge>
+                    )}
                     {persona.bitrix_bot_id && (
                       <Badge variant="secondary" className="gap-1 bg-green-500/10 text-green-600 border-green-200">
                         <MessageSquare className="h-3 w-3" />
@@ -551,6 +570,16 @@ export default function Personas() {
                       </Badge>
                     )}
                   </div>
+
+                  {/* ElevenLabs Voice Test */}
+                  {persona.elevenlabs_agent_id && (
+                    <div className="pt-2 border-t">
+                      <VoiceTestButton 
+                        agentId={persona.elevenlabs_agent_id} 
+                        personaName={persona.name}
+                      />
+                    </div>
+                  )}
 
                   {/* Bitrix24 Publish/Unpublish */}
                   {bitrixIntegration && (
@@ -727,6 +756,35 @@ export default function Personas() {
                 selectedDocumentIds={selectedDocumentIds}
                 onSelectionChange={setSelectedDocumentIds}
               />
+
+              {/* ElevenLabs Telephony */}
+              <div className="space-y-3 p-4 rounded-lg bg-muted/50 border">
+                <div className="flex items-center gap-2">
+                  <Phone className="h-4 w-4 text-green-600" />
+                  <Label className="text-base font-medium">Telefonia ElevenLabs</Label>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="elevenlabs-agent-id" className="text-sm">Agent ID</Label>
+                  <Input
+                    id="elevenlabs-agent-id"
+                    placeholder="Ag123abc... (copie do painel ElevenLabs)"
+                    value={elevenlabsAgentId}
+                    onChange={(e) => setElevenlabsAgentId(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Configure um agente no{" "}
+                    <a 
+                      href="https://elevenlabs.io/agents" 
+                      target="_blank" 
+                      rel="noopener noreferrer"
+                      className="text-primary hover:underline"
+                    >
+                      ElevenLabs Agents
+                    </a>
+                    {" "}e cole o Agent ID aqui para habilitar chamadas de voz.
+                  </p>
+                </div>
+              </div>
 
               {/* Default Persona */}
               <div className="flex items-center justify-between p-4 rounded-lg bg-muted/50 border">

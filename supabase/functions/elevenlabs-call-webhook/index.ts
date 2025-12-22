@@ -47,11 +47,12 @@ serve(async (req) => {
 
     switch (type) {
       case "call.started": {
-        // Find workspace by agent_id (stored in personas or settings)
+        // Find workspace by agent_id (stored in personas.elevenlabs_agent_id)
         const { data: personas } = await supabase
           .from("personas")
           .select("id, workspace_id, name")
-          .or(`metadata->elevenlabs_agent_id.eq.${agent_id},voice_id.eq.${agent_id}`)
+          .eq("elevenlabs_agent_id", agent_id)
+          .eq("is_active", true)
           .limit(1);
 
         const persona = personas?.[0];
