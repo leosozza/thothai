@@ -155,20 +155,36 @@ export default function Personas() {
     
     setTogglingBitrix(true);
     try {
-      // Get persona details for bot registration
       const persona = personas.find(p => p.id === personaId);
       if (!persona) throw new Error("Persona não encontrada");
 
       if (enable) {
-        // First disable any other persona that's currently the Bitrix bot
+        // Disable any other persona that's currently the Bitrix bot
         await supabase
           .from("personas")
           .update({ bitrix_bot_enabled: false })
           .eq("workspace_id", workspace?.id)
           .eq("bitrix_bot_enabled", true);
 
-        // Register the bot in Bitrix24 if not already registered
-        if (!bitrixIntegration.config.bot_id) {
+        // ALWAYS check database for current bot_id (not local state)
+        console.log("[Bitrix Bot] Checking database for existing bot_id...");
+        const { data: currentIntegration, error: fetchError } = await supabase
+          .from("integrations")
+          .select("config")
+          .eq("id", bitrixIntegration.id)
+          .single();
+
+        if (fetchError) {
+          console.error("[Bitrix Bot] Error fetching integration:", fetchError);
+          throw fetchError;
+        }
+
+        const currentBotId = (currentIntegration?.config as Record<string, unknown>)?.bot_id;
+        console.log("[Bitrix Bot] Current bot_id from database:", currentBotId);
+
+        // Register bot if not already registered
+        if (!currentBotId) {
+          console.log("[Bitrix Bot] No bot_id found, registering bot...");
           toast.loading("Registrando bot no Bitrix24...", { id: "bot-register" });
           
           const { data: registerData, error: registerError } = await supabase.functions.invoke(
@@ -185,16 +201,30 @@ export default function Personas() {
 
           toast.dismiss("bot-register");
 
-          if (registerError || registerData?.error) {
-            throw new Error(registerData?.error || registerError?.message || "Erro ao registrar bot");
+          console.log("[Bitrix Bot] Register response:", registerData, "Error:", registerError);
+
+          if (registerError) {
+            console.error("[Bitrix Bot] Function invoke error:", registerError);
+            throw new Error(registerError.message || "Erro ao chamar função de registro");
           }
 
-          console.log("Bot registered:", registerData);
-          
-          // Update local integration state with bot_id
-          if (registerData?.bot_id) {
-            bitrixIntegration.config.bot_id = registerData.bot_id;
+          if (registerData?.error) {
+            console.error("[Bitrix Bot] Register returned error:", registerData.error);
+            throw new Error(registerData.error);
           }
+
+          if (!registerData?.bot_id) {
+            console.error("[Bitrix Bot] No bot_id returned:", registerData);
+            throw new Error("Bot registrado mas bot_id não retornado");
+          }
+
+          console.log("[Bitrix Bot] Bot registered successfully with ID:", registerData.bot_id);
+          toast.success(`Bot registrado com ID: ${registerData.bot_id}`);
+          
+          // Update local state with new bot_id
+          bitrixIntegration.config.bot_id = registerData.bot_id;
+        } else {
+          console.log("[Bitrix Bot] Bot already registered with ID:", currentBotId);
         }
       }
 
@@ -229,7 +259,7 @@ export default function Personas() {
       );
       fetchPersonas();
     } catch (error) {
-      console.error("Error toggling Bitrix bot:", error);
+      console.error("[Bitrix Bot] Error toggling:", error);
       toast.error(error instanceof Error ? error.message : "Erro ao atualizar configuração do Bitrix24");
     } finally {
       setTogglingBitrix(false);
