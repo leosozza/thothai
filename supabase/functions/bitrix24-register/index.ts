@@ -6,6 +6,9 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
+// Thoth Ibis Icon SVG (WhatsApp-style green background with ibis bird)
+const THOTH_IBIS_ICON_SVG = `data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%2325D366'/%3E%3Ccircle cx='50' cy='45' r='30' fill='none' stroke='white' stroke-width='4'/%3E%3Cpath d='M35 75 L50 90 L50 75' fill='white'/%3E%3Cg fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M50 65 C42 62, 36 52, 38 40 C40 30, 46 26, 52 26 C58 26, 64 32, 64 42 C64 52, 58 62, 50 65'/%3E%3Cpath d='M48 26 C45 22, 38 18, 32 14'/%3E%3Ccircle cx='30' cy='12' r='5'/%3E%3Cpath d='M25 12 C22 16, 18 22, 16 28'/%3E%3Ccircle cx='29' cy='11' r='1.5' fill='white'/%3E%3C/g%3E%3C/svg%3E`;
+
 // Helper to refresh Bitrix24 OAuth token
 async function refreshBitrixToken(integration: any, supabase: any): Promise<string | null> {
   const config = integration.config;
@@ -279,7 +282,7 @@ serve(async (req) => {
         ID: finalConnectorId,
         NAME: "Thoth WhatsApp",
         ICON: {
-          DATA_IMAGE: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAAACXBIWXMAAAsTAAALEwEAmpwYAAADhklEQVR4nO2ZW4hNURjHf2OMMYZxGYYZMi4PDMaDiKTkRuSWSx4oL0peJC9ueJEXJZIXJZLkgSTJg9zKNS+6lMsLuYu4ZGacMWbQ5//0f9i2s/fea59zzln7R6e99t5rfWv9v/XdhzCEIQxByOIQmtCGEFqRQCeyGI0EhtKJCIYhxhBaHcE/xBkIwQsJqONYzs+wH9gNPNM97gJ7gMNIYgISaMUnAQsMNuuBfUA18A7YAngCNqJRh01CBLJ5zE1gBfAB2Ap8Bm6j0Y2OaUQjoI3xAjoBbNJn3AM6EMEWJNBVvwR0YAEPgE1AvjYeCJ6BEN+N7nUSGMSI96MT6NW0wONA0/qkRDThBNqQQxNSsJjxwC7gKXAWqNKxR8D5qAkYiV7kMQbYBTyJWQJRYyLwEqgE7gNXYhZA1BgPdAIL/Tgx/gFDEh3IBjaHsQ9wWtuOqIFlEJLDwAJgYxgBtOvYLeBqtOEnJQR0AbYDWb6PpPD8gYFKYAuwyuWg2cBGYJ8dYAvgog5yFNjiJsAJYCNwDJgNvEP6xPb9xQJuA4cSmECvq+2N7gSK4o/xOAAMRyQfkz7pD9iJTgBuBs4hkdQNqDgPBSZGpYKjSKLUiwNWuH3jGvA0bCVfBuYC9cC0oG9OASuBNj1+Hzgb8R8kxCDgKDAKmAM8cBPIbWCy9h8FxkYsgMFAL2AVMBd46CZAA1ChB4bxNYL/SILjQC/gk0eiNOhLVyKLJz+Rww6gN1AQ8aXYYKAbsBC44ibAOWC5djxBMqUeGI5MGPOwg7H2eS6+R7IvyI7twHRgWdBLVgM7gKnAfqfXnRw+D1zo78FNSD0e1AtjE+oK7PWymDrNvgFcQKdDvZrxjS9fmAbUSv8kMAc4AVQE/RNPA2OR+wdwDFgNTPHihDVID7AT2KAOXxH8pzEPeIxsAhuBYuA8cAaYj/RJ5wIfI/6TjFADlgJ7gz6yAimQw5EuvzC8QyZ0o9YPjgPfkU2nE3BcJ0qNQBGwHpgQ1Mv5uu/z0G/n9fsooA2oDjhJCbBGAjuFvI0mIO1HJVBO9JPkRxYBQ5AOYBLSD9YBj4J+t1CnU51ILDAZuKrjDqAmqJ8LlwKL/S5gCpKt1CA7EKgLaLMSOIQMyCrkJTAzYqMlxCJgE3Ir4J9wPrL70ga0ALeDPp+ElA5kWMjAkA+xPQghCAD/AF3FgPgqhI7fAAAAAElFTkSuQmCC"
+          DATA_IMAGE: THOTH_IBIS_ICON_SVG
         },
         PLACEMENT_HANDLER: `${supabaseUrl}/functions/v1/bitrix24-connector-settings`,
       }),

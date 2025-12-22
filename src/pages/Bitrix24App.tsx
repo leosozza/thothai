@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
-import { Loader2, MessageSquare, Bot, BookOpen, Settings, Phone, LayoutDashboard, AlertCircle, ExternalLink, RefreshCw, RotateCcw, Search, Stethoscope, CheckCircle, XCircle, Info } from "lucide-react";
+import { Loader2, Bot, BookOpen, Settings, Phone, LayoutDashboard, AlertCircle, ExternalLink, RefreshCw, RotateCcw, Search, Stethoscope, CheckCircle, XCircle, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { ThothLogo } from "@/components/ThothLogo";
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 
@@ -158,8 +159,8 @@ export default function Bitrix24App() {
       <div className="min-h-screen bg-background flex items-center justify-center p-4">
         <Card className="w-full max-w-lg">
           <CardHeader className="text-center">
-            <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
-              <MessageSquare className="h-8 w-8 text-primary" />
+            <div className="flex justify-center mb-4">
+              <ThothLogo size="lg" showText={false} />
             </div>
             <CardTitle>Thoth.ai para Bitrix24</CardTitle>
             <CardDescription>
@@ -246,12 +247,7 @@ export default function Bitrix24App() {
       <aside className="w-56 border-r bg-card flex flex-col">
         {/* Logo */}
         <div className="p-4 border-b">
-          <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-              <MessageSquare className="h-4 w-4 text-primary-foreground" />
-            </div>
-            <span className="font-semibold text-lg">Thoth.ai</span>
-          </div>
+          <ThothLogo size="sm" showText={true} />
           {domain && (
             <Badge variant="secondary" className="mt-2 text-xs">
               {domain}
