@@ -2050,11 +2050,24 @@ export default function Integrations() {
               })}
           </TabsContent>
 
-          <TabsContent value="telephony" className="mt-6 space-y-4">
+          <TabsContent value="telephony" className="mt-6 space-y-6">
             <div className="bg-muted/50 rounded-lg p-4 mb-4">
               <p className="text-sm text-muted-foreground">
-                Configure agentes de voz com ElevenLabs Conversational AI para atendimento telefônico automatizado.
+                Configure provedores de telefonia (WaVoIP, Twilio, Telnyx) integrados com ElevenLabs Conversational AI para atendimento automatizado por voz.
               </p>
+            </div>
+
+            {/* Telephony Providers Section */}
+            <div className="space-y-4">
+              <h3 className="text-lg font-semibold flex items-center gap-2">
+                <Settings className="h-5 w-5" />
+                Provedores de Telefonia
+              </h3>
+              <div className="grid gap-4 md:grid-cols-3">
+                <TelephonyProviderCard providerType="wavoip" />
+                <TelephonyProviderCard providerType="twilio" />
+                <TelephonyProviderCard providerType="telnyx" />
+              </div>
             </div>
 
             {/* ElevenLabs Conversational AI Card */}
@@ -2110,6 +2123,9 @@ export default function Integrations() {
                 </div>
               </CardContent>
             </Card>
+
+            {/* Telephony Numbers Management */}
+            <TelephonyNumbersCard />
 
             {/* Configured Agents Card */}
             <Card>

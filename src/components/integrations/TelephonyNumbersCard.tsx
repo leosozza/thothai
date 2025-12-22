@@ -5,7 +5,8 @@ import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { Loader2, Phone, RefreshCw, Settings, Trash2, Plus, MessageSquare } from "lucide-react";
+import { useWorkspace } from "@/hooks/useWorkspace";
+import { Loader2, Phone, RefreshCw, Settings, Trash2, MessageSquare } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -22,14 +23,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { VoiceTestButton } from "@/components/calls/VoiceTestButton";
-
-interface TelephonyProvider {
-  id: string;
-  provider_type: string;
-  name: string;
-  config: Record<string, unknown>;
-  is_active: boolean;
-}
 
 interface TelephonyNumber {
   id: string;
@@ -50,13 +43,6 @@ interface Persona {
   elevenlabs_agent_id: string | null;
 }
 
-interface TelephonyNumbersCardProps {
-  workspaceId: string;
-  providers: TelephonyProvider[];
-  personas: Persona[];
-  onRefresh: () => void;
-}
-
 const providerIcons: Record<string, typeof Phone> = {
   wavoip: MessageSquare,
   twilio: Phone,
@@ -69,13 +55,11 @@ const providerColors: Record<string, string> = {
   telnyx: "bg-emerald-500",
 };
 
-export function TelephonyNumbersCard({
-  workspaceId,
-  providers,
-  personas,
-  onRefresh,
-}: TelephonyNumbersCardProps) {
+export function TelephonyNumbersCard() {
+  const { workspace } = useWorkspace();
   const [numbers, setNumbers] = useState<TelephonyNumber[]>([]);
+  const [personas, setPersonas] = useState<Persona[]>([]);
+  const [hasProviders, setHasProviders] = useState(false);
   const [loading, setLoading] = useState(true);
   const [configDialogOpen, setConfigDialogOpen] = useState(false);
   const [selectedNumber, setSelectedNumber] = useState<TelephonyNumber | null>(null);
@@ -83,15 +67,26 @@ export function TelephonyNumbersCard({
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    fetchNumbers();
-  }, [workspaceId, providers]);
+    if (workspace?.id) {
+      fetchData();
+    }
+  }, [workspace?.id]);
 
-  const fetchNumbers = async () => {
-    if (!workspaceId) return;
+  const fetchData = async () => {
+    if (!workspace?.id) return;
 
     setLoading(true);
     try {
-      const { data, error } = await supabase
+      // Fetch providers to check if any exist
+      const { data: providersData } = await supabase
+        .from("telephony_providers")
+        .select("id")
+        .eq("workspace_id", workspace.id);
+
+      setHasProviders((providersData?.length || 0) > 0);
+
+      // Fetch numbers
+      const { data: numbersData, error: numbersError } = await supabase
         .from("telephony_numbers")
         .select(`
           id,
@@ -104,11 +99,11 @@ export function TelephonyNumbersCard({
           telephony_providers (provider_type, name),
           personas (name)
         `)
-        .eq("workspace_id", workspaceId);
+        .eq("workspace_id", workspace.id);
 
-      if (error) throw error;
+      if (numbersError) throw numbersError;
 
-      const mappedNumbers: TelephonyNumber[] = (data || []).map((item: any) => ({
+      const mappedNumbers: TelephonyNumber[] = (numbersData || []).map((item: any) => ({
         id: item.id,
         provider_id: item.provider_id,
         phone_number: item.phone_number,
@@ -122,9 +117,19 @@ export function TelephonyNumbersCard({
       }));
 
       setNumbers(mappedNumbers);
+
+      // Fetch personas
+      const { data: personasData, error: personasError } = await supabase
+        .from("personas")
+        .select("id, name, elevenlabs_agent_id")
+        .eq("workspace_id", workspace.id);
+
+      if (personasError) throw personasError;
+
+      setPersonas(personasData || []);
     } catch (error) {
-      console.error("Error fetching telephony numbers:", error);
-      toast.error("Erro ao carregar números");
+      console.error("Error fetching telephony data:", error);
+      toast.error("Erro ao carregar dados de telefonia");
     } finally {
       setLoading(false);
     }
@@ -158,7 +163,7 @@ export function TelephonyNumbersCard({
 
       toast.success("Configuração salva com sucesso!");
       setConfigDialogOpen(false);
-      fetchNumbers();
+      fetchData();
     } catch (error) {
       console.error("Error saving number config:", error);
       toast.error("Erro ao salvar configuração");
@@ -177,14 +182,15 @@ export function TelephonyNumbersCard({
       if (error) throw error;
 
       toast.success("Número removido com sucesso!");
-      fetchNumbers();
+      fetchData();
     } catch (error) {
       console.error("Error deleting number:", error);
       toast.error("Erro ao remover número");
     }
   };
 
-  if (providers.length === 0) {
+  // Don't render if no providers are configured
+  if (!hasProviders && !loading) {
     return null;
   }
 
@@ -204,7 +210,7 @@ export function TelephonyNumbersCard({
                 </CardDescription>
               </div>
             </div>
-            <Button variant="outline" size="sm" onClick={fetchNumbers} disabled={loading}>
+            <Button variant="outline" size="sm" onClick={fetchData} disabled={loading}>
               <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
               Atualizar
             </Button>
