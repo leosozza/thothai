@@ -15,6 +15,9 @@ verify_jwt = false
 [functions.ai-process-bitrix24]
 verify_jwt = false
 
+[functions.ai-gateway]
+verify_jwt = false
+
 [functions.flow-engine]
 verify_jwt = false
 

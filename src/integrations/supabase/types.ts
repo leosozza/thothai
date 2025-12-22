@@ -14,6 +14,60 @@ export type Database = {
   }
   public: {
     Tables: {
+      ai_providers: {
+        Row: {
+          auth_header: string | null
+          auth_prefix: string | null
+          available_models: Json | null
+          base_url: string
+          created_at: string | null
+          docs_url: string | null
+          id: string
+          is_active: boolean | null
+          is_free: boolean | null
+          is_native: boolean | null
+          key_generation_guide: string | null
+          logo_url: string | null
+          name: string
+          slug: string
+          updated_at: string | null
+        }
+        Insert: {
+          auth_header?: string | null
+          auth_prefix?: string | null
+          available_models?: Json | null
+          base_url: string
+          created_at?: string | null
+          docs_url?: string | null
+          id?: string
+          is_active?: boolean | null
+          is_free?: boolean | null
+          is_native?: boolean | null
+          key_generation_guide?: string | null
+          logo_url?: string | null
+          name: string
+          slug: string
+          updated_at?: string | null
+        }
+        Update: {
+          auth_header?: string | null
+          auth_prefix?: string | null
+          available_models?: Json | null
+          base_url?: string
+          created_at?: string | null
+          docs_url?: string | null
+          id?: string
+          is_active?: boolean | null
+          is_free?: boolean | null
+          is_native?: boolean | null
+          key_generation_guide?: string | null
+          logo_url?: string | null
+          name?: string
+          slug?: string
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
       bitrix_channel_mappings: {
         Row: {
           created_at: string
@@ -331,6 +385,50 @@ export type Database = {
             columns: ["instance_id"]
             isOneToOne: false
             referencedRelation: "instances"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      credit_transactions: {
+        Row: {
+          ai_model: string | null
+          ai_provider: string | null
+          amount: number
+          created_at: string | null
+          description: string | null
+          id: string
+          tokens_used: number | null
+          transaction_type: string
+          workspace_id: string
+        }
+        Insert: {
+          ai_model?: string | null
+          ai_provider?: string | null
+          amount: number
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          tokens_used?: number | null
+          transaction_type: string
+          workspace_id: string
+        }
+        Update: {
+          ai_model?: string | null
+          ai_provider?: string | null
+          amount?: number
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          tokens_used?: number | null
+          transaction_type?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "credit_transactions_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
             referencedColumns: ["id"]
           },
         ]
@@ -724,6 +822,8 @@ export type Database = {
       }
       personas: {
         Row: {
+          ai_model: string | null
+          ai_provider_id: string | null
           avatar_url: string | null
           bitrix_bot_enabled: boolean | null
           bitrix_bot_id: number | null
@@ -737,12 +837,15 @@ export type Database = {
           system_prompt: string
           temperature: number | null
           updated_at: string
+          use_native_credits: boolean | null
           voice_enabled: boolean | null
           voice_id: string | null
           welcome_message: string | null
           workspace_id: string
         }
         Insert: {
+          ai_model?: string | null
+          ai_provider_id?: string | null
           avatar_url?: string | null
           bitrix_bot_enabled?: boolean | null
           bitrix_bot_id?: number | null
@@ -756,12 +859,15 @@ export type Database = {
           system_prompt: string
           temperature?: number | null
           updated_at?: string
+          use_native_credits?: boolean | null
           voice_enabled?: boolean | null
           voice_id?: string | null
           welcome_message?: string | null
           workspace_id: string
         }
         Update: {
+          ai_model?: string | null
+          ai_provider_id?: string | null
           avatar_url?: string | null
           bitrix_bot_enabled?: boolean | null
           bitrix_bot_id?: number | null
@@ -775,12 +881,20 @@ export type Database = {
           system_prompt?: string
           temperature?: number | null
           updated_at?: string
+          use_native_credits?: boolean | null
           voice_enabled?: boolean | null
           voice_id?: string | null
           welcome_message?: string | null
           workspace_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "personas_ai_provider_id_fkey"
+            columns: ["ai_provider_id"]
+            isOneToOne: false
+            referencedRelation: "ai_providers"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "personas_department_id_fkey"
             columns: ["department_id"]
@@ -826,6 +940,86 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      workspace_ai_credentials: {
+        Row: {
+          api_key_encrypted: string
+          created_at: string | null
+          id: string
+          is_active: boolean | null
+          last_used_at: string | null
+          provider_id: string
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          api_key_encrypted: string
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          last_used_at?: string | null
+          provider_id: string
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          api_key_encrypted?: string
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          last_used_at?: string | null
+          provider_id?: string
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workspace_ai_credentials_provider_id_fkey"
+            columns: ["provider_id"]
+            isOneToOne: false
+            referencedRelation: "ai_providers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "workspace_ai_credentials_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      workspace_credits: {
+        Row: {
+          balance: number | null
+          created_at: string | null
+          id: string
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          balance?: number | null
+          created_at?: string | null
+          id?: string
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          balance?: number | null
+          created_at?: string | null
+          id?: string
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "workspace_credits_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: true
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       workspace_members: {
         Row: {
@@ -954,7 +1148,7 @@ export type Database = {
       }
     }
     Enums: {
-      [_ in never]: never
+      app_role: "admin" | "moderator" | "user"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -1081,6 +1275,8 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: ["admin", "moderator", "user"],
+    },
   },
 } as const
