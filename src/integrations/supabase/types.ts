@@ -934,8 +934,10 @@ export type Database = {
           temperature: number | null
           updated_at: string
           use_native_credits: boolean | null
+          use_native_voice: boolean | null
           voice_enabled: boolean | null
           voice_id: string | null
+          voice_provider_id: string | null
           welcome_message: string | null
           workspace_id: string
         }
@@ -956,8 +958,10 @@ export type Database = {
           temperature?: number | null
           updated_at?: string
           use_native_credits?: boolean | null
+          use_native_voice?: boolean | null
           voice_enabled?: boolean | null
           voice_id?: string | null
+          voice_provider_id?: string | null
           welcome_message?: string | null
           workspace_id: string
         }
@@ -978,8 +982,10 @@ export type Database = {
           temperature?: number | null
           updated_at?: string
           use_native_credits?: boolean | null
+          use_native_voice?: boolean | null
           voice_enabled?: boolean | null
           voice_id?: string | null
+          voice_provider_id?: string | null
           welcome_message?: string | null
           workspace_id?: string
         }
@@ -996,6 +1002,13 @@ export type Database = {
             columns: ["department_id"]
             isOneToOne: false
             referencedRelation: "departments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "personas_voice_provider_id_fkey"
+            columns: ["voice_provider_id"]
+            isOneToOne: false
+            referencedRelation: "voice_providers"
             referencedColumns: ["id"]
           },
           {
