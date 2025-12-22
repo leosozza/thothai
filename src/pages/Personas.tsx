@@ -16,15 +16,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useWorkspace } from "@/hooks/useWorkspace";
@@ -37,6 +29,7 @@ import {
   Volume2,
   Loader2,
   Sparkles,
+  MessageSquare,
 } from "lucide-react";
 
 interface Persona {
@@ -51,6 +44,17 @@ interface Persona {
   welcome_message: string | null;
   is_default: boolean;
   department_id: string | null;
+  bitrix_bot_enabled: boolean;
+}
+
+interface BitrixIntegration {
+  id: string;
+  config: {
+    bot_id?: number;
+    bot_enabled?: boolean;
+    bot_persona_id?: string;
+    [key: string]: unknown;
+  };
 }
 
 export default function Personas() {
@@ -59,6 +63,8 @@ export default function Personas() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingPersona, setEditingPersona] = useState<Persona | null>(null);
   const [saving, setSaving] = useState(false);
+  const [bitrixIntegration, setBitrixIntegration] = useState<BitrixIntegration | null>(null);
+  const [togglingBitrix, setTogglingBitrix] = useState(false);
   const { workspace } = useWorkspace();
 
   // Form states
@@ -69,12 +75,33 @@ export default function Personas() {
   const [temperature, setTemperature] = useState([0.7]);
   const [voiceEnabled, setVoiceEnabled] = useState(false);
   const [isDefault, setIsDefault] = useState(false);
+  const [bitrixBotEnabled, setBitrixBotEnabled] = useState(false);
 
   useEffect(() => {
     if (workspace) {
       fetchPersonas();
+      fetchBitrixIntegration();
     }
   }, [workspace]);
+
+  const fetchBitrixIntegration = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("integrations")
+        .select("id, config")
+        .eq("workspace_id", workspace?.id)
+        .eq("type", "bitrix24")
+        .eq("is_active", true)
+        .maybeSingle();
+
+      if (error) throw error;
+      if (data) {
+        setBitrixIntegration(data as BitrixIntegration);
+      }
+    } catch (error) {
+      console.error("Error fetching Bitrix24 integration:", error);
+    }
+  };
 
   const fetchPersonas = async () => {
     try {
@@ -101,6 +128,7 @@ export default function Personas() {
     setTemperature([0.7]);
     setVoiceEnabled(false);
     setIsDefault(false);
+    setBitrixBotEnabled(false);
     setEditingPersona(null);
   };
 
@@ -118,7 +146,57 @@ export default function Personas() {
     setTemperature([persona.temperature]);
     setVoiceEnabled(persona.voice_enabled);
     setIsDefault(persona.is_default);
+    setBitrixBotEnabled(persona.bitrix_bot_enabled || false);
     setDialogOpen(true);
+  };
+
+  const handleToggleBitrixBot = async (personaId: string, enable: boolean) => {
+    if (!bitrixIntegration) return;
+    
+    setTogglingBitrix(true);
+    try {
+      // If enabling, first disable any other persona that's currently the Bitrix bot
+      if (enable) {
+        await supabase
+          .from("personas")
+          .update({ bitrix_bot_enabled: false })
+          .eq("workspace_id", workspace?.id)
+          .eq("bitrix_bot_enabled", true);
+      }
+
+      // Update the persona
+      const { error: personaError } = await supabase
+        .from("personas")
+        .update({ bitrix_bot_enabled: enable })
+        .eq("id", personaId);
+
+      if (personaError) throw personaError;
+
+      // Update the Bitrix24 integration config
+      const newConfig = {
+        ...bitrixIntegration.config,
+        bot_enabled: enable,
+        bot_persona_id: enable ? personaId : null,
+      };
+
+      const { error: integrationError } = await supabase
+        .from("integrations")
+        .update({ config: newConfig })
+        .eq("id", bitrixIntegration.id);
+
+      if (integrationError) throw integrationError;
+
+      // Update local state
+      setBitrixIntegration({ ...bitrixIntegration, config: newConfig });
+      
+      toast.success(enable ? "Persona ativada como Chatbot no Bitrix24" : "Persona desativada do Bitrix24");
+      fetchPersonas();
+    } catch (error) {
+      console.error("Error toggling Bitrix bot:", error);
+      toast.error("Erro ao atualizar configuração do Bitrix24");
+    } finally {
+      setTogglingBitrix(false);
+    }
   };
 
   const handleSave = async () => {
@@ -270,7 +348,7 @@ export default function Personas() {
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="flex items-center gap-4 text-sm">
+                  <div className="flex flex-wrap items-center gap-2 text-sm">
                     <div className="flex items-center gap-1.5">
                       <span className="text-muted-foreground">Temp:</span>
                       <span className="font-medium">{persona.temperature}</span>
@@ -279,6 +357,12 @@ export default function Personas() {
                       <Badge variant="outline" className="gap-1">
                         <Volume2 className="h-3 w-3" />
                         Voz
+                      </Badge>
+                    )}
+                    {persona.bitrix_bot_enabled && (
+                      <Badge variant="secondary" className="gap-1 bg-blue-500/10 text-blue-600 border-blue-200">
+                        <MessageSquare className="h-3 w-3" />
+                        Bitrix24
                       </Badge>
                     )}
                   </div>
@@ -412,6 +496,25 @@ export default function Personas() {
                   </div>
                   <Switch checked={isDefault} onCheckedChange={setIsDefault} />
                 </div>
+
+                {bitrixIntegration && editingPersona && (
+                  <div className="flex items-center justify-between p-3 rounded-lg bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800">
+                    <div>
+                      <Label className="flex items-center gap-2">
+                        <MessageSquare className="h-4 w-4 text-blue-600" />
+                        Chatbot no Bitrix24
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        Ativar esta persona como chatbot no Bitrix24
+                      </p>
+                    </div>
+                    <Switch 
+                      checked={editingPersona.bitrix_bot_enabled || false}
+                      onCheckedChange={(checked) => handleToggleBitrixBot(editingPersona.id, checked)}
+                      disabled={togglingBitrix}
+                    />
+                  </div>
+                )}
               </div>
             </div>
 
