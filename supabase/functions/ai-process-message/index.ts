@@ -220,6 +220,8 @@ serve(async (req) => {
         message: aiContent,
         conversation_id,
         contact_id,
+        workspace_id, // Pass workspace_id to bypass auth check
+        internal_call: true, // Flag for internal edge function calls
       }),
     });
 
