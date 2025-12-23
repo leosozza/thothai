@@ -2061,10 +2061,11 @@ export default function Integrations() {
                 <Settings className="h-5 w-5" />
                 Provedores de Telefonia
               </h3>
-              <div className="grid gap-4 md:grid-cols-3">
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
                 <TelephonyProviderCard providerType="wavoip" />
                 <TelephonyProviderCard providerType="twilio" />
                 <TelephonyProviderCard providerType="telnyx" />
+                <TelephonyProviderCard providerType="falefacil" />
               </div>
             </div>
 

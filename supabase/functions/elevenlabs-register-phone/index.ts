@@ -7,12 +7,16 @@ const corsHeaders = {
 };
 
 interface RegisterPhoneRequest {
-  action: "register" | "import_from_provider";
+  action: "register" | "import_from_provider" | "register_sip";
   workspace_id: string;
   provider_id?: string;
   phone_number?: string;
   agent_id?: string;
   friendly_name?: string;
+  // SIP specific fields
+  sip_account?: string;
+  sip_password?: string;
+  sip_server?: string;
 }
 
 serve(async (req) => {
@@ -39,7 +43,7 @@ serve(async (req) => {
 
     console.log(`[ElevenLabs Phone] Action: ${action}, Workspace: ${workspace_id}`);
 
-    switch (action) {
+switch (action) {
       case "import_from_provider": {
         if (!provider_id) {
           return new Response(
@@ -62,9 +66,23 @@ serve(async (req) => {
           );
         }
 
-        const config = provider.config as { api_token?: string; instance_key?: string; instance_info?: any };
+        const config = provider.config as { 
+          api_token?: string; 
+          instance_key?: string; 
+          instance_info?: any;
+          phone_number?: string;
+          sip_account?: string;
+          sip_password?: string;
+          sip_server?: string;
+        };
 
         let phoneFromProvider: string | null = null;
+
+        // For SIP providers (falefacil, twilio, telnyx), use config phone_number directly
+        if (provider.provider_type === "falefacil" && config.phone_number) {
+          phoneFromProvider = config.phone_number;
+          console.log(`[ElevenLabs Phone] Using phone from Fale Fácil config: ${phoneFromProvider}`);
+        }
 
         // For WaVoIP, fetch from API (endpoint/method may vary between deployments)
         let wavoipFetched = false;
@@ -227,7 +245,12 @@ serve(async (req) => {
             provider_id,
             phone_number: normalizedPhone,
             friendly_name: `${provider.name} - ${normalizedPhone}`,
-            capabilities: { voice: true, sms: false, whatsapp: provider.provider_type === "wavoip" },
+            capabilities: { 
+              voice: true, 
+              sms: false, 
+              whatsapp: provider.provider_type === "wavoip",
+              sip: provider.provider_type === "falefacil" || provider.provider_type === "twilio" || provider.provider_type === "telnyx",
+            },
             is_active: true,
           })
           .select("id")
@@ -246,6 +269,85 @@ serve(async (req) => {
             message: "Número importado com sucesso!",
             number_id: newNumber.id,
             phone_number: normalizedPhone,
+          }),
+          { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      case "register_sip": {
+        // Register a phone number with ElevenLabs using SIP Trunk
+        const { sip_account, sip_password, sip_server, phone_number: sipPhoneNumber, agent_id: sipAgentId } = body;
+
+        if (!sipPhoneNumber || !sip_account || !sip_password || !sip_server) {
+          return new Response(
+            JSON.stringify({ 
+              success: false, 
+              error: "phone_number, sip_account, sip_password e sip_server são obrigatórios" 
+            }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+          );
+        }
+
+        // Normalize phone number
+        let normalizedPhone = sipPhoneNumber.replace(/\D/g, "");
+        if (!normalizedPhone.startsWith("+")) {
+          normalizedPhone = "+" + normalizedPhone;
+        }
+
+        // Build SIP URI
+        const sipUri = `sip:${sip_account}@${sip_server}`;
+
+        console.log(`[ElevenLabs Phone] Registering SIP number: ${normalizedPhone}, URI: ${sipUri}`);
+
+        // Register with ElevenLabs via SIP Trunk
+        const elevenLabsResponse = await fetch("https://api.elevenlabs.io/v1/convai/phone-numbers", {
+          method: "POST",
+          headers: {
+            "xi-api-key": ELEVENLABS_API_KEY,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            provider: "sip_trunk",
+            phone_number: normalizedPhone,
+            sip_trunk_uri: sipUri,
+            sip_trunk_authentication: {
+              username: sip_account,
+              password: sip_password,
+            },
+            ...(sipAgentId && { agent_id: sipAgentId }),
+          }),
+        });
+
+        const elevenLabsText = await elevenLabsResponse.text();
+        console.log(`[ElevenLabs Phone] ElevenLabs SIP registration response: ${elevenLabsResponse.status}`, elevenLabsText);
+
+        let elevenLabsData: any = null;
+        try {
+          elevenLabsData = JSON.parse(elevenLabsText);
+        } catch {
+          // Not JSON, could be error
+        }
+
+        if (!elevenLabsResponse.ok) {
+          const errorMsg = elevenLabsData?.detail?.message || 
+                          elevenLabsData?.message || 
+                          elevenLabsData?.error ||
+                          `ElevenLabs error: ${elevenLabsResponse.status}`;
+          return new Response(
+            JSON.stringify({ success: false, error: errorMsg }),
+            { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
+          );
+        }
+
+        const elevenLabsPhoneId = elevenLabsData?.phone_number_id || elevenLabsData?.id;
+
+        return new Response(
+          JSON.stringify({ 
+            success: true, 
+            message: "Número SIP registrado no ElevenLabs com sucesso!",
+            phone_number: normalizedPhone,
+            sip_uri: sipUri,
+            elevenlabs_phone_id: elevenLabsPhoneId,
           }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
