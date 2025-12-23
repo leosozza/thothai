@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
-import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -24,18 +23,26 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 import { supabase } from "@/integrations/supabase/client";
 import { useWorkspace } from "@/hooks/useWorkspace";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { cn } from "@/lib/utils";
 import {
   Search,
   Send,
   Paperclip,
   Mic,
   MoreVertical,
-  Video,
   User,
   Bot,
   Check,
@@ -46,10 +53,11 @@ import {
   Loader2,
   Plus,
   RefreshCw,
-  ArrowLeftRight,
   UserCheck,
   Smartphone,
   Building2,
+  ArrowLeft,
+  Info,
 } from "lucide-react";
 import { OutboundCallDialog } from "@/components/calls/OutboundCallDialog";
 
@@ -110,6 +118,7 @@ export default function Conversations() {
   const [transferring, setTransferring] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { workspace } = useWorkspace();
+  const isMobile = useIsMobile();
 
   // Reference to selected conversation for use in realtime callbacks
   const selectedConversationRef = useRef<Conversation | null>(null);
@@ -606,9 +615,13 @@ export default function Conversations() {
     <AppLayout title="Conversas">
       <div className="flex h-[calc(100vh-3.5rem)]">
         {/* Sidebar - Conversation List */}
-        <div className="w-80 border-r border-border flex flex-col bg-card">
+        <div className={cn(
+          "border-r border-border flex flex-col bg-card",
+          "w-full md:w-80",
+          selectedConversation && "hidden md:flex"
+        )}>
           {/* Search Header */}
-          <div className="p-4 space-y-3">
+          <div className="p-3 md:p-4 space-y-3">
             <div className="flex gap-2">
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -633,7 +646,8 @@ export default function Conversations() {
                 <DialogTrigger asChild>
                   <Button size="sm" className="gap-1.5 flex-1">
                     <Plus className="h-3.5 w-3.5" />
-                    Nova Conversa
+                    <span className="hidden sm:inline">Nova Conversa</span>
+                    <span className="sm:hidden">Nova</span>
                   </Button>
                 </DialogTrigger>
                 <DialogContent>
@@ -699,14 +713,14 @@ export default function Conversations() {
                       ) : (
                         <MessageSquare className="h-4 w-4 mr-2" />
                       )}
-                      Iniciar Conversa
+                      Iniciar
                     </Button>
                   </DialogFooter>
                 </DialogContent>
               </Dialog>
               <Button variant="outline" size="sm" className="gap-1.5">
                 <Filter className="h-3.5 w-3.5" />
-                Filtros
+                <span className="hidden sm:inline">Filtros</span>
               </Button>
             </div>
           </div>
@@ -735,22 +749,24 @@ export default function Conversations() {
                   <button
                     key={conv.id}
                     onClick={() => setSelectedConversation(conv)}
-                    className={`w-full p-4 text-left hover:bg-accent/50 transition-colors ${
-                      selectedConversation?.id === conv.id ? "bg-accent" : ""
-                    }`}
+                    className={cn(
+                      "w-full p-3 md:p-4 text-left hover:bg-accent/50 transition-colors",
+                      selectedConversation?.id === conv.id && "bg-accent"
+                    )}
                   >
                     <div className="flex gap-3">
                       <div className="relative">
-                        <Avatar className="h-12 w-12">
+                        <Avatar className="h-11 w-11 md:h-12 md:w-12">
                           <AvatarImage src={conv.contact.profile_picture_url || ""} />
                           <AvatarFallback className="bg-primary/10 text-primary">
                             {getContactInitials(conv.contact)}
                           </AvatarFallback>
                         </Avatar>
                         {/* Attendance mode indicator dot */}
-                        <div className={`absolute -bottom-0.5 -right-0.5 h-4 w-4 rounded-full border-2 border-card flex items-center justify-center ${
+                        <div className={cn(
+                          "absolute -bottom-0.5 -right-0.5 h-4 w-4 rounded-full border-2 border-card flex items-center justify-center",
                           conv.attendance_mode === "human" ? "bg-primary" : "bg-muted"
-                        }`}>
+                        )}>
                           {conv.attendance_mode === "human" ? (
                             <User className="h-2.5 w-2.5 text-primary-foreground" />
                           ) : (
@@ -792,42 +808,54 @@ export default function Conversations() {
         </div>
 
         {/* Chat Area */}
-        <div className="flex-1 flex flex-col">
+        <div className={cn(
+          "flex-1 flex flex-col",
+          !selectedConversation && "hidden md:flex"
+        )}>
           {selectedConversation ? (
             <>
               {/* Chat Header */}
-              <div className="h-16 border-b border-border flex items-center justify-between px-4 bg-card">
-                <div className="flex items-center gap-3">
-                  <Avatar className="h-10 w-10">
+              <div className="h-14 md:h-16 border-b border-border flex items-center justify-between px-2 md:px-4 bg-card">
+                <div className="flex items-center gap-2 md:gap-3">
+                  {/* Back button for mobile */}
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="md:hidden shrink-0"
+                    onClick={() => setSelectedConversation(null)}
+                  >
+                    <ArrowLeft className="h-5 w-5" />
+                  </Button>
+                  <Avatar className="h-9 w-9 md:h-10 md:w-10 shrink-0">
                     <AvatarImage src={selectedConversation.contact.profile_picture_url || ""} />
                     <AvatarFallback className="bg-primary/10 text-primary">
                       {getContactInitials(selectedConversation.contact)}
                     </AvatarFallback>
                   </Avatar>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h3 className="font-medium">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 md:gap-2">
+                      <h3 className="font-medium truncate text-sm md:text-base">
                         {getContactName(selectedConversation.contact)}
                       </h3>
-                      {/* Attendance Mode Badge */}
+                      {/* Attendance Mode Badge - Compact on mobile */}
                       <Badge 
                         variant={selectedConversation.attendance_mode === "human" ? "default" : "secondary"}
-                        className="text-xs gap-1"
+                        className="text-xs gap-0.5 md:gap-1 px-1.5 md:px-2 shrink-0"
                       >
                         {selectedConversation.attendance_mode === "human" ? (
                           <>
                             <User className="h-3 w-3" />
-                            Humano
+                            <span className="hidden sm:inline">Humano</span>
                           </>
                         ) : (
                           <>
                             <Bot className="h-3 w-3" />
-                            IA
+                            <span className="hidden sm:inline">IA</span>
                           </>
                         )}
                       </Badge>
                     </div>
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-xs text-muted-foreground truncate hidden sm:block">
                       {selectedConversation.contact.phone_number}
                       {selectedConversation.instance && (
                         <span className="ml-2 text-primary">
@@ -837,22 +865,22 @@ export default function Conversations() {
                     </p>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  {/* Transfer Buttons */}
+                <div className="flex items-center gap-1 md:gap-2 shrink-0">
+                  {/* Transfer Buttons - Hidden on mobile, use sheet instead */}
                   {selectedConversation.attendance_mode === "human" ? (
                     <Button 
                       variant="outline" 
                       size="sm"
                       onClick={handleTransferToAI}
                       disabled={transferring}
-                      className="gap-1.5"
+                      className="gap-1.5 hidden md:flex"
                     >
                       {transferring ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
                       ) : (
                         <Bot className="h-4 w-4" />
                       )}
-                      Devolver para IA
+                      <span className="hidden lg:inline">Devolver para IA</span>
                     </Button>
                   ) : (
                     <Button 
@@ -860,29 +888,138 @@ export default function Conversations() {
                       size="sm"
                       onClick={handleTransferToHuman}
                       disabled={transferring}
-                      className="gap-1.5"
+                      className="gap-1.5 hidden md:flex"
                     >
                       {transferring ? (
                         <Loader2 className="h-4 w-4 animate-spin" />
                       ) : (
                         <UserCheck className="h-4 w-4" />
                       )}
-                      Assumir Atendimento
+                      <span className="hidden lg:inline">Assumir</span>
                     </Button>
                   )}
-                  <OutboundCallDialog
-                    contact={selectedConversation.contact}
-                    workspaceId={workspace?.id || ""}
-                  />
-                  <Button variant="ghost" size="icon">
+                  <div className="hidden md:block">
+                    <OutboundCallDialog
+                      contact={selectedConversation.contact}
+                      workspaceId={workspace?.id || ""}
+                    />
+                  </div>
+                  
+                  {/* Contact Info Sheet for mobile/tablet */}
+                  <Sheet>
+                    <SheetTrigger asChild>
+                      <Button variant="ghost" size="icon" className="xl:hidden">
+                        <Info className="h-4 w-4" />
+                      </Button>
+                    </SheetTrigger>
+                    <SheetContent side="right" className="w-[300px] sm:w-[350px]">
+                      <SheetHeader>
+                        <SheetTitle>Detalhes do Contato</SheetTitle>
+                      </SheetHeader>
+                      <div className="mt-6">
+                        <div className="text-center mb-6">
+                          <Avatar className="h-20 w-20 mx-auto mb-3">
+                            <AvatarImage src={selectedConversation.contact.profile_picture_url || ""} />
+                            <AvatarFallback className="bg-primary/10 text-primary text-2xl">
+                              {getContactInitials(selectedConversation.contact)}
+                            </AvatarFallback>
+                          </Avatar>
+                          <h3 className="font-semibold text-lg">
+                            {getContactName(selectedConversation.contact)}
+                          </h3>
+                          <p className="text-sm text-muted-foreground">
+                            {selectedConversation.contact.phone_number}
+                          </p>
+                        </div>
+
+                        <Separator className="my-4" />
+
+                        <div className="space-y-4">
+                          <div>
+                            <h4 className="text-sm font-medium text-muted-foreground mb-2">Instância</h4>
+                            <Badge variant="outline">
+                              {selectedConversation.instance?.name || "Não identificada"}
+                            </Badge>
+                          </div>
+
+                          <div>
+                            <h4 className="text-sm font-medium text-muted-foreground mb-2">Modo de Atendimento</h4>
+                            <Badge 
+                              variant={selectedConversation.attendance_mode === "human" ? "default" : "secondary"}
+                              className="gap-1"
+                            >
+                              {selectedConversation.attendance_mode === "human" ? (
+                                <>
+                                  <User className="h-3 w-3" />
+                                  Atendimento Humano
+                                </>
+                              ) : (
+                                <>
+                                  <Bot className="h-3 w-3" />
+                                  Atendimento IA
+                                </>
+                              )}
+                            </Badge>
+                          </div>
+
+                          <div>
+                            <h4 className="text-sm font-medium text-muted-foreground mb-2">Status</h4>
+                            <Badge variant="outline" className="capitalize">
+                              {selectedConversation.status === "waiting_human" ? "Aguardando Atendente" :
+                               selectedConversation.status === "in_progress" ? "Em Atendimento" :
+                               selectedConversation.status === "open" ? "Aberta" :
+                               selectedConversation.status}
+                            </Badge>
+                          </div>
+
+                          <Separator className="my-2" />
+
+                          <div>
+                            <h4 className="text-sm font-medium text-muted-foreground mb-2">Ações</h4>
+                            <div className="space-y-2">
+                              {selectedConversation.attendance_mode === "human" ? (
+                                <Button 
+                                  variant="outline" 
+                                  size="sm" 
+                                  className="w-full justify-start gap-2"
+                                  onClick={handleTransferToAI}
+                                  disabled={transferring}
+                                >
+                                  {transferring ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />}
+                                  Devolver para IA
+                                </Button>
+                              ) : (
+                                <Button 
+                                  variant="default" 
+                                  size="sm" 
+                                  className="w-full justify-start gap-2"
+                                  onClick={handleTransferToHuman}
+                                  disabled={transferring}
+                                >
+                                  {transferring ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserCheck className="h-4 w-4" />}
+                                  Assumir Atendimento
+                                </Button>
+                              )}
+                              <OutboundCallDialog
+                                contact={selectedConversation.contact}
+                                workspaceId={workspace?.id || ""}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </SheetContent>
+                  </Sheet>
+                  
+                  <Button variant="ghost" size="icon" className="hidden md:flex">
                     <MoreVertical className="h-4 w-4" />
                   </Button>
                 </div>
               </div>
 
               {/* Messages Area */}
-              <ScrollArea className="flex-1 p-4 bg-muted/30">
-                <div className="space-y-4 max-w-3xl mx-auto">
+              <ScrollArea className="flex-1 p-3 md:p-4 bg-muted/30">
+                <div className="space-y-3 md:space-y-4 max-w-3xl mx-auto">
                   {messages.length === 0 ? (
                     <div className="flex flex-col items-center justify-center py-12 text-center">
                       <MessageSquare className="h-10 w-10 text-muted-foreground/50 mb-3" />
@@ -934,23 +1071,28 @@ export default function Conversations() {
                       return (
                         <div
                           key={msg.id}
-                          className={`flex ${msg.direction === "outgoing" ? "justify-end" : "justify-start"}`}
+                          className={cn(
+                            "flex",
+                            msg.direction === "outgoing" ? "justify-end" : "justify-start"
+                          )}
                         >
                           <div
-                            className={`max-w-[70%] rounded-2xl px-4 py-2 ${
+                            className={cn(
+                              "max-w-[85%] md:max-w-[70%] rounded-2xl px-3 md:px-4 py-2",
                               msg.direction === "outgoing"
                                 ? "bg-primary text-primary-foreground rounded-br-md"
                                 : "bg-card border border-border rounded-bl-md"
-                            }`}
+                            )}
                           >
                             {getSourceIcon()}
                             <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
                             <div
-                              className={`flex items-center justify-end gap-1 mt-1 ${
+                              className={cn(
+                                "flex items-center justify-end gap-1 mt-1",
                                 msg.direction === "outgoing"
                                   ? "text-primary-foreground/70"
                                   : "text-muted-foreground"
-                              }`}
+                              )}
                             >
                               <span className="text-xs">
                                 {new Date(msg.created_at).toLocaleTimeString("pt-BR", {
@@ -970,9 +1112,9 @@ export default function Conversations() {
               </ScrollArea>
 
               {/* Message Input */}
-              <div className="p-4 border-t border-border bg-card">
-                <div className="flex items-center gap-2 max-w-3xl mx-auto">
-                  <Button variant="ghost" size="icon">
+              <div className="p-2 md:p-4 border-t border-border bg-card">
+                <div className="flex items-center gap-1 md:gap-2 max-w-3xl mx-auto">
+                  <Button variant="ghost" size="icon" className="shrink-0 hidden sm:flex">
                     <Paperclip className="h-5 w-5" />
                   </Button>
                   <Input
@@ -987,11 +1129,12 @@ export default function Conversations() {
                     className="flex-1"
                     disabled={selectedConversation.instance?.status !== "connected"}
                   />
-                  <Button variant="ghost" size="icon">
+                  <Button variant="ghost" size="icon" className="shrink-0 hidden sm:flex">
                     <Mic className="h-5 w-5" />
                   </Button>
                   <Button
                     size="icon"
+                    className="shrink-0"
                     onClick={handleSendMessage}
                     disabled={
                       !newMessage.trim() ||
@@ -1013,8 +1156,8 @@ export default function Conversations() {
               <div className="h-20 w-20 rounded-full bg-primary/10 flex items-center justify-center mb-6">
                 <MessageSquare className="h-10 w-10 text-primary" />
               </div>
-              <h2 className="text-2xl font-semibold mb-2">Thoth.AI Inbox</h2>
-              <p className="text-muted-foreground max-w-md">
+              <h2 className="text-xl md:text-2xl font-semibold mb-2">THOTH.AI Inbox</h2>
+              <p className="text-muted-foreground max-w-md text-sm md:text-base">
                 Selecione uma conversa para começar a atender ou aguarde novas mensagens
                 dos seus clientes.
               </p>
@@ -1022,9 +1165,9 @@ export default function Conversations() {
           )}
         </div>
 
-        {/* Contact Info Sidebar - Only show when conversation selected */}
+        {/* Contact Info Sidebar - Desktop only (xl+) */}
         {selectedConversation && (
-          <div className="w-72 border-l border-border bg-card p-4 hidden lg:block">
+          <div className="w-72 border-l border-border bg-card p-4 hidden xl:block">
             <div className="text-center mb-6">
               <Avatar className="h-20 w-20 mx-auto mb-3">
                 <AvatarImage src={selectedConversation.contact.profile_picture_url || ""} />
