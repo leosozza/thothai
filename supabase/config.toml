@@ -140,3 +140,6 @@ verify_jwt = false
 
 [functions.evolution-send-message]
 verify_jwt = false
+
+[functions.assign-conversation]
+verify_jwt = true

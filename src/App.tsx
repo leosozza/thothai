@@ -30,6 +30,7 @@ import GenerateLogo from "./pages/GenerateLogo";
 import AIProviders from "./pages/AIProviders";
 import Diagnostics from "./pages/Diagnostics";
 import Calls from "./pages/Calls";
+import Operator from "./pages/Operator";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -80,6 +81,7 @@ const App = () => (
                       <Route path="/analytics" element={<Dashboard />} />
                       <Route path="/playground" element={<Playground />} />
                       <Route path="/calls" element={<Calls />} />
+                      <Route path="/operator" element={<Operator />} />
                       <Route path="*" element={<NotFound />} />
                     </Routes>
                   </WorkspaceProvider>
