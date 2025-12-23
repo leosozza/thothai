@@ -1,6 +1,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+const FUNCTION_VERSION = "2025-12-23-v3";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -116,7 +118,7 @@ serve(async (req) => {
       original_message_type = "text"
     } = await req.json();
 
-    console.log("=== FLOW ENGINE ===");
+    console.log(`=== FLOW ENGINE (${FUNCTION_VERSION}) ===`);
     console.log("Input:", { message_id, content: content?.substring(0, 50), is_first_message, workspace_id });
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;

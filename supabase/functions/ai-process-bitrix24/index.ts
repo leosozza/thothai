@@ -1,6 +1,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+const FUNCTION_VERSION = "2025-12-23-v3";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -77,39 +79,86 @@ async function searchKnowledge(
 }
 
 /**
- * Try to acquire a processing lock on the conversation
+ * Fallback time-based lock using last_message_at
+ */
+async function fallbackTimeLock(supabase: any, conversationId: string): Promise<boolean> {
+  try {
+    const { data: conv } = await supabase
+      .from("conversations")
+      .select("last_message_at, updated_at")
+      .eq("id", conversationId)
+      .single();
+
+    if (!conv) return true;
+
+    const lastUpdate = new Date(conv.updated_at || conv.last_message_at);
+    const now = new Date();
+    const diffMs = now.getTime() - lastUpdate.getTime();
+
+    if (diffMs < 2000) {
+      console.log(`Fallback lock: Too recent (${diffMs}ms ago), skipping`);
+      return false;
+    }
+
+    await supabase
+      .from("conversations")
+      .update({ updated_at: now.toISOString() })
+      .eq("id", conversationId);
+
+    return true;
+  } catch (error) {
+    console.error("Fallback lock error:", error);
+    return true;
+  }
+}
+
+/**
+ * Try to acquire a processing lock with fallback
  */
 async function tryAcquireLock(
   supabase: any, 
   conversationId: string, 
   lockTimeoutMs: number = 30000
 ): Promise<boolean> {
-  const now = new Date();
-  const lockExpiry = new Date(now.getTime() - lockTimeoutMs);
+  try {
+    const now = new Date();
+    const lockExpiry = new Date(now.getTime() - lockTimeoutMs);
 
-  const { data, error } = await supabase
-    .from("conversations")
-    .update({ processing_lock_at: now.toISOString() })
-    .eq("id", conversationId)
-    .or(`processing_lock_at.is.null,processing_lock_at.lt.${lockExpiry.toISOString()}`)
-    .select("id");
+    const { data, error } = await supabase
+      .from("conversations")
+      .update({ processing_lock_at: now.toISOString() })
+      .eq("id", conversationId)
+      .or(`processing_lock_at.is.null,processing_lock_at.lt.${lockExpiry.toISOString()}`)
+      .select("id");
 
-  if (error) {
-    console.error("Error acquiring lock:", error);
-    return false;
+    if (error) {
+      if (error.code === "42703") {
+        console.warn(`Lock column missing (code: ${error.code}), using fallback`);
+        return await fallbackTimeLock(supabase, conversationId);
+      }
+      console.error("Error acquiring lock:", error);
+      return await fallbackTimeLock(supabase, conversationId);
+    }
+
+    return data && data.length > 0;
+  } catch (error) {
+    console.error("Lock exception, using fallback:", error);
+    return await fallbackTimeLock(supabase, conversationId);
   }
-
-  return data && data.length > 0;
 }
 
 /**
  * Release the processing lock
  */
 async function releaseLock(supabase: any, conversationId: string): Promise<void> {
-  await supabase
-    .from("conversations")
-    .update({ processing_lock_at: null })
-    .eq("id", conversationId);
+  try {
+    await supabase
+      .from("conversations")
+      .update({ processing_lock_at: null })
+      .eq("id", conversationId);
+  } catch (error) {
+    console.warn("Could not release lock:", error);
+  }
 }
 
 serve(async (req) => {
@@ -134,7 +183,7 @@ serve(async (req) => {
       message_type = "connector"
     } = await req.json();
     
-    console.log("=== AI PROCESS BITRIX24 ===");
+    console.log(`=== AI PROCESS BITRIX24 (${FUNCTION_VERSION}) ===`);
     console.log("Input:", { conversation_id, contact_id, content: content?.substring(0, 50), workspace_id, line_id, message_type, persona_id });
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
