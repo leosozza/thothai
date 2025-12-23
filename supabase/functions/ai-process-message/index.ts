@@ -508,6 +508,25 @@ serve(async (req) => {
       }
 
       // Send message via WhatsApp (audio or text)
+      // Get instance to determine provider type
+      const { data: instance } = await supabase
+        .from("instances")
+        .select("provider_type, evolution_instance_name")
+        .eq("id", instance_id)
+        .single();
+
+      const providerType = instance?.provider_type || "wapi";
+      
+      // Determine which send function to use based on provider_type
+      let sendFunction = "wapi-send-message";
+      if (providerType === "evolution") {
+        sendFunction = "evolution-send-message";
+      } else if (providerType === "gupshup") {
+        sendFunction = "gupshup-send-message";
+      }
+
+      console.log(`Provider factory: Using ${sendFunction} for provider_type=${providerType}`);
+
       const sendPayload: Record<string, unknown> = {
         instance_id,
         phone_number: contact.phone_number,
@@ -515,6 +534,7 @@ serve(async (req) => {
         contact_id,
         workspace_id,
         internal_call: true,
+        evolution_instance_name: instance?.evolution_instance_name,
       };
 
       if (audioBase64) {
@@ -525,7 +545,7 @@ serve(async (req) => {
         sendPayload.message = aiContent;
       }
 
-      const sendResponse = await fetch(`${supabaseUrl}/functions/v1/wapi-send-message`, {
+      const sendResponse = await fetch(`${supabaseUrl}/functions/v1/${sendFunction}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -536,7 +556,7 @@ serve(async (req) => {
 
       if (!sendResponse.ok) {
         const sendError = await sendResponse.text();
-        console.error("Failed to send message:", sendError);
+        console.error(`Failed to send message via ${sendFunction}:`, sendError);
         throw new Error("Failed to send WhatsApp message");
       }
 

@@ -494,6 +494,7 @@ async function sendMessage(supabaseUrl: string, supabaseKey: string, params: {
 }) {
   const supabase = createClient(supabaseUrl, supabaseKey);
 
+  // Get contact phone number
   const { data: contact } = await supabase
     .from("contacts")
     .select("phone_number")
@@ -505,7 +506,26 @@ async function sendMessage(supabaseUrl: string, supabaseKey: string, params: {
     return;
   }
 
-  const response = await fetch(`${supabaseUrl}/functions/v1/wapi-send-message`, {
+  // Get instance to determine provider type
+  const { data: instance } = await supabase
+    .from("instances")
+    .select("provider_type, evolution_instance_name")
+    .eq("id", params.instance_id)
+    .single();
+
+  const providerType = instance?.provider_type || "wapi";
+  
+  // Determine which send function to use based on provider_type
+  let sendFunction = "wapi-send-message";
+  if (providerType === "evolution") {
+    sendFunction = "evolution-send-message";
+  } else if (providerType === "gupshup") {
+    sendFunction = "gupshup-send-message";
+  }
+
+  console.log(`Provider factory: Using ${sendFunction} for provider_type=${providerType}`);
+
+  const response = await fetch(`${supabaseUrl}/functions/v1/${sendFunction}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -517,10 +537,11 @@ async function sendMessage(supabaseUrl: string, supabaseKey: string, params: {
       message: params.message,
       conversation_id: params.conversation_id,
       contact_id: params.contact_id,
+      evolution_instance_name: instance?.evolution_instance_name,
     }),
   });
 
   if (!response.ok) {
-    console.error("Failed to send flow message:", await response.text());
+    console.error(`Failed to send flow message via ${sendFunction}:`, await response.text());
   }
 }

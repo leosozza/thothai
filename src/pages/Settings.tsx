@@ -28,7 +28,9 @@ import {
   Palette,
   Sun,
   Moon,
-  Sparkles
+  Sparkles,
+  Smartphone,
+  ExternalLink
 } from "lucide-react";
 
 interface Profile {
@@ -44,6 +46,14 @@ interface NotificationSettings {
   emailDailySummary: boolean;
   pushNotifications: boolean;
   soundEnabled: boolean;
+}
+
+interface ProviderConfig {
+  wapi_base_url: string;
+  wapi_api_key: string;
+  wapi_instance_id: string;
+  evolution_server_url: string;
+  evolution_api_key: string;
 }
 
 const Settings = () => {
@@ -77,6 +87,18 @@ const Settings = () => {
   const [showPassword, setShowPassword] = useState(false);
   const [changingPassword, setChangingPassword] = useState(false);
 
+  // Provider settings
+  const [providerConfig, setProviderConfig] = useState<ProviderConfig>({
+    wapi_base_url: "https://api.w-api.app",
+    wapi_api_key: "",
+    wapi_instance_id: "",
+    evolution_server_url: "",
+    evolution_api_key: "",
+  });
+  const [loadingProviders, setLoadingProviders] = useState(false);
+  const [savingProviders, setSavingProviders] = useState(false);
+  const [showProviderKeys, setShowProviderKeys] = useState(false);
+
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -89,6 +111,12 @@ const Settings = () => {
       fetchProfile();
     }
   }, [user]);
+
+  useEffect(() => {
+    if (workspace) {
+      fetchProviderConfig();
+    }
+  }, [workspace]);
 
 
   const fetchProfile = async () => {
@@ -108,6 +136,130 @@ const Settings = () => {
       console.error("Error fetching profile:", error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchProviderConfig = async () => {
+    if (!workspace) return;
+    setLoadingProviders(true);
+
+    try {
+      // Fetch W-API config
+      const { data: wapiIntegration } = await supabase
+        .from("integrations")
+        .select("config")
+        .eq("workspace_id", workspace.id)
+        .eq("type", "wapi")
+        .maybeSingle();
+
+      // Fetch Evolution API config
+      const { data: evolutionIntegration } = await supabase
+        .from("integrations")
+        .select("config")
+        .eq("workspace_id", workspace.id)
+        .eq("type", "evolution")
+        .maybeSingle();
+
+      const wapiConfig = wapiIntegration?.config as Record<string, string> | null;
+      const evolutionConfig = evolutionIntegration?.config as Record<string, string> | null;
+
+      setProviderConfig({
+        wapi_base_url: wapiConfig?.base_url || "https://api.w-api.app",
+        wapi_api_key: wapiConfig?.api_key || "",
+        wapi_instance_id: wapiConfig?.instance_id || "",
+        evolution_server_url: evolutionConfig?.server_url || "",
+        evolution_api_key: evolutionConfig?.api_key || "",
+      });
+    } catch (error) {
+      console.error("Error fetching provider config:", error);
+    } finally {
+      setLoadingProviders(false);
+    }
+  };
+
+  const saveProviderConfig = async () => {
+    if (!workspace) return;
+    setSavingProviders(true);
+
+    try {
+      // Save W-API config
+      const { data: existingWapi } = await supabase
+        .from("integrations")
+        .select("id")
+        .eq("workspace_id", workspace.id)
+        .eq("type", "wapi")
+        .maybeSingle();
+
+      if (existingWapi) {
+        await supabase
+          .from("integrations")
+          .update({
+            config: {
+              base_url: providerConfig.wapi_base_url,
+              api_key: providerConfig.wapi_api_key,
+              instance_id: providerConfig.wapi_instance_id,
+            },
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", existingWapi.id);
+      } else if (providerConfig.wapi_api_key) {
+        await supabase.from("integrations").insert({
+          workspace_id: workspace.id,
+          name: "W-API",
+          type: "wapi",
+          is_active: true,
+          config: {
+            base_url: providerConfig.wapi_base_url,
+            api_key: providerConfig.wapi_api_key,
+            instance_id: providerConfig.wapi_instance_id,
+          },
+        });
+      }
+
+      // Save Evolution API config
+      const { data: existingEvolution } = await supabase
+        .from("integrations")
+        .select("id")
+        .eq("workspace_id", workspace.id)
+        .eq("type", "evolution")
+        .maybeSingle();
+
+      if (existingEvolution) {
+        await supabase
+          .from("integrations")
+          .update({
+            config: {
+              server_url: providerConfig.evolution_server_url,
+              api_key: providerConfig.evolution_api_key,
+            },
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", existingEvolution.id);
+      } else if (providerConfig.evolution_api_key) {
+        await supabase.from("integrations").insert({
+          workspace_id: workspace.id,
+          name: "Evolution API",
+          type: "evolution",
+          is_active: true,
+          config: {
+            server_url: providerConfig.evolution_server_url,
+            api_key: providerConfig.evolution_api_key,
+          },
+        });
+      }
+
+      toast({
+        title: "Configurações salvas",
+        description: "As configurações de provedores foram atualizadas.",
+      });
+    } catch (error: any) {
+      toast({
+        title: "Erro ao salvar",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setSavingProviders(false);
     }
   };
 
@@ -222,10 +374,14 @@ const Settings = () => {
         </div>
 
         <Tabs defaultValue="profile" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-5 lg:w-auto lg:inline-flex">
+          <TabsList className="grid w-full grid-cols-6 lg:w-auto lg:inline-flex">
             <TabsTrigger value="profile" className="gap-2">
               <User className="h-4 w-4 hidden sm:inline" />
               Perfil
+            </TabsTrigger>
+            <TabsTrigger value="providers" className="gap-2">
+              <Smartphone className="h-4 w-4 hidden sm:inline" />
+              Provedores
             </TabsTrigger>
             <TabsTrigger value="appearance" className="gap-2">
               <Palette className="h-4 w-4 hidden sm:inline" />
@@ -321,6 +477,198 @@ const Settings = () => {
                 </div>
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* Providers Tab */}
+          <TabsContent value="providers">
+            <div className="space-y-6">
+              {/* W-API Configuration */}
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle className="flex items-center gap-2">
+                        <div className="h-8 w-8 rounded-full bg-blue-100 flex items-center justify-center">
+                          <span className="text-blue-600 font-bold text-sm">W</span>
+                        </div>
+                        W-API
+                      </CardTitle>
+                      <CardDescription>
+                        Conecte números WhatsApp via QR Code
+                      </CardDescription>
+                    </div>
+                    <a
+                      href="https://w-api.app"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm text-muted-foreground hover:text-primary flex items-center gap-1"
+                    >
+                      Documentação
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid gap-4">
+                    <div className="grid gap-2">
+                      <Label htmlFor="wapi-base-url">URL Base</Label>
+                      <Input
+                        id="wapi-base-url"
+                        value={providerConfig.wapi_base_url}
+                        onChange={(e) =>
+                          setProviderConfig((prev) => ({
+                            ...prev,
+                            wapi_base_url: e.target.value,
+                          }))
+                        }
+                        placeholder="https://api.w-api.app"
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="wapi-api-key">API Key</Label>
+                      <div className="relative">
+                        <Input
+                          id="wapi-api-key"
+                          type={showProviderKeys ? "text" : "password"}
+                          value={providerConfig.wapi_api_key}
+                          onChange={(e) =>
+                            setProviderConfig((prev) => ({
+                              ...prev,
+                              wapi_api_key: e.target.value,
+                            }))
+                          }
+                          placeholder="Sua API Key da W-API"
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="absolute right-0 top-0 h-full px-3"
+                          onClick={() => setShowProviderKeys(!showProviderKeys)}
+                        >
+                          {showProviderKeys ? (
+                            <EyeOff className="h-4 w-4" />
+                          ) : (
+                            <Eye className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="wapi-instance-id">Instance ID (opcional)</Label>
+                      <Input
+                        id="wapi-instance-id"
+                        value={providerConfig.wapi_instance_id}
+                        onChange={(e) =>
+                          setProviderConfig((prev) => ({
+                            ...prev,
+                            wapi_instance_id: e.target.value,
+                          }))
+                        }
+                        placeholder="ID da instância padrão"
+                      />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Evolution API Configuration */}
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <CardTitle className="flex items-center gap-2">
+                        <div className="h-8 w-8 rounded-full bg-green-100 flex items-center justify-center">
+                          <span className="text-green-600 font-bold text-sm">E</span>
+                        </div>
+                        Evolution API
+                      </CardTitle>
+                      <CardDescription>
+                        Conecte números WhatsApp via servidor Evolution
+                      </CardDescription>
+                    </div>
+                    <a
+                      href="https://doc.evolution-api.com"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-sm text-muted-foreground hover:text-primary flex items-center gap-1"
+                    >
+                      Documentação
+                      <ExternalLink className="h-3 w-3" />
+                    </a>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="p-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg">
+                    <p className="text-sm text-blue-800 dark:text-blue-200 font-medium mb-2">
+                      📋 Configuração do Servidor Evolution
+                    </p>
+                    <p className="text-xs text-blue-700 dark:text-blue-300">
+                      Você precisa hospedar sua própria instância do Evolution API. 
+                      Use Docker ou VPS para instalação. Consulte a documentação oficial.
+                    </p>
+                  </div>
+
+                  <div className="grid gap-4">
+                    <div className="grid gap-2">
+                      <Label htmlFor="evolution-server-url">URL do Servidor</Label>
+                      <Input
+                        id="evolution-server-url"
+                        value={providerConfig.evolution_server_url}
+                        onChange={(e) =>
+                          setProviderConfig((prev) => ({
+                            ...prev,
+                            evolution_server_url: e.target.value,
+                          }))
+                        }
+                        placeholder="https://evolution.seudominio.com"
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="evolution-api-key">API Key Global</Label>
+                      <div className="relative">
+                        <Input
+                          id="evolution-api-key"
+                          type={showProviderKeys ? "text" : "password"}
+                          value={providerConfig.evolution_api_key}
+                          onChange={(e) =>
+                            setProviderConfig((prev) => ({
+                              ...prev,
+                              evolution_api_key: e.target.value,
+                            }))
+                          }
+                          placeholder="Chave API do servidor Evolution"
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="absolute right-0 top-0 h-full px-3"
+                          onClick={() => setShowProviderKeys(!showProviderKeys)}
+                        >
+                          {showProviderKeys ? (
+                            <EyeOff className="h-4 w-4" />
+                          ) : (
+                            <Eye className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <div className="flex justify-end">
+                <Button onClick={saveProviderConfig} disabled={savingProviders || loadingProviders}>
+                  {savingProviders ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <Save className="h-4 w-4 mr-2" />
+                  )}
+                  Salvar Configurações
+                </Button>
+              </div>
+            </div>
           </TabsContent>
 
           {/* Appearance Tab */}
