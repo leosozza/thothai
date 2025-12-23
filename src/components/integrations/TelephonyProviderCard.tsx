@@ -29,7 +29,7 @@ interface TelephonyProvider {
 }
 
 interface TelephonyProviderCardProps {
-  providerType: "wavoip" | "twilio" | "telnyx" | "falefacil";
+  providerType: "wavoip" | "twilio" | "telnyx" | "sip";
   onSaved?: () => void;
 }
 
@@ -67,18 +67,18 @@ const providerConfigs = {
     ],
     docs: "https://developers.telnyx.com/docs/voice",
   },
-  falefacil: {
-    name: "Fale Fácil VoIP",
-    description: "SIP Trunking via Fale Fácil",
+  sip: {
+    name: "SIP Trunk",
+    description: "Provedor SIP genérico (qualquer servidor)",
     icon: Phone,
     color: "bg-purple-500",
     fields: [
       { key: "sip_account", label: "Conta SIP", type: "text", placeholder: "Ex: 51914001" },
       { key: "sip_password", label: "Senha VoIP", type: "password", placeholder: "Sua senha VoIP" },
-      { key: "sip_server", label: "Servidor SIP", type: "text", placeholder: "sip.falefacilvoip.com.br" },
+      { key: "sip_server", label: "Servidor SIP", type: "text", placeholder: "sip.seuservidor.com.br" },
       { key: "phone_number", label: "Número (E.164)", type: "text", placeholder: "+5551999999999" },
     ],
-    docs: "https://falefacilvoip.com.br",
+    docs: "https://elevenlabs.io/docs/conversational-ai/phone-numbers",
   },
 };
 

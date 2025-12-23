@@ -2065,7 +2065,7 @@ export default function Integrations() {
                 <TelephonyProviderCard providerType="wavoip" />
                 <TelephonyProviderCard providerType="twilio" />
                 <TelephonyProviderCard providerType="telnyx" />
-                <TelephonyProviderCard providerType="falefacil" />
+                <TelephonyProviderCard providerType="sip" />
               </div>
             </div>
 
