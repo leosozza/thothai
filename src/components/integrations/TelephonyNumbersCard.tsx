@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useWorkspace } from "@/hooks/useWorkspace";
-import { Loader2, Phone, RefreshCw, Settings, Trash2, MessageSquare, Download } from "lucide-react";
+import { Loader2, Phone, RefreshCw, Settings, Trash2, MessageSquare, Download, PhoneOutgoing } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -31,6 +31,7 @@ interface TelephonyNumber {
   friendly_name: string | null;
   persona_id: string | null;
   elevenlabs_agent_id: string | null;
+  provider_number_id: string | null;
   is_active: boolean;
   provider_type?: string;
   provider_name?: string;
@@ -69,6 +70,7 @@ export function TelephonyNumbersCard() {
   const [selectedNumber, setSelectedNumber] = useState<TelephonyNumber | null>(null);
   const [selectedPersonaId, setSelectedPersonaId] = useState<string>("");
   const [saving, setSaving] = useState(false);
+  const [registeringNumber, setRegisteringNumber] = useState<string | null>(null);
 
   useEffect(() => {
     if (workspace?.id) {
@@ -100,6 +102,7 @@ export function TelephonyNumbersCard() {
           friendly_name,
           persona_id,
           elevenlabs_agent_id,
+          provider_number_id,
           is_active,
           telephony_providers (provider_type, name),
           personas (name)
@@ -115,6 +118,7 @@ export function TelephonyNumbersCard() {
         friendly_name: item.friendly_name,
         persona_id: item.persona_id,
         elevenlabs_agent_id: item.elevenlabs_agent_id,
+        provider_number_id: item.provider_number_id,
         is_active: item.is_active,
         provider_type: item.telephony_providers?.provider_type,
         provider_name: item.telephony_providers?.name,
@@ -234,6 +238,86 @@ export function TelephonyNumbersCard() {
     }
   };
 
+  const handleRegisterInElevenLabs = async (number: TelephonyNumber) => {
+    if (!workspace?.id) return;
+
+    setRegisteringNumber(number.id);
+    try {
+      // Get provider config for SIP credentials
+      const { data: provider } = await supabase
+        .from("telephony_providers")
+        .select("config, provider_type")
+        .eq("id", number.provider_id)
+        .single();
+
+      if (!provider) {
+        throw new Error("Provedor não encontrado");
+      }
+
+      const config = provider.config as {
+        sip_account?: string;
+        sip_password?: string;
+        sip_server?: string;
+      };
+
+      // For SIP providers, we need credentials
+      if (provider.provider_type === "sip" && (!config.sip_account || !config.sip_password || !config.sip_server)) {
+        toast.error("Configuração SIP incompleta. Verifique conta, senha e servidor.");
+        return;
+      }
+
+      // Get agent ID from persona or number
+      let agentId = number.elevenlabs_agent_id;
+      if (!agentId && number.persona_id) {
+        const persona = personas.find(p => p.id === number.persona_id);
+        agentId = persona?.elevenlabs_agent_id || null;
+      }
+
+      if (!agentId) {
+        toast.error("Primeiro associe uma persona com agente ElevenLabs configurado.");
+        return;
+      }
+
+      const { data, error } = await supabase.functions.invoke("elevenlabs-register-phone", {
+        body: {
+          action: "register_sip",
+          workspace_id: workspace.id,
+          phone_number: number.phone_number,
+          agent_id: agentId,
+          sip_account: config.sip_account,
+          sip_password: config.sip_password,
+          sip_server: config.sip_server,
+          number_id: number.id,
+        },
+      });
+
+      if (error) throw error;
+
+      if (data?.success) {
+        // Update the number with the ElevenLabs phone ID
+        if (data.elevenlabs_phone_id) {
+          await supabase
+            .from("telephony_numbers")
+            .update({ 
+              provider_number_id: data.elevenlabs_phone_id,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", number.id);
+        }
+
+        toast.success("Número registrado no ElevenLabs com sucesso!");
+        fetchData();
+      } else {
+        throw new Error(data?.error || "Erro ao registrar");
+      }
+    } catch (error: any) {
+      console.error("Error registering in ElevenLabs:", error);
+      toast.error(error.message || "Erro ao registrar no ElevenLabs");
+    } finally {
+      setRegisteringNumber(null);
+    }
+  };
+
   // Don't render if no providers are configured
   if (!hasProviders && !loading) {
     return null;
@@ -314,12 +398,41 @@ export function TelephonyNumbersCard() {
                             ⚠ Nenhuma persona associada
                           </p>
                         )}
+                        {!number.provider_number_id && number.provider_type === "sip" && (
+                          <p className="text-xs text-orange-500 mt-1">
+                            ⚠ Não registrado no ElevenLabs
+                          </p>
+                        )}
+                        {number.provider_number_id && (
+                          <p className="text-xs text-green-600 mt-1">
+                            ✓ Registrado no ElevenLabs
+                          </p>
+                        )}
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
                       <Badge variant={number.is_active ? "outline" : "secondary"}>
                         {number.is_active ? "Ativo" : "Inativo"}
                       </Badge>
+                      
+                      {/* Show Register button for SIP numbers not yet registered */}
+                      {!number.provider_number_id && (number.provider_type === "sip" || number.provider_type === "wavoip") && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleRegisterInElevenLabs(number)}
+                          disabled={registeringNumber === number.id}
+                        >
+                          {registeringNumber === number.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <>
+                              <PhoneOutgoing className="h-4 w-4 mr-1" />
+                              Registrar
+                            </>
+                          )}
+                        </Button>
+                      )}
                       
                       {number.elevenlabs_agent_id && (
                         <VoiceTestButton

@@ -282,7 +282,14 @@ switch (action) {
 
       case "register_sip": {
         // Register a phone number with ElevenLabs using SIP Trunk
-        const { sip_account, sip_password, sip_server, phone_number: sipPhoneNumber, agent_id: sipAgentId } = body;
+        const { 
+          sip_account, 
+          sip_password, 
+          sip_server, 
+          phone_number: sipPhoneNumber, 
+          agent_id: sipAgentId,
+          number_id 
+        } = body as any;
 
         if (!sipPhoneNumber || !sip_account || !sip_password || !sip_server) {
           return new Response(
@@ -300,8 +307,8 @@ switch (action) {
           normalizedPhone = "+" + normalizedPhone;
         }
 
-        // Build SIP URI
-        const sipUri = `sip:${sip_account}@${sip_server}`;
+        // Build SIP URI - use sip:server:port format for Fale Fácil
+        const sipUri = `sip:${sip_server}:5060`;
 
         console.log(`[ElevenLabs Phone] Registering SIP number: ${normalizedPhone}, URI: ${sipUri}`);
 
@@ -315,11 +322,10 @@ switch (action) {
           body: JSON.stringify({
             provider: "sip_trunk",
             phone_number: normalizedPhone,
-            sip_trunk_uri: sipUri,
-            sip_trunk_authentication: {
-              username: sip_account,
-              password: sip_password,
-            },
+            label: `SIP - ${normalizedPhone}`,
+            sip_trunk_address: sipUri,
+            sip_trunk_username: sip_account,
+            sip_trunk_password: sip_password,
             ...(sipAgentId && { agent_id: sipAgentId }),
           }),
         });
@@ -335,17 +341,37 @@ switch (action) {
         }
 
         if (!elevenLabsResponse.ok) {
-          const errorMsg = elevenLabsData?.detail?.message || 
+          const errorMsg = elevenLabsData?.detail?.[0]?.msg ||
+                          elevenLabsData?.detail?.message || 
                           elevenLabsData?.message || 
                           elevenLabsData?.error ||
                           `ElevenLabs error: ${elevenLabsResponse.status}`;
+          console.error(`[ElevenLabs Phone] Registration failed:`, elevenLabsText);
           return new Response(
-            JSON.stringify({ success: false, error: errorMsg }),
+            JSON.stringify({ success: false, error: errorMsg, details: elevenLabsData }),
             { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
           );
         }
 
         const elevenLabsPhoneId = elevenLabsData?.phone_number_id || elevenLabsData?.id;
+
+        // If we have a number_id, update the record
+        if (number_id && elevenLabsPhoneId) {
+          console.log(`[ElevenLabs Phone] Updating number ${number_id} with provider_number_id: ${elevenLabsPhoneId}`);
+          
+          const { error: updateError } = await supabaseClient
+            .from("telephony_numbers")
+            .update({
+              provider_number_id: elevenLabsPhoneId,
+              elevenlabs_agent_id: sipAgentId,
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", number_id);
+
+          if (updateError) {
+            console.error(`[ElevenLabs Phone] Error updating number:`, updateError);
+          }
+        }
 
         return new Response(
           JSON.stringify({ 
