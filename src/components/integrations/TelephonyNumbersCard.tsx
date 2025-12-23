@@ -58,6 +58,13 @@ const providerColors: Record<string, string> = {
   sip: "bg-purple-500",
 };
 
+// Providers that support outbound calls
+const OUTBOUND_CAPABLE_PROVIDERS = ["twilio", "telnyx"];
+
+const supportsOutbound = (providerType: string | undefined): boolean => {
+  return OUTBOUND_CAPABLE_PROVIDERS.includes(providerType || "");
+};
+
 export function TelephonyNumbersCard() {
   const { workspace } = useWorkspace();
   const [numbers, setNumbers] = useState<TelephonyNumber[]>([]);
@@ -388,6 +395,16 @@ export function TelephonyNumbersCard() {
                           <Badge variant="outline" className="text-xs">
                             {number.provider_name}
                           </Badge>
+                          {/* Outbound capability indicator */}
+                          {supportsOutbound(number.provider_type) ? (
+                            <Badge variant="default" className="text-xs bg-green-600 hover:bg-green-700">
+                              ↔ Entrada/Saída
+                            </Badge>
+                          ) : (
+                            <Badge variant="secondary" className="text-xs bg-amber-500/10 text-amber-600 hover:bg-amber-500/20">
+                              ← Apenas Entrada
+                            </Badge>
+                          )}
                         </div>
                         {number.persona_name ? (
                           <p className="text-sm text-muted-foreground">
@@ -406,6 +423,11 @@ export function TelephonyNumbersCard() {
                         {number.provider_number_id && (
                           <p className="text-xs text-green-600 mt-1">
                             ✓ Registrado no ElevenLabs
+                          </p>
+                        )}
+                        {!supportsOutbound(number.provider_type) && (
+                          <p className="text-xs text-muted-foreground mt-1">
+                            ℹ SIP/Wavoip só recebe chamadas. Use Twilio/Telnyx para fazer chamadas.
                           </p>
                         )}
                       </div>
