@@ -125,3 +125,9 @@ verify_jwt = true
 
 [functions.mcp-server]
 verify_jwt = false
+
+[functions.cleanup-tts-audio]
+verify_jwt = false
+
+[functions.bitrix24-iframe-test]
+verify_jwt = false
