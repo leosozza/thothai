@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
+import { RealtimeMonitor } from "@/components/diagnostics/RealtimeMonitor";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -758,20 +759,23 @@ export default function Diagnostics() {
 
           {/* Activity Tab */}
           <TabsContent value="activity" className="space-y-4">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Activity className="h-5 w-5" />
-                  Atividade Recente
-                </CardTitle>
-                <CardDescription>
-                  Histórico de eventos e ações do sistema
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  {/* Recent Events Summary */}
-                  <div className="grid gap-4 md:grid-cols-4">
+            <div className="grid gap-4 lg:grid-cols-2">
+              {/* Realtime Monitor */}
+              <RealtimeMonitor />
+              
+              {/* Stats Summary */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Activity className="h-5 w-5" />
+                    Resumo de Atividade
+                  </CardTitle>
+                  <CardDescription>
+                    Estatísticas das últimas 24 horas
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid gap-4 grid-cols-2">
                     <Card className="bg-card/50">
                       <CardContent className="pt-4">
                         <div className="flex items-center gap-3">
@@ -780,7 +784,7 @@ export default function Diagnostics() {
                           </div>
                           <div>
                             <p className="text-2xl font-bold">--</p>
-                            <p className="text-xs text-muted-foreground">Mensagens (24h)</p>
+                            <p className="text-xs text-muted-foreground">Mensagens</p>
                           </div>
                         </div>
                       </CardContent>
@@ -794,7 +798,7 @@ export default function Diagnostics() {
                           </div>
                           <div>
                             <p className="text-2xl font-bold">--</p>
-                            <p className="text-xs text-muted-foreground">Respostas IA (24h)</p>
+                            <p className="text-xs text-muted-foreground">Respostas IA</p>
                           </div>
                         </div>
                       </CardContent>
@@ -808,7 +812,7 @@ export default function Diagnostics() {
                           </div>
                           <div>
                             <p className="text-2xl font-bold">--</p>
-                            <p className="text-xs text-muted-foreground">Webhooks (24h)</p>
+                            <p className="text-xs text-muted-foreground">Webhooks</p>
                           </div>
                         </div>
                       </CardContent>
@@ -822,22 +826,15 @@ export default function Diagnostics() {
                           </div>
                           <div>
                             <p className="text-2xl font-bold">{stats.errors}</p>
-                            <p className="text-xs text-muted-foreground">Erros (24h)</p>
+                            <p className="text-xs text-muted-foreground">Erros</p>
                           </div>
                         </div>
                       </CardContent>
                     </Card>
                   </div>
-
-                  {/* Activity Timeline Placeholder */}
-                  <div className="flex flex-col items-center justify-center py-12 text-muted-foreground border rounded-lg">
-                    <Activity className="h-12 w-12 mb-4 opacity-50" />
-                    <p>Timeline de atividades em breve</p>
-                    <p className="text-xs mt-1">Histórico detalhado de eventos do sistema</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            </div>
           </TabsContent>
         </Tabs>
       </div>
