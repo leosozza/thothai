@@ -7,6 +7,19 @@ const corsHeaders = {
 };
 
 /**
+ * Generate a simple hash of a message for duplicate detection
+ */
+function hashMessage(content: string): string {
+  let hash = 0;
+  for (let i = 0; i < content.length; i++) {
+    const char = content.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32bit integer
+  }
+  return hash.toString(16);
+}
+
+/**
  * Search knowledge base for relevant chunks
  */
 async function searchKnowledge(
@@ -67,6 +80,45 @@ async function searchKnowledge(
   }
 }
 
+/**
+ * Try to acquire a processing lock on the conversation
+ * Returns true if lock acquired, false if already locked
+ */
+async function tryAcquireLock(
+  supabase: any, 
+  conversationId: string, 
+  lockTimeoutMs: number = 30000
+): Promise<boolean> {
+  const now = new Date();
+  const lockExpiry = new Date(now.getTime() - lockTimeoutMs);
+
+  // Try to update only if no lock or lock expired
+  const { data, error } = await supabase
+    .from("conversations")
+    .update({ processing_lock_at: now.toISOString() })
+    .eq("id", conversationId)
+    .or(`processing_lock_at.is.null,processing_lock_at.lt.${lockExpiry.toISOString()}`)
+    .select("id");
+
+  if (error) {
+    console.error("Error acquiring lock:", error);
+    return false;
+  }
+
+  // If we got a row back, we acquired the lock
+  return data && data.length > 0;
+}
+
+/**
+ * Release the processing lock
+ */
+async function releaseLock(supabase: any, conversationId: string): Promise<void> {
+  await supabase
+    .from("conversations")
+    .update({ processing_lock_at: null })
+    .eq("id", conversationId);
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -75,7 +127,8 @@ serve(async (req) => {
   try {
     const { message_id, conversation_id, instance_id, contact_id, content, workspace_id, original_message_type = "text" } = await req.json();
     
-    console.log("AI Process Message called:", { message_id, conversation_id, instance_id, content, original_message_type });
+    console.log("=== AI PROCESS MESSAGE ===");
+    console.log("Input:", { message_id, conversation_id, instance_id, content: content?.substring(0, 50), original_message_type });
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
@@ -86,234 +139,316 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // ANTI-LOOP: Check if we already processed this conversation recently (2 seconds)
-    const { data: recentOutgoing } = await supabase
-      .from("messages")
-      .select("created_at")
-      .eq("conversation_id", conversation_id)
-      .eq("direction", "outgoing")
-      .eq("is_from_bot", true)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+    // === ANTI-LOOP MECHANISM 1: Processing Lock ===
+    const lockAcquired = await tryAcquireLock(supabase, conversation_id);
+    if (!lockAcquired) {
+      console.log("ANTI-LOOP: Could not acquire lock, another process is handling this conversation");
+      return new Response(JSON.stringify({ 
+        skipped: true, 
+        reason: "Processing lock active" 
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
-    if (recentOutgoing) {
-      const timeSince = Date.now() - new Date(recentOutgoing.created_at).getTime();
-      if (timeSince < 2000) {
-        console.log("ANTI-LOOP: Skipping - already processed recently:", timeSince, "ms ago");
+    try {
+      // === ANTI-LOOP MECHANISM 2: Check recent outgoing messages ===
+      const { data: recentOutgoing } = await supabase
+        .from("messages")
+        .select("created_at, content")
+        .eq("conversation_id", conversation_id)
+        .eq("direction", "outgoing")
+        .eq("is_from_bot", true)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (recentOutgoing) {
+        const timeSince = Date.now() - new Date(recentOutgoing.created_at).getTime();
+        if (timeSince < 3000) {
+          console.log("ANTI-LOOP: Skipping - bot message sent recently:", timeSince, "ms ago");
+          return new Response(JSON.stringify({ 
+            skipped: true, 
+            reason: "Bot message sent recently",
+            time_since_ms: timeSince 
+          }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      }
+
+      // Check conversation attendance_mode
+      const { data: conversation } = await supabase
+        .from("conversations")
+        .select("attendance_mode, bot_state")
+        .eq("id", conversation_id)
+        .single();
+
+      if (conversation?.attendance_mode === "human") {
+        console.log("SKIP: Conversation is in human mode, bot should not respond");
         return new Response(JSON.stringify({ 
           skipped: true, 
-          reason: "Already processed recently",
-          time_since_ms: timeSince 
+          reason: "Conversation in human mode" 
         }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
-    }
 
-    // Fetch the default persona for this workspace
-    let systemPrompt = "Você é um assistente prestativo e profissional. Responda de forma clara e objetiva.";
-    let personaName = "Assistente";
-    let temperature = 0.7;
-    let voiceId: string | null = null;
-    let voiceEnabled = false;
+      // Fetch the default persona for this workspace
+      let systemPrompt = "Você é um assistente prestativo e profissional. Responda de forma clara e objetiva.";
+      let personaName = "Assistente";
+      let temperature = 0.7;
+      let voiceId: string | null = null;
+      let voiceEnabled = false;
 
-    if (workspace_id) {
-      const { data: persona } = await supabase
-        .from("personas")
-        .select("*")
-        .eq("workspace_id", workspace_id)
-        .eq("is_default", true)
-        .single();
+      if (workspace_id) {
+        const { data: persona } = await supabase
+          .from("personas")
+          .select("*")
+          .eq("workspace_id", workspace_id)
+          .eq("is_default", true)
+          .single();
 
-      if (persona) {
-        systemPrompt = persona.system_prompt || systemPrompt;
-        personaName = persona.name || personaName;
-        temperature = persona.temperature || temperature;
-        voiceId = persona.voice_id || null;
-        voiceEnabled = persona.voice_enabled || false;
-        console.log("Using persona:", personaName, "voice_enabled:", voiceEnabled, "voice_id:", voiceId);
+        if (persona) {
+          systemPrompt = persona.system_prompt || systemPrompt;
+          personaName = persona.name || personaName;
+          temperature = persona.temperature || temperature;
+          voiceId = persona.voice_id || null;
+          voiceEnabled = persona.voice_enabled || false;
+          console.log("Using persona:", personaName, "voice_enabled:", voiceEnabled, "voice_id:", voiceId);
+        }
       }
-    }
 
-    // Search knowledge base for relevant context
-    let knowledgeContext = "";
-    if (workspace_id && content) {
-      const relevantChunks = await searchKnowledge(supabase, workspace_id, content);
-      
-      if (relevantChunks.length > 0) {
-        knowledgeContext = `\n\n## Base de Conhecimento\nUse as seguintes informações para responder quando relevante:\n\n${relevantChunks.join("\n\n---\n\n")}`;
-        console.log(`Found ${relevantChunks.length} relevant knowledge chunks`);
+      // Search knowledge base for relevant context
+      let knowledgeContext = "";
+      if (workspace_id && content) {
+        const relevantChunks = await searchKnowledge(supabase, workspace_id, content);
+        
+        if (relevantChunks.length > 0) {
+          knowledgeContext = `\n\n## Base de Conhecimento\nUse as seguintes informações para responder quando relevante:\n\n${relevantChunks.join("\n\n---\n\n")}`;
+          console.log(`Found ${relevantChunks.length} relevant knowledge chunks`);
+        }
       }
-    }
 
-    // Build system prompt with knowledge context
-    const fullSystemPrompt = systemPrompt + knowledgeContext;
+      // Fetch conversation history (last 15 messages for better context)
+      const { data: history } = await supabase
+        .from("messages")
+        .select("content, direction, is_from_bot, created_at")
+        .eq("conversation_id", conversation_id)
+        .order("created_at", { ascending: false })
+        .limit(15);
 
-    // Fetch conversation history (last 10 messages for context)
-    const { data: history } = await supabase
-      .from("messages")
-      .select("content, direction, is_from_bot")
-      .eq("conversation_id", conversation_id)
-      .order("created_at", { ascending: false })
-      .limit(10);
+      // Get last bot message to prevent repetition
+      const lastBotMessage = history?.find(m => m.is_from_bot && m.direction === "outgoing")?.content || "";
 
-    const messages = [
-      { role: "system", content: fullSystemPrompt },
-    ];
+      // Build anti-repetition instruction
+      const antiRepetitionPrompt = lastBotMessage 
+        ? `\n\nIMPORTANTE: Você já respondeu: "${lastBotMessage.substring(0, 200)}..."\nNÃO repita esta mensagem. Avance a conversa ou peça mais informações se necessário.`
+        : "";
 
-    // Add conversation history in chronological order
-    if (history && history.length > 0) {
-      const reversedHistory = [...history].reverse();
-      for (const msg of reversedHistory) {
-        if (msg.content) {
-          messages.push({
-            role: msg.direction === "incoming" ? "user" : "assistant",
-            content: msg.content,
+      // Build full system prompt with knowledge context and anti-repetition
+      const fullSystemPrompt = systemPrompt + knowledgeContext + antiRepetitionPrompt;
+
+      const messages = [
+        { role: "system", content: fullSystemPrompt },
+      ];
+
+      // Add conversation history in chronological order
+      if (history && history.length > 0) {
+        const reversedHistory = [...history].reverse();
+        for (const msg of reversedHistory) {
+          if (msg.content) {
+            messages.push({
+              role: msg.direction === "incoming" ? "user" : "assistant",
+              content: msg.content,
+            });
+          }
+        }
+      }
+
+      // Add current message if not already in history
+      if (content && !history?.some(h => h.content === content)) {
+        messages.push({ role: "user", content });
+      }
+
+      console.log("Sending to AI with", messages.length, "messages (knowledge context:", knowledgeContext.length > 0 ? "yes" : "no", ")");
+
+      // Call Lovable AI Gateway
+      const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${LOVABLE_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "google/gemini-2.5-flash",
+          messages,
+          temperature,
+          max_tokens: 1024,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("AI Gateway error:", response.status, errorText);
+        
+        if (response.status === 429) {
+          return new Response(JSON.stringify({ error: "Rate limit exceeded" }), {
+            status: 429,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
-      }
-    }
-
-    // Add current message if not already in history
-    if (content && !history?.some(h => h.content === content)) {
-      messages.push({ role: "user", content });
-    }
-
-    console.log("Sending to AI with", messages.length, "messages (knowledge context:", knowledgeContext.length > 0 ? "yes" : "no", ")");
-
-    // Call Lovable AI Gateway
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
-        messages,
-        temperature,
-        max_tokens: 1024,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("AI Gateway error:", response.status, errorText);
-      
-      if (response.status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limit exceeded" }), {
-          status: 429,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      if (response.status === 402) {
-        return new Response(JSON.stringify({ error: "Payment required" }), {
-          status: 402,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      throw new Error(`AI Gateway error: ${response.status}`);
-    }
-
-    const aiResponse = await response.json();
-    const aiContent = aiResponse.choices?.[0]?.message?.content;
-
-    if (!aiContent) {
-      throw new Error("No content in AI response");
-    }
-
-    console.log("AI Response:", aiContent.substring(0, 100) + "...");
-
-    // Get contact phone number
-    const { data: contact } = await supabase
-      .from("contacts")
-      .select("phone_number")
-      .eq("id", contact_id)
-      .single();
-
-    if (!contact) {
-      throw new Error("Contact not found");
-    }
-
-    // Determine if we should respond with audio
-    const shouldRespondWithAudio = original_message_type === "audio" && voiceEnabled;
-    console.log("Should respond with audio:", shouldRespondWithAudio, "original_type:", original_message_type, "voice_enabled:", voiceEnabled);
-
-    let audioBase64: string | null = null;
-
-    if (shouldRespondWithAudio) {
-      // Generate audio response using ElevenLabs TTS
-      try {
-        console.log("Generating audio response via ElevenLabs TTS...");
-        const ttsResponse = await fetch(`${supabaseUrl}/functions/v1/elevenlabs-tts`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${supabaseKey}`,
-          },
-          body: JSON.stringify({
-            text: aiContent,
-            voice: voiceId || "jessica", // Use persona's voice or default
-          }),
-        });
-
-        if (ttsResponse.ok) {
-          const ttsResult = await ttsResponse.json();
-          audioBase64 = ttsResult.audio_base64;
-          console.log("TTS audio generated successfully, size:", audioBase64?.length || 0);
-        } else {
-          const ttsError = await ttsResponse.text();
-          console.error("TTS failed, falling back to text:", ttsError);
+        if (response.status === 402) {
+          return new Response(JSON.stringify({ error: "Payment required" }), {
+            status: 402,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
         }
-      } catch (ttsErr) {
-        console.error("TTS error, falling back to text:", ttsErr);
+        throw new Error(`AI Gateway error: ${response.status}`);
       }
+
+      const aiResponse = await response.json();
+      const aiContent = aiResponse.choices?.[0]?.message?.content;
+
+      if (!aiContent) {
+        throw new Error("No content in AI response");
+      }
+
+      console.log("AI Response:", aiContent.substring(0, 100) + "...");
+
+      // === ANTI-LOOP MECHANISM 3: Check for duplicate response ===
+      const responseHash = hashMessage(aiContent);
+      const lastBotHash = lastBotMessage ? hashMessage(lastBotMessage) : "";
+      
+      if (responseHash === lastBotHash) {
+        console.log("ANTI-LOOP: AI generated same response as before, modifying...");
+        // Don't send duplicate, update bot state
+        await supabase
+          .from("conversations")
+          .update({ 
+            bot_state: { 
+              ...conversation?.bot_state,
+              duplicate_detected_at: new Date().toISOString(),
+              last_duplicate_hash: responseHash
+            }
+          })
+          .eq("id", conversation_id);
+        
+        return new Response(JSON.stringify({ 
+          skipped: true, 
+          reason: "Duplicate response detected" 
+        }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // Get contact phone number
+      const { data: contact } = await supabase
+        .from("contacts")
+        .select("phone_number")
+        .eq("id", contact_id)
+        .single();
+
+      if (!contact) {
+        throw new Error("Contact not found");
+      }
+
+      // Determine if we should respond with audio
+      const shouldRespondWithAudio = original_message_type === "audio" && voiceEnabled;
+      console.log("Should respond with audio:", shouldRespondWithAudio, "original_type:", original_message_type, "voice_enabled:", voiceEnabled);
+
+      let audioBase64: string | null = null;
+
+      if (shouldRespondWithAudio) {
+        // Generate audio response using ElevenLabs TTS
+        try {
+          console.log("Generating audio response via ElevenLabs TTS...");
+          const ttsResponse = await fetch(`${supabaseUrl}/functions/v1/elevenlabs-tts`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${supabaseKey}`,
+            },
+            body: JSON.stringify({
+              text: aiContent,
+              voice: voiceId || "jessica", // Use persona's voice or default
+            }),
+          });
+
+          if (ttsResponse.ok) {
+            const ttsResult = await ttsResponse.json();
+            audioBase64 = ttsResult.audio_base64;
+            console.log("TTS audio generated successfully, size:", audioBase64?.length || 0);
+          } else {
+            const ttsError = await ttsResponse.text();
+            console.error("TTS failed, falling back to text:", ttsError);
+          }
+        } catch (ttsErr) {
+          console.error("TTS error, falling back to text:", ttsErr);
+        }
+      }
+
+      // Send message via WhatsApp (audio or text)
+      const sendPayload: Record<string, unknown> = {
+        instance_id,
+        phone_number: contact.phone_number,
+        conversation_id,
+        contact_id,
+        workspace_id,
+        internal_call: true,
+      };
+
+      if (audioBase64) {
+        sendPayload.message_type = "audio";
+        sendPayload.audio_base64 = audioBase64;
+        sendPayload.message = aiContent; // Keep text for fallback/storage
+      } else {
+        sendPayload.message = aiContent;
+      }
+
+      const sendResponse = await fetch(`${supabaseUrl}/functions/v1/wapi-send-message`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${supabaseKey}`,
+        },
+        body: JSON.stringify(sendPayload),
+      });
+
+      if (!sendResponse.ok) {
+        const sendError = await sendResponse.text();
+        console.error("Failed to send message:", sendError);
+        throw new Error("Failed to send WhatsApp message");
+      }
+
+      // Update conversation bot_state and message hash
+      await supabase
+        .from("conversations")
+        .update({ 
+          last_bot_message_hash: responseHash,
+          bot_state: {
+            ...conversation?.bot_state,
+            last_processed_at: new Date().toISOString(),
+            last_processed_message_id: message_id
+          }
+        })
+        .eq("id", conversation_id);
+
+      console.log("AI message sent successfully", audioBase64 ? "(audio)" : "(text)");
+
+      return new Response(JSON.stringify({ 
+        success: true, 
+        response: aiContent,
+        persona: personaName,
+        sent_as_audio: !!audioBase64
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+
+    } finally {
+      // Always release the lock when done
+      await releaseLock(supabase, conversation_id);
     }
-
-    // Send message via WhatsApp (audio or text)
-    const sendPayload: Record<string, unknown> = {
-      instance_id,
-      phone_number: contact.phone_number,
-      conversation_id,
-      contact_id,
-      workspace_id,
-      internal_call: true,
-    };
-
-    if (audioBase64) {
-      sendPayload.message_type = "audio";
-      sendPayload.audio_base64 = audioBase64;
-      sendPayload.message = aiContent; // Keep text for fallback/storage
-    } else {
-      sendPayload.message = aiContent;
-    }
-
-    const sendResponse = await fetch(`${supabaseUrl}/functions/v1/wapi-send-message`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${supabaseKey}`,
-      },
-      body: JSON.stringify(sendPayload),
-    });
-
-    if (!sendResponse.ok) {
-      const sendError = await sendResponse.text();
-      console.error("Failed to send message:", sendError);
-      throw new Error("Failed to send WhatsApp message");
-    }
-
-    console.log("AI message sent successfully", audioBase64 ? "(audio)" : "(text)");
-
-    return new Response(JSON.stringify({ 
-      success: true, 
-      response: aiContent,
-      persona: personaName,
-      sent_as_audio: !!audioBase64
-    }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
 
   } catch (error: unknown) {
     console.error("Error in ai-process-message:", error);

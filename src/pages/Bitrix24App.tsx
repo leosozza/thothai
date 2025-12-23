@@ -1,15 +1,22 @@
 import { useState, useEffect } from "react";
-import { Loader2, Bot, BookOpen, Settings, Phone, LayoutDashboard, AlertCircle, ExternalLink, RefreshCw, RotateCcw, Search, Stethoscope, CheckCircle, XCircle, Info } from "lucide-react";
+import { Loader2, Bot, BookOpen, Settings, Phone, LayoutDashboard, AlertCircle, ExternalLink, RefreshCw, RotateCcw, Search, Stethoscope, CheckCircle, XCircle, Info, GitBranch, Plus, Trash2, Power } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { ThothLogo } from "@/components/ThothLogo";
+import { supabase } from "@/integrations/supabase/client";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 
-type AppView = "loading" | "pending" | "dashboard" | "instances" | "training" | "personas" | "settings" | "not-in-bitrix";
+type AppView = "loading" | "pending" | "dashboard" | "instances" | "training" | "personas" | "flows" | "settings" | "not-in-bitrix";
 
 interface BitrixStatus {
   found: boolean;
@@ -137,6 +144,7 @@ export default function Bitrix24App() {
   const navItems = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { id: "instances", label: "Instâncias", icon: Phone },
+    { id: "flows", label: "Fluxos", icon: GitBranch },
     { id: "training", label: "Treinamento", icon: BookOpen },
     { id: "personas", label: "Personas", icon: Bot },
     { id: "settings", label: "Configurações", icon: Settings },
@@ -286,6 +294,7 @@ export default function Bitrix24App() {
       <main className="flex-1 p-6 overflow-auto">
         {view === "dashboard" && <DashboardView status={status} />}
         {view === "instances" && <InstancesView status={status} />}
+        {view === "flows" && <FlowsView status={status} />}
         {view === "training" && <TrainingView />}
         {view === "personas" && <PersonasView />}
         {view === "settings" && <SettingsView domain={domain} status={status} memberId={memberId} onReload={loadData} />}
@@ -489,6 +498,296 @@ function PersonasView() {
               Abrir Personas
             </a>
           </Button>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// Flows View - Manage automation flows
+function FlowsView({ status }: { status: BitrixStatus | null }) {
+  const [flows, setFlows] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [newFlow, setNewFlow] = useState({ name: "", description: "", trigger_type: "keyword", trigger_value: "", intent_triggers: "" });
+
+  useEffect(() => {
+    fetchFlows();
+  }, []);
+
+  const fetchFlows = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("flows")
+        .select("*")
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+      setFlows(data || []);
+    } catch (err) {
+      console.error("Error fetching flows:", err);
+      toast.error("Erro ao carregar fluxos");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCreateFlow = async () => {
+    if (!newFlow.name.trim()) {
+      toast.error("Nome do fluxo é obrigatório");
+      return;
+    }
+
+    try {
+      const { data: workspaces } = await supabase
+        .from("workspace_members")
+        .select("workspace_id")
+        .limit(1)
+        .single();
+
+      if (!workspaces?.workspace_id) {
+        toast.error("Workspace não encontrado");
+        return;
+      }
+
+      const intentTriggers = newFlow.intent_triggers
+        ? newFlow.intent_triggers.split(",").map(t => t.trim()).filter(Boolean)
+        : [];
+
+      const { error } = await supabase
+        .from("flows")
+        .insert({
+          name: newFlow.name,
+          description: newFlow.description,
+          trigger_type: newFlow.trigger_type,
+          trigger_value: newFlow.trigger_value || null,
+          intent_triggers: intentTriggers,
+          workspace_id: workspaces.workspace_id,
+          nodes: [],
+          edges: [],
+          is_active: false
+        });
+
+      if (error) throw error;
+
+      toast.success("Fluxo criado com sucesso!");
+      setCreateDialogOpen(false);
+      setNewFlow({ name: "", description: "", trigger_type: "keyword", trigger_value: "", intent_triggers: "" });
+      fetchFlows();
+    } catch (err: any) {
+      toast.error("Erro ao criar fluxo: " + err.message);
+    }
+  };
+
+  const handleToggleFlow = async (flowId: string, isActive: boolean) => {
+    try {
+      const { error } = await supabase
+        .from("flows")
+        .update({ is_active: !isActive })
+        .eq("id", flowId);
+
+      if (error) throw error;
+
+      toast.success(isActive ? "Fluxo desativado" : "Fluxo ativado");
+      fetchFlows();
+    } catch (err: any) {
+      toast.error("Erro: " + err.message);
+    }
+  };
+
+  const handleDeleteFlow = async (flowId: string) => {
+    if (!confirm("Tem certeza que deseja excluir este fluxo?")) return;
+
+    try {
+      const { error } = await supabase
+        .from("flows")
+        .delete()
+        .eq("id", flowId);
+
+      if (error) throw error;
+
+      toast.success("Fluxo excluído");
+      fetchFlows();
+    } catch (err: any) {
+      toast.error("Erro: " + err.message);
+    }
+  };
+
+  const triggerTypeLabels: Record<string, string> = {
+    keyword: "Palavra-chave",
+    first_message: "Primeira mensagem",
+    all_messages: "Todas as mensagens",
+    intent: "Intenção IA"
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Fluxos de Automação</h1>
+          <p className="text-muted-foreground">Configure quando o bot deve seguir fluxos específicos</p>
+        </div>
+        <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+          <DialogTrigger asChild>
+            <Button>
+              <Plus className="h-4 w-4 mr-2" />
+              Novo Fluxo
+            </Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Criar Novo Fluxo</DialogTitle>
+              <DialogDescription>
+                Configure como e quando este fluxo será acionado
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label>Nome do Fluxo</Label>
+                <Input
+                  value={newFlow.name}
+                  onChange={(e) => setNewFlow({ ...newFlow, name: e.target.value })}
+                  placeholder="Ex: Agendamento de Consulta"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Descrição</Label>
+                <Textarea
+                  value={newFlow.description}
+                  onChange={(e) => setNewFlow({ ...newFlow, description: e.target.value })}
+                  placeholder="Descreva o objetivo deste fluxo"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Tipo de Gatilho</Label>
+                <Select
+                  value={newFlow.trigger_type}
+                  onValueChange={(v) => setNewFlow({ ...newFlow, trigger_type: v })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="keyword">Palavra-chave</SelectItem>
+                    <SelectItem value="first_message">Primeira mensagem</SelectItem>
+                    <SelectItem value="all_messages">Todas as mensagens</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {newFlow.trigger_type === "keyword" && (
+                <div className="space-y-2">
+                  <Label>Palavras-chave (separadas por vírgula)</Label>
+                  <Input
+                    value={newFlow.trigger_value}
+                    onChange={(e) => setNewFlow({ ...newFlow, trigger_value: e.target.value })}
+                    placeholder="agendar, marcar, consulta"
+                  />
+                </div>
+              )}
+              <div className="space-y-2">
+                <Label>Gatilhos por Intenção IA (opcional)</Label>
+                <Input
+                  value={newFlow.intent_triggers}
+                  onChange={(e) => setNewFlow({ ...newFlow, intent_triggers: e.target.value })}
+                  placeholder="agendamento, suporte, vendas"
+                />
+                <p className="text-xs text-muted-foreground">
+                  A IA detectará automaticamente a intenção do cliente e acionará o fluxo
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setCreateDialogOpen(false)}>
+                Cancelar
+              </Button>
+              <Button onClick={handleCreateFlow}>
+                Criar Fluxo
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      ) : flows.length === 0 ? (
+        <Card>
+          <CardContent className="py-12 text-center">
+            <GitBranch className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+            <h3 className="font-medium mb-2">Nenhum fluxo criado</h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              Crie fluxos para automatizar conversas específicas como agendamentos, suporte, etc.
+            </p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid gap-4">
+          {flows.map((flow) => (
+            <Card key={flow.id}>
+              <CardContent className="py-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className={cn(
+                      "w-10 h-10 rounded-full flex items-center justify-center",
+                      flow.is_active ? "bg-green-500/10" : "bg-muted"
+                    )}>
+                      <GitBranch className={cn(
+                        "h-5 w-5",
+                        flow.is_active ? "text-green-500" : "text-muted-foreground"
+                      )} />
+                    </div>
+                    <div>
+                      <h4 className="font-medium">{flow.name}</h4>
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Badge variant="secondary" className="text-xs">
+                          {triggerTypeLabels[flow.trigger_type] || flow.trigger_type}
+                        </Badge>
+                        {flow.trigger_value && (
+                          <span className="text-xs">{flow.trigger_value}</span>
+                        )}
+                        {flow.intent_triggers?.length > 0 && (
+                          <Badge variant="outline" className="text-xs">
+                            IA: {flow.intent_triggers.join(", ")}
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      checked={flow.is_active}
+                      onCheckedChange={() => handleToggleFlow(flow.id, flow.is_active)}
+                    />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleDeleteFlow(flow.id)}
+                    >
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      <Card>
+        <CardContent className="py-4">
+          <p className="text-sm text-muted-foreground">
+            Para edição avançada de fluxos com editor visual, acesse{" "}
+            <a 
+              href="https://chat.thoth24.com/flows" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="text-primary hover:underline"
+            >
+              chat.thoth24.com/flows
+            </a>
+          </p>
         </CardContent>
       </Card>
     </div>
