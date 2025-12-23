@@ -35,7 +35,6 @@ import {
   Paperclip,
   Mic,
   MoreVertical,
-  Phone,
   Video,
   User,
   Bot,
@@ -50,6 +49,7 @@ import {
   ArrowLeftRight,
   UserCheck,
 } from "lucide-react";
+import { OutboundCallDialog } from "@/components/calls/OutboundCallDialog";
 
 interface Contact {
   id: string;
@@ -866,9 +866,10 @@ export default function Conversations() {
                       Assumir Atendimento
                     </Button>
                   )}
-                  <Button variant="ghost" size="icon">
-                    <Phone className="h-4 w-4" />
-                  </Button>
+                  <OutboundCallDialog
+                    contact={selectedConversation.contact}
+                    workspaceId={workspace?.id || ""}
+                  />
                   <Button variant="ghost" size="icon">
                     <MoreVertical className="h-4 w-4" />
                   </Button>
