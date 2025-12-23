@@ -43,6 +43,8 @@ interface Instance {
   qr_code: string | null;
   created_at: string;
   connection_type?: string;
+  provider_type?: string;
+  evolution_instance_name?: string | null;
   gupshup_app_id?: string | null;
 }
 
@@ -53,7 +55,7 @@ const statusConfig: Record<string, { label: string; color: string; icon: typeof 
   qr_pending: { label: "Aguardando QR", color: "bg-blue-500", icon: QrCode },
 };
 
-type ConnectionType = "waba" | "official";
+type ConnectionType = "waba" | "official" | "evolution";
 
 export default function Instances() {
   const [instances, setInstances] = useState<Instance[]>([]);
@@ -61,6 +63,7 @@ export default function Instances() {
   const [creating, setCreating] = useState(false);
   const [newInstanceName, setNewInstanceName] = useState("");
   const [connectionType, setConnectionType] = useState<ConnectionType>("waba");
+  const [evolutionInstanceName, setEvolutionInstanceName] = useState("");
   const [gupshupApiKey, setGupshupApiKey] = useState("");
   const [gupshupAppId, setGupshupAppId] = useState("");
   const [gupshupPhoneNumber, setGupshupPhoneNumber] = useState("");
@@ -129,6 +132,7 @@ export default function Instances() {
   const resetForm = () => {
     setNewInstanceName("");
     setConnectionType("waba");
+    setEvolutionInstanceName("");
     setGupshupApiKey("");
     setGupshupAppId("");
     setGupshupPhoneNumber("");
@@ -147,21 +151,35 @@ export default function Instances() {
       }
     }
 
+    if (connectionType === "evolution") {
+      if (!evolutionInstanceName.trim()) {
+        toast.error("Digite o nome da instância Evolution");
+        return;
+      }
+    }
+
     setCreating(true);
     try {
+      // Determine provider_type and initial status
+      const providerType = connectionType === "evolution" ? "evolution" : connectionType === "official" ? "gupshup" : "wapi";
+      const initialStatus = connectionType === "official" ? "connecting" : "disconnected";
+
       // Create instance in database
       const { data: newInstance, error } = await supabase.from("instances").insert({
         user_id: user?.id,
         workspace_id: workspace?.id,
         name: newInstanceName.trim(),
-        status: connectionType === "official" ? "connecting" : "disconnected",
-        connection_type: connectionType,
+        status: initialStatus,
+        connection_type: connectionType === "evolution" ? "waba" : connectionType,
+        provider_type: providerType,
+        evolution_instance_name: connectionType === "evolution" ? evolutionInstanceName.trim() : null,
       }).select().single();
 
       if (error) throw error;
 
-      // If official (Gupshup), connect immediately
+      // Handle connection based on type
       if (connectionType === "official" && newInstance) {
+        // Gupshup connection
         const response = await supabase.functions.invoke("gupshup-connect", {
           body: {
             instanceId: newInstance.id,
@@ -176,11 +194,31 @@ export default function Instances() {
           throw new Error(response.error.message || "Erro ao conectar Gupshup");
         }
 
-      if (response.data?.error) {
+        if (response.data?.error) {
           throw new Error(response.data.error);
         }
 
         toast.success("Instância criada e conectada com sucesso!");
+      } else if (connectionType === "evolution" && newInstance) {
+        // Evolution API connection
+        const response = await supabase.functions.invoke("evolution-connect", {
+          body: {
+            instanceId: newInstance.id,
+            workspaceId: workspace?.id,
+            action: "create",
+            evolutionInstanceName: evolutionInstanceName.trim(),
+          },
+        });
+
+        if (response.error) {
+          throw new Error(response.error.message || "Erro ao criar instância Evolution");
+        }
+
+        if (response.data?.error) {
+          throw new Error(response.data.error);
+        }
+
+        toast.success("Instância Evolution criada! Clique em Conectar para escanear o QR Code.");
       } else {
         toast.success("Instância criada! Clique em Conectar para escanear o QR Code.");
       }
@@ -229,11 +267,16 @@ export default function Instances() {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       
-      const response = await supabase.functions.invoke("wapi-connect", {
+      // Determine which connect function to use based on provider_type
+      const providerType = instance.provider_type || "wapi";
+      const connectFunction = providerType === "evolution" ? "evolution-connect" : "wapi-connect";
+      
+      const response = await supabase.functions.invoke(connectFunction, {
         body: {
           instanceId: instance.id,
           workspaceId: workspace.id,
           action: "connect",
+          evolutionInstanceName: instance.evolution_instance_name,
         },
       });
 
@@ -291,19 +334,27 @@ export default function Instances() {
     );
   };
 
-const getConnectionTypeBadge = (connectionType?: string) => {
+const getConnectionTypeBadge = (connectionType?: string, providerType?: string) => {
     if (connectionType === "official") {
       return (
         <Badge variant="outline" className="gap-1 text-green-600 border-green-200 bg-green-50">
           <Shield className="h-3 w-3" />
-          Oficial
+          Gupshup
+        </Badge>
+      );
+    }
+    if (providerType === "evolution") {
+      return (
+        <Badge variant="outline" className="gap-1 text-emerald-600 border-emerald-200 bg-emerald-50">
+          <MessageSquare className="h-3 w-3" />
+          Evolution
         </Badge>
       );
     }
     return (
       <Badge variant="outline" className="gap-1 text-blue-600 border-blue-200 bg-blue-50">
         <QrCode className="h-3 w-3" />
-        QR Code
+        W-API
       </Badge>
     );
   };
@@ -362,10 +413,22 @@ const getConnectionTypeBadge = (connectionType?: string) => {
                       <Label htmlFor="waba" className="flex-1 cursor-pointer">
                         <div className="flex items-center gap-2 font-medium">
                           <QrCode className="h-4 w-4 text-blue-500" />
-                          WhatsApp QR Code
+                          W-API (QR Code)
                         </div>
                         <p className="text-sm text-muted-foreground mt-1">
-                          Conecte escaneando o QR Code pelo celular.
+                          Conecte via W-API escaneando o QR Code pelo celular.
+                        </p>
+                      </Label>
+                    </div>
+                    <div className="flex items-start space-x-3 p-3 border rounded-lg hover:bg-muted/50 transition-colors">
+                      <RadioGroupItem value="evolution" id="evolution" className="mt-1" />
+                      <Label htmlFor="evolution" className="flex-1 cursor-pointer">
+                        <div className="flex items-center gap-2 font-medium">
+                          <MessageSquare className="h-4 w-4 text-emerald-500" />
+                          Evolution API (QR Code)
+                        </div>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          Conecte via seu servidor Evolution API.
                         </p>
                       </Label>
                     </div>
@@ -374,15 +437,46 @@ const getConnectionTypeBadge = (connectionType?: string) => {
                       <Label htmlFor="official" className="flex-1 cursor-pointer">
                         <div className="flex items-center gap-2 font-medium">
                           <Shield className="h-4 w-4 text-green-500" />
-                          WhatsApp Business Oficial
+                          Gupshup (API Oficial)
                         </div>
                         <p className="text-sm text-muted-foreground mt-1">
-                          API oficial da Meta via parceiro certificado. Requer cadastro gratuito.
+                          API oficial da Meta via Gupshup. Requer cadastro.
                         </p>
                       </Label>
                     </div>
                   </RadioGroup>
                 </div>
+
+                {/* Evolution API Fields */}
+                {connectionType === "evolution" && (
+                  <div className="space-y-4 p-4 bg-muted/30 rounded-lg border">
+                    <div className="flex items-center gap-2 text-sm font-medium text-emerald-600">
+                      <MessageSquare className="h-4 w-4" />
+                      Configuração Evolution API
+                    </div>
+                    
+                    <div className="p-3 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg">
+                      <p className="text-xs text-blue-700 dark:text-blue-300">
+                        Certifique-se de ter configurado o servidor Evolution em{" "}
+                        <strong>Configurações → Provedores</strong> antes de criar a instância.
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="evolution-instance-name">Nome da Instância no Evolution *</Label>
+                      <Input
+                        id="evolution-instance-name"
+                        placeholder="Ex: thoth-vendas"
+                        value={evolutionInstanceName}
+                        onChange={(e) => setEvolutionInstanceName(e.target.value)}
+                        disabled={creating}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Nome único para identificar a instância no servidor Evolution
+                      </p>
+                    </div>
+                  </div>
+                )}
 
                 {/* Gupshup Fields (only shown when official is selected) */}
                 {connectionType === "official" && (
@@ -461,8 +555,12 @@ const getConnectionTypeBadge = (connectionType?: string) => {
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                       {connectionType === "official" ? "Conectando..." : "Criando..."}
                     </>
+                  ) : connectionType === "official" ? (
+                    "Criar e Conectar"
+                  ) : connectionType === "evolution" ? (
+                    "Criar no Evolution"
                   ) : (
-                    connectionType === "official" ? "Criar e Conectar" : "Criar Instância"
+                    "Criar Instância"
                   )}
                 </Button>
               </DialogFooter>
@@ -590,8 +688,8 @@ const getConnectionTypeBadge = (connectionType?: string) => {
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="flex items-center justify-between">
-                    <span className="text-sm text-muted-foreground">Tipo</span>
-                    {getConnectionTypeBadge(instance.connection_type)}
+                    <span className="text-sm text-muted-foreground">Provedor</span>
+                    {getConnectionTypeBadge(instance.connection_type, instance.provider_type)}
                   </div>
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-muted-foreground">Status</span>
@@ -660,13 +758,16 @@ const getConnectionTypeBadge = (connectionType?: string) => {
           </CardHeader>
           <CardContent className="text-sm text-muted-foreground space-y-2">
             <p>
-              • <strong>WABA (QR Code)</strong>: Conecta via W-API escaneando QR Code. Requer configuração prévia em Integrações.
+              • <strong>W-API</strong>: Conecta via W-API escaneando QR Code. Configure as credenciais em Configurações → Provedores.
             </p>
             <p>
-              • <strong>Oficial (Gupshup)</strong>: Usa a API oficial do WhatsApp via Gupshup. Requer conta verificada no Meta Business.
+              • <strong>Evolution API</strong>: Conecta via seu servidor Evolution. Configure a URL e API Key em Configurações → Provedores.
             </p>
             <p>
-              • As mensagens recebidas aparecerão na página de Conversas independente do tipo de conexão.
+              • <strong>Gupshup</strong>: Usa a API oficial do WhatsApp via Gupshup. Requer conta verificada no Meta Business.
+            </p>
+            <p>
+              • As mensagens recebidas aparecerão na página de Conversas independente do provedor escolhido.
             </p>
           </CardContent>
         </Card>
