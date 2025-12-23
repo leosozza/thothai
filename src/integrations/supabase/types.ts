@@ -1019,6 +1019,103 @@ export type Database = {
           },
         ]
       }
+      mcp_connections: {
+        Row: {
+          auth_config: Json | null
+          auth_type: string
+          available_tools: Json | null
+          created_at: string | null
+          description: string | null
+          id: string
+          is_active: boolean | null
+          last_sync_at: string | null
+          mcp_url: string
+          name: string
+          transport_type: string
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          auth_config?: Json | null
+          auth_type?: string
+          available_tools?: Json | null
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          is_active?: boolean | null
+          last_sync_at?: string | null
+          mcp_url: string
+          name: string
+          transport_type?: string
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          auth_config?: Json | null
+          auth_type?: string
+          available_tools?: Json | null
+          created_at?: string | null
+          description?: string | null
+          id?: string
+          is_active?: boolean | null
+          last_sync_at?: string | null
+          mcp_url?: string
+          name?: string
+          transport_type?: string
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mcp_connections_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      mcp_server_config: {
+        Row: {
+          allowed_tools: Json | null
+          api_key: string | null
+          created_at: string | null
+          id: string
+          is_enabled: boolean | null
+          rate_limit: number | null
+          updated_at: string | null
+          workspace_id: string
+        }
+        Insert: {
+          allowed_tools?: Json | null
+          api_key?: string | null
+          created_at?: string | null
+          id?: string
+          is_enabled?: boolean | null
+          rate_limit?: number | null
+          updated_at?: string | null
+          workspace_id: string
+        }
+        Update: {
+          allowed_tools?: Json | null
+          api_key?: string | null
+          created_at?: string | null
+          id?: string
+          is_enabled?: boolean | null
+          rate_limit?: number | null
+          updated_at?: string | null
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mcp_server_config_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: true
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       messages: {
         Row: {
           audio_transcription: string | null
@@ -1217,6 +1314,42 @@ export type Database = {
           },
           {
             foreignKeyName: "persona_knowledge_documents_persona_id_fkey"
+            columns: ["persona_id"]
+            isOneToOne: false
+            referencedRelation: "personas"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      persona_mcp_connections: {
+        Row: {
+          created_at: string | null
+          id: string
+          mcp_connection_id: string
+          persona_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          mcp_connection_id: string
+          persona_id: string
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          mcp_connection_id?: string
+          persona_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "persona_mcp_connections_mcp_connection_id_fkey"
+            columns: ["mcp_connection_id"]
+            isOneToOne: false
+            referencedRelation: "mcp_connections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "persona_mcp_connections_persona_id_fkey"
             columns: ["persona_id"]
             isOneToOne: false
             referencedRelation: "personas"

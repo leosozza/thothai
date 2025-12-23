@@ -116,3 +116,12 @@ verify_jwt = true
 
 [functions.elevenlabs-register-phone]
 verify_jwt = true
+
+[functions.mcp-client-discover]
+verify_jwt = true
+
+[functions.mcp-client-call]
+verify_jwt = true
+
+[functions.mcp-server]
+verify_jwt = false
