@@ -154,6 +154,40 @@ export function TelephonyProviderCard({
 
     setSaving(true);
     try {
+      // Para Twilio, usar a edge function que importa números automaticamente
+      if (providerType === "twilio") {
+        const { data, error } = await supabase.functions.invoke("twilio-connect", {
+          body: {
+            action: "connect",
+            workspace_id: workspace.id,
+            account_sid: formData.account_sid,
+            auth_token: formData.auth_token,
+            provider_id: existingProvider?.id,
+          },
+        });
+
+        if (error) {
+          console.error("Twilio connect error:", error);
+          throw new Error(error.message || "Erro ao conectar Twilio");
+        }
+
+        if (!data?.success) {
+          throw new Error(data?.error || "Erro ao conectar Twilio");
+        }
+
+        const numbersImported = data.numbers_imported || 0;
+        if (numbersImported > 0) {
+          toast.success(`${config.name} conectado! ${numbersImported} número(s) importado(s).`);
+        } else {
+          toast.success(`${config.name} conectado com sucesso!`);
+        }
+        
+        fetchProvider();
+        onSaved?.();
+        return;
+      }
+
+      // Para outros provedores, continuar com a lógica atual
       if (existingProvider) {
         // Update existing provider
         const { error } = await supabase
@@ -183,7 +217,7 @@ export function TelephonyProviderCard({
       onSaved?.();
     } catch (error) {
       console.error("Error saving telephony provider:", error);
-      toast.error(`Erro ao salvar ${config.name}`);
+      toast.error(error instanceof Error ? error.message : `Erro ao salvar ${config.name}`);
     } finally {
       setSaving(false);
     }
