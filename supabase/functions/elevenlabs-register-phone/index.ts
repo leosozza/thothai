@@ -90,13 +90,13 @@ switch (action) {
           console.log(`[ElevenLabs Phone] SIP provider - using configured phone: ${phoneFromProvider}`);
         }
 
-        // For WaVoIP, fetch from API (endpoint/method may vary between deployments)
+        // For WaVoIP, fetch from API ONLY if we don't already have a phone number
         let wavoipFetched = false;
         let wavoipLastError:
           | { url: string; method: string; status: number; body: string }
           | null = null;
 
-        if (provider.provider_type === "wavoip" && config.api_token && config.instance_key) {
+        if (provider.provider_type === "wavoip" && config.api_token && config.instance_key && !phoneFromProvider) {
           console.log(`[ElevenLabs Phone] Fetching WaVoIP instance info...`);
 
           const baseUrl = "https://api.wavoip.com";
