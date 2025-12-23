@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useWorkspace } from "@/hooks/useWorkspace";
-import { Loader2, Phone, RefreshCw, Settings, Trash2, MessageSquare } from "lucide-react";
+import { Loader2, Phone, RefreshCw, Settings, Trash2, MessageSquare, Download } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -59,8 +59,10 @@ export function TelephonyNumbersCard() {
   const { workspace } = useWorkspace();
   const [numbers, setNumbers] = useState<TelephonyNumber[]>([]);
   const [personas, setPersonas] = useState<Persona[]>([]);
+  const [providers, setProviders] = useState<{ id: string; name: string; provider_type: string }[]>([]);
   const [hasProviders, setHasProviders] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [importing, setImporting] = useState(false);
   const [configDialogOpen, setConfigDialogOpen] = useState(false);
   const [selectedNumber, setSelectedNumber] = useState<TelephonyNumber | null>(null);
   const [selectedPersonaId, setSelectedPersonaId] = useState<string>("");
@@ -80,10 +82,11 @@ export function TelephonyNumbersCard() {
       // Fetch providers to check if any exist
       const { data: providersData } = await supabase
         .from("telephony_providers")
-        .select("id")
+        .select("id, name, provider_type")
         .eq("workspace_id", workspace.id);
 
       setHasProviders((providersData?.length || 0) > 0);
+      setProviders(providersData || []);
 
       // Fetch numbers
       const { data: numbersData, error: numbersError } = await supabase
@@ -189,6 +192,46 @@ export function TelephonyNumbersCard() {
     }
   };
 
+  const handleImportNumbers = async () => {
+    if (!workspace?.id || providers.length === 0) return;
+
+    setImporting(true);
+    try {
+      let imported = 0;
+      
+      for (const provider of providers) {
+        const { data, error } = await supabase.functions.invoke("elevenlabs-register-phone", {
+          body: {
+            action: "import_from_provider",
+            workspace_id: workspace.id,
+            provider_id: provider.id,
+          },
+        });
+
+        if (error) {
+          console.error(`Error importing from ${provider.name}:`, error);
+          continue;
+        }
+
+        if (data?.success && data?.number_id) {
+          imported++;
+        }
+      }
+
+      if (imported > 0) {
+        toast.success(`${imported} número(s) importado(s) com sucesso!`);
+        fetchData();
+      } else {
+        toast.info("Nenhum novo número encontrado para importar");
+      }
+    } catch (error) {
+      console.error("Error importing numbers:", error);
+      toast.error("Erro ao importar números");
+    } finally {
+      setImporting(false);
+    }
+  };
+
   // Don't render if no providers are configured
   if (!hasProviders && !loading) {
     return null;
@@ -210,10 +253,19 @@ export function TelephonyNumbersCard() {
                 </CardDescription>
               </div>
             </div>
-            <Button variant="outline" size="sm" onClick={fetchData} disabled={loading}>
-              <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
-              Atualizar
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={handleImportNumbers} disabled={importing || loading}>
+                {importing ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Download className="h-4 w-4 mr-2" />
+                )}
+                Importar Números
+              </Button>
+              <Button variant="ghost" size="sm" onClick={fetchData} disabled={loading}>
+                <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent>
@@ -226,7 +278,7 @@ export function TelephonyNumbersCard() {
               <Phone className="h-12 w-12 mx-auto mb-4 opacity-50" />
               <p className="text-sm">Nenhum número cadastrado ainda.</p>
               <p className="text-xs mt-2">
-                Os números serão importados automaticamente dos provedores conectados.
+                Clique em "Importar Números" para buscar os números dos provedores conectados.
               </p>
             </div>
           ) : (

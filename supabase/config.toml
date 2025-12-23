@@ -113,3 +113,6 @@ verify_jwt = true
 
 [functions.elevenlabs-outbound-call]
 verify_jwt = true
+
+[functions.elevenlabs-register-phone]
+verify_jwt = true
