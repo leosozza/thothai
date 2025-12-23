@@ -78,10 +78,16 @@ switch (action) {
 
         let phoneFromProvider: string | null = null;
 
-        // For SIP providers, use config phone_number directly
-        if (provider.provider_type === "sip" && config.phone_number) {
+        // For SIP providers or any provider with phone_number in config, use it directly
+        if (config.phone_number) {
           phoneFromProvider = config.phone_number;
-          console.log(`[ElevenLabs Phone] Using phone from SIP config: ${phoneFromProvider}`);
+          console.log(`[ElevenLabs Phone] Using phone from config: ${phoneFromProvider}`);
+        }
+
+        // For SIP providers (generic), we don't need to fetch from API
+        if (provider.provider_type === "sip" && phoneFromProvider) {
+          // Phone already set from config, no API call needed
+          console.log(`[ElevenLabs Phone] SIP provider - using configured phone: ${phoneFromProvider}`);
         }
 
         // For WaVoIP, fetch from API (endpoint/method may vary between deployments)
