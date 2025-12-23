@@ -156,14 +156,17 @@ export default function Diagnostics() {
     try {
       // Use a minimal request - we just want to check if the function responds
       // The function may return an error (400/500) but that still means it's running
-      const { data, error } = await supabase.functions.invoke(functionName, {
+      const response = await supabase.functions.invoke(functionName, {
         body: { action: "health_check" },
       });
       
       const responseTime = Date.now() - startTime;
       
-      // Any response (even an error response) means the function is running
-      // We only care about network/deployment failures which throw exceptions
+      // Any response (even an error response from the function) means the function is running
+      // The error field being set just means the function returned a non-2xx status
+      // which is expected for functions that don't have a health_check handler
+      // We only care if there's a network/deployment error (which would throw)
+      
       return {
         name: functionName,
         status: responseTime > 2000 ? "degraded" : "healthy",
@@ -173,22 +176,9 @@ export default function Diagnostics() {
       };
     } catch (error: unknown) {
       const responseTime = Date.now() - startTime;
-      
-      // Check if this is a FunctionsHttpError (function responded but with error status)
-      // This actually means the function IS running, just returned an expected error
       const errorMessage = error instanceof Error ? error.message : String(error);
       
-      // If we got a response (even 4xx/5xx), the function is operational
-      if (errorMessage.includes("400") || errorMessage.includes("500") || errorMessage.includes("Missing") || errorMessage.includes("required")) {
-        return {
-          name: functionName,
-          status: responseTime > 2000 ? "degraded" : "healthy",
-          message: responseTime > 2000 ? `Latência alta (${responseTime}ms)` : "Operacional",
-          lastChecked: new Date(),
-          responseTime,
-        };
-      }
-      
+      // Network errors or deployment issues mean the function is truly unavailable
       return {
         name: functionName,
         status: "unhealthy",
