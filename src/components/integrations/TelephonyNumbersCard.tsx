@@ -162,7 +162,7 @@ export function TelephonyNumbersCard() {
       const { error } = await supabase
         .from("telephony_numbers")
         .update({
-          persona_id: selectedPersonaId || null,
+          persona_id: selectedPersonaId === "none" ? null : selectedPersonaId || null,
           elevenlabs_agent_id: elevenlabsAgentId,
           updated_at: new Date().toISOString(),
         })
@@ -492,7 +492,7 @@ export function TelephonyNumbersCard() {
                   <SelectValue placeholder="Selecione uma persona" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Nenhuma</SelectItem>
+                  <SelectItem value="none">Nenhuma</SelectItem>
                   {personas.map((persona) => (
                     <SelectItem key={persona.id} value={persona.id}>
                       {persona.name}

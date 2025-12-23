@@ -173,7 +173,7 @@ export function TransferRulesCard() {
     try {
       const ruleData = {
         workspace_id: workspace.id,
-        persona_id: formData.persona_id || null,
+        persona_id: formData.persona_id === "all" ? null : formData.persona_id || null,
         name: formData.name,
         destination_type: formData.destination_type,
         destination: formData.destination,
@@ -469,7 +469,7 @@ export function TransferRulesCard() {
                   <SelectValue placeholder="Aplicar a todas as personas" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Todas as personas</SelectItem>
+                  <SelectItem value="all">Todas as personas</SelectItem>
                   {personas.map((persona) => (
                     <SelectItem key={persona.id} value={persona.id}>
                       {persona.name}
