@@ -551,27 +551,22 @@ export function TelephonyNumbersCard() {
             {selectedNumber?.provider_type === "twilio" && (
               <div className="space-y-2">
                 <Label htmlFor="elevenlabs_phone_id">ElevenLabs Phone ID</Label>
-                <input
+                <Input
                   id="elevenlabs_phone_id"
                   type="text"
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                  placeholder="ph_xxxxxxxxx"
-                  defaultValue={selectedNumber?.elevenlabs_phone_id || ""}
-                  onChange={(e) => {
-                    if (selectedNumber) {
-                      selectedNumber.elevenlabs_phone_id = e.target.value || null;
-                    }
-                  }}
+                  placeholder="phnum_xxxxxxxxx"
+                  value={elevenlabsPhoneId}
+                  onChange={(e) => setElevenlabsPhoneId(e.target.value)}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Após registrar o número no ElevenLabs, cole o ID aqui (ex: ph_abc123xyz).
+                  Após registrar o número no ElevenLabs, cole o ID aqui (ex: phnum_abc123xyz).
                   <a 
                     href="https://elevenlabs.io/app/agents/phone-numbers" 
                     target="_blank" 
                     rel="noopener noreferrer"
                     className="ml-1 text-primary underline"
                   >
-                    Registrar número →
+                    Ver números →
                   </a>
                 </p>
               </div>
