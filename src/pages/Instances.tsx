@@ -31,6 +31,8 @@ import {
   RefreshCw,
   Shield,
   MessageSquare,
+  LogOut,
+  AlertTriangle,
 } from "lucide-react";
 
 interface Instance {
@@ -71,6 +73,7 @@ export default function Instances() {
   const [qrDialogOpen, setQrDialogOpen] = useState(false);
   const [connectingInstance, setConnectingInstance] = useState<Instance | null>(null);
   const [connecting, setConnecting] = useState(false);
+  const [disconnecting, setDisconnecting] = useState<string | null>(null);
   const { user } = useAuth();
   const { workspace } = useWorkspace();
 
@@ -235,6 +238,10 @@ export default function Instances() {
   };
 
   const deleteInstance = async (id: string) => {
+    if (!confirm("Tem certeza que deseja remover esta instância? Esta ação não pode ser desfeita.")) {
+      return;
+    }
+
     try {
       const { error } = await supabase.from("instances").delete().eq("id", id);
 
@@ -245,6 +252,76 @@ export default function Instances() {
     } catch (error) {
       console.error("Error deleting instance:", error);
       toast.error("Erro ao remover instância");
+    }
+  };
+
+  const disconnectEvolutionInstance = async (instance: Instance) => {
+    if (!workspace) return;
+    
+    setDisconnecting(instance.id);
+
+    try {
+      const response = await supabase.functions.invoke("evolution-connect", {
+        body: {
+          instanceId: instance.id,
+          workspaceId: workspace.id,
+          action: "logout",
+          evolutionInstanceName: instance.evolution_instance_name,
+        },
+      });
+
+      if (response.error) {
+        throw new Error(response.error.message || "Erro ao desconectar");
+      }
+
+      if (response.data?.error) {
+        throw new Error(response.data.error);
+      }
+
+      toast.success("WhatsApp desconectado com sucesso!");
+      fetchInstances();
+    } catch (error) {
+      console.error("Error disconnecting instance:", error);
+      toast.error(error instanceof Error ? error.message : "Erro ao desconectar");
+    } finally {
+      setDisconnecting(null);
+    }
+  };
+
+  const deleteEvolutionFromServer = async (instance: Instance) => {
+    if (!workspace) return;
+    
+    if (!confirm("Tem certeza que deseja remover esta instância do servidor Evolution? Isso também desconectará o WhatsApp.")) {
+      return;
+    }
+
+    setDisconnecting(instance.id);
+
+    try {
+      const response = await supabase.functions.invoke("evolution-connect", {
+        body: {
+          instanceId: instance.id,
+          workspaceId: workspace.id,
+          action: "delete",
+          evolutionInstanceName: instance.evolution_instance_name,
+        },
+      });
+
+      if (response.error) {
+        throw new Error(response.error.message || "Erro ao remover");
+      }
+
+      if (response.data?.error) {
+        throw new Error(response.data.error);
+      }
+
+      toast.success("Instância removida do servidor Evolution!");
+      fetchInstances();
+    } catch (error) {
+      console.error("Error deleting Evolution instance:", error);
+      toast.error(error instanceof Error ? error.message : "Erro ao remover do Evolution");
+    } finally {
+      setDisconnecting(null);
     }
   };
 
@@ -696,54 +773,91 @@ const getConnectionTypeBadge = (connectionType?: string, providerType?: string) 
                     {getStatusBadge(instance.status)}
                   </div>
 
-                  <div className="flex gap-2">
-                    {instance.status === "connected" ? (
+                  <div className="flex flex-col gap-2">
+                    <div className="flex gap-2">
+                      {instance.status === "connected" ? (
+                        <>
+                          {instance.provider_type === "evolution" ? (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="flex-1 gap-2 text-orange-600 hover:text-orange-700"
+                              onClick={() => disconnectEvolutionInstance(instance)}
+                              disabled={disconnecting === instance.id}
+                            >
+                              {disconnecting === instance.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <LogOut className="h-4 w-4" />
+                              )}
+                              Desconectar
+                            </Button>
+                          ) : (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="flex-1 gap-2 text-green-600"
+                              disabled
+                            >
+                              <Wifi className="h-4 w-4" />
+                              Conectado
+                            </Button>
+                          )}
+                        </>
+                      ) : instance.connection_type === "official" ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1 gap-2"
+                          disabled
+                        >
+                          <Shield className="h-4 w-4" />
+                          Verificar Conexão
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1 gap-2"
+                          onClick={() => connectInstance(instance)}
+                          disabled={disconnecting === instance.id}
+                        >
+                          <QrCode className="h-4 w-4" />
+                          Conectar
+                        </Button>
+                      )}
                       <Button
                         variant="outline"
-                        size="sm"
-                        className="flex-1 gap-2 text-green-600"
-                        disabled
+                        size="icon"
+                        className="h-8 w-8"
+                        onClick={() => toast.info("Configurações em breve")}
                       >
-                        <Wifi className="h-4 w-4" />
-                        Conectado
+                        <Settings className="h-4 w-4" />
                       </Button>
-                    ) : instance.connection_type === "official" ? (
                       <Button
                         variant="outline"
-                        size="sm"
-                        className="flex-1 gap-2"
-                        disabled
+                        size="icon"
+                        className="h-8 w-8 text-destructive hover:text-destructive"
+                        onClick={() => deleteInstance(instance.id)}
+                        disabled={disconnecting === instance.id}
                       >
-                        <Shield className="h-4 w-4" />
-                        Verificar Conexão
+                        <Trash2 className="h-4 w-4" />
                       </Button>
-                    ) : (
+                    </div>
+                    
+                    {/* Evolution-specific actions */}
+                    {instance.provider_type === "evolution" && instance.evolution_instance_name && (
                       <Button
-                        variant="outline"
+                        variant="ghost"
                         size="sm"
-                        className="flex-1 gap-2"
-                        onClick={() => connectInstance(instance)}
+                        className="w-full gap-2 text-xs text-muted-foreground hover:text-destructive"
+                        onClick={() => deleteEvolutionFromServer(instance)}
+                        disabled={disconnecting === instance.id}
                       >
-                        <QrCode className="h-4 w-4" />
-                        Conectar
+                        <AlertTriangle className="h-3 w-3" />
+                        Remover do servidor Evolution
                       </Button>
                     )}
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      className="h-8 w-8"
-                      onClick={() => toast.info("Configurações em breve")}
-                    >
-                      <Settings className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="icon"
-                      className="h-8 w-8 text-destructive hover:text-destructive"
-                      onClick={() => deleteInstance(instance.id)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
                   </div>
                 </CardContent>
               </Card>
