@@ -1,6 +1,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+const FUNCTION_VERSION = "2025-12-23-v3";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -14,7 +16,7 @@ function hashMessage(content: string): string {
   for (let i = 0; i < content.length; i++) {
     const char = content.charCodeAt(i);
     hash = ((hash << 5) - hash) + char;
-    hash = hash & hash; // Convert to 32bit integer
+    hash = hash & hash;
   }
   return hash.toString(16);
 }
@@ -29,7 +31,6 @@ async function searchKnowledge(
   limit: number = 5
 ): Promise<string[]> {
   try {
-    // Get all completed documents for this workspace
     const { data: documents } = await supabase
       .from("knowledge_documents")
       .select("id")
@@ -42,18 +43,16 @@ async function searchKnowledge(
 
     const documentIds = documents.map((d: any) => d.id);
 
-    // Get chunks from these documents
     const { data: chunks } = await supabase
       .from("knowledge_chunks")
       .select("content")
       .in("document_id", documentIds)
-      .limit(limit * 3); // Get more to filter
+      .limit(limit * 3);
 
     if (!chunks || chunks.length === 0) {
       return [];
     }
 
-    // Simple keyword matching (in production, use embeddings)
     const queryWords = query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
     
     const scoredChunks = chunks.map((chunk: any) => {
@@ -67,7 +66,6 @@ async function searchKnowledge(
       return { content: chunk.content, score };
     });
 
-    // Sort by relevance and take top chunks
     scoredChunks.sort((a: any, b: any) => b.score - a.score);
     
     return scoredChunks
@@ -81,42 +79,90 @@ async function searchKnowledge(
 }
 
 /**
- * Try to acquire a processing lock on the conversation
- * Returns true if lock acquired, false if already locked
+ * Fallback time-based lock using last_message_at
+ */
+async function fallbackTimeLock(supabase: any, conversationId: string): Promise<boolean> {
+  try {
+    const { data: conv } = await supabase
+      .from("conversations")
+      .select("last_message_at, updated_at")
+      .eq("id", conversationId)
+      .single();
+
+    if (!conv) return true;
+
+    const lastUpdate = new Date(conv.updated_at || conv.last_message_at);
+    const now = new Date();
+    const diffMs = now.getTime() - lastUpdate.getTime();
+
+    // If last update was less than 2 seconds ago, another process might be handling
+    if (diffMs < 2000) {
+      console.log(`Fallback lock: Too recent (${diffMs}ms ago), skipping`);
+      return false;
+    }
+
+    // Update updated_at to act as a lock
+    await supabase
+      .from("conversations")
+      .update({ updated_at: now.toISOString() })
+      .eq("id", conversationId);
+
+    return true;
+  } catch (error) {
+    console.error("Fallback lock error:", error);
+    return true; // Continue on error
+  }
+}
+
+/**
+ * Try to acquire a processing lock on the conversation with fallback
  */
 async function tryAcquireLock(
   supabase: any, 
   conversationId: string, 
   lockTimeoutMs: number = 30000
 ): Promise<boolean> {
-  const now = new Date();
-  const lockExpiry = new Date(now.getTime() - lockTimeoutMs);
+  try {
+    const now = new Date();
+    const lockExpiry = new Date(now.getTime() - lockTimeoutMs);
 
-  // Try to update only if no lock or lock expired
-  const { data, error } = await supabase
-    .from("conversations")
-    .update({ processing_lock_at: now.toISOString() })
-    .eq("id", conversationId)
-    .or(`processing_lock_at.is.null,processing_lock_at.lt.${lockExpiry.toISOString()}`)
-    .select("id");
+    const { data, error } = await supabase
+      .from("conversations")
+      .update({ processing_lock_at: now.toISOString() })
+      .eq("id", conversationId)
+      .or(`processing_lock_at.is.null,processing_lock_at.lt.${lockExpiry.toISOString()}`)
+      .select("id");
 
-  if (error) {
-    console.error("Error acquiring lock:", error);
-    return false;
+    if (error) {
+      // If column doesn't exist (42703), use fallback
+      if (error.code === "42703") {
+        console.warn(`Lock column missing (code: ${error.code}), using fallback time-based lock`);
+        return await fallbackTimeLock(supabase, conversationId);
+      }
+      console.error("Error acquiring lock:", error);
+      return await fallbackTimeLock(supabase, conversationId);
+    }
+
+    return data && data.length > 0;
+  } catch (error) {
+    console.error("Lock exception, using fallback:", error);
+    return await fallbackTimeLock(supabase, conversationId);
   }
-
-  // If we got a row back, we acquired the lock
-  return data && data.length > 0;
 }
 
 /**
- * Release the processing lock
+ * Release the processing lock (with fallback handling)
  */
 async function releaseLock(supabase: any, conversationId: string): Promise<void> {
-  await supabase
-    .from("conversations")
-    .update({ processing_lock_at: null })
-    .eq("id", conversationId);
+  try {
+    await supabase
+      .from("conversations")
+      .update({ processing_lock_at: null })
+      .eq("id", conversationId);
+  } catch (error) {
+    // Ignore errors - column might not exist
+    console.warn("Could not release lock:", error);
+  }
 }
 
 serve(async (req) => {
@@ -127,7 +173,7 @@ serve(async (req) => {
   try {
     const { message_id, conversation_id, instance_id, contact_id, content, workspace_id, original_message_type = "text" } = await req.json();
     
-    console.log("=== AI PROCESS MESSAGE ===");
+    console.log(`=== AI PROCESS MESSAGE (${FUNCTION_VERSION}) ===`);
     console.log("Input:", { message_id, conversation_id, instance_id, content: content?.substring(0, 50), original_message_type });
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
