@@ -6,23 +6,51 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-async function transcribeAudioFromUrl(audioUrl: string, languageCode: string = "por") {
+// Download decrypted media from W-API
+async function downloadMediaFromWAPI(
+  messageId: string,
+  wapiInstanceKey: string,
+  wapiApiKey: string
+): Promise<ArrayBuffer | null> {
+  const WAPI_BASE_URL = "https://api.w-api.app/v1";
+  
+  console.log("Downloading decrypted media from W-API for message:", messageId);
+  
+  try {
+    const response = await fetch(
+      `${WAPI_BASE_URL}/message/download-media?instanceId=${wapiInstanceKey}&messageId=${messageId}`,
+      {
+        method: "GET",
+        headers: {
+          "Authorization": `Bearer ${wapiApiKey}`,
+        },
+      }
+    );
+    
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => "");
+      console.error("W-API media download failed:", response.status, errorText);
+      return null;
+    }
+    
+    const arrayBuffer = await response.arrayBuffer();
+    console.log("W-API media downloaded successfully, size:", arrayBuffer.byteLength, "bytes");
+    return arrayBuffer;
+  } catch (error) {
+    console.error("Error downloading media from W-API:", error);
+    return null;
+  }
+}
+
+// Transcribe audio using ElevenLabs STT
+async function transcribeAudio(audioData: ArrayBuffer, languageCode: string = "por"): Promise<string | null> {
   const ELEVENLABS_API_KEY = Deno.env.get("ELEVENLABS_API_KEY");
   if (!ELEVENLABS_API_KEY) {
     console.log("ELEVENLABS_API_KEY not configured; skipping transcription");
     return null;
   }
 
-  console.log("Fetching audio for transcription:", audioUrl);
-  const audioResponse = await fetch(audioUrl);
-  if (!audioResponse.ok) {
-    const t = await audioResponse.text().catch(() => "");
-    throw new Error(`Failed to fetch audio from URL (${audioResponse.status}): ${t}`);
-  }
-
-  const audioBuffer = await audioResponse.arrayBuffer();
-  const audioBlob = new Blob([audioBuffer], { type: "audio/ogg" });
-
+  const audioBlob = new Blob([audioData], { type: "audio/ogg" });
   console.log("Transcribing audio, size:", audioBlob.size, "bytes, language:", languageCode);
 
   const apiFormData = new FormData();
@@ -51,6 +79,43 @@ async function transcribeAudioFromUrl(audioUrl: string, languageCode: string = "
 
   console.log("Transcription:", text ? text.substring(0, 120) : "<empty>");
   return text || null;
+}
+
+// Legacy function for backward compatibility - tries W-API first, then direct URL
+async function transcribeAudioFromUrl(
+  audioUrl: string, 
+  languageCode: string = "por",
+  messageId?: string,
+  wapiInstanceKey?: string,
+  wapiApiKey?: string
+): Promise<string | null> {
+  // If we have W-API credentials and messageId, try downloading decrypted media
+  if (messageId && wapiInstanceKey && wapiApiKey) {
+    console.log("Attempting to download decrypted audio via W-API...");
+    const decryptedAudio = await downloadMediaFromWAPI(messageId, wapiInstanceKey, wapiApiKey);
+    
+    if (decryptedAudio) {
+      return await transcribeAudio(decryptedAudio, languageCode);
+    }
+    console.log("W-API download failed, falling back to direct URL...");
+  }
+  
+  // Fallback: try direct URL (may fail for encrypted URLs)
+  const ELEVENLABS_API_KEY = Deno.env.get("ELEVENLABS_API_KEY");
+  if (!ELEVENLABS_API_KEY) {
+    console.log("ELEVENLABS_API_KEY not configured; skipping transcription");
+    return null;
+  }
+
+  console.log("Fetching audio for transcription (direct URL):", audioUrl);
+  const audioResponse = await fetch(audioUrl);
+  if (!audioResponse.ok) {
+    const t = await audioResponse.text().catch(() => "");
+    throw new Error(`Failed to fetch audio from URL (${audioResponse.status}): ${t}`);
+  }
+
+  const audioBuffer = await audioResponse.arrayBuffer();
+  return await transcribeAudio(audioBuffer, languageCode);
 }
 
 serve(async (req) => {
@@ -227,20 +292,51 @@ serve(async (req) => {
           payload.msgContent?.documentMessage?.caption ||
           "";
 
-        // Transcribe audio messages using ElevenLabs STT
+        // Transcribe audio messages using ElevenLabs STT via W-API decrypted download
         let audioTranscription: string | null = null;
         let audioUrl: string | null = null;
         if (messageType === "audio" && payload.msgContent?.audioMessage?.url) {
           audioUrl = payload.msgContent.audioMessage.url;
           try {
-            console.log("Transcribing audio message...");
-            audioTranscription = await transcribeAudioFromUrl(audioUrl!);
+            console.log("Transcribing audio message via W-API...");
+            
+            // Get W-API credentials from instance
+            const wapiInstanceKey = instance.instance_key;
+            
+            // Get W-API API key from integrations or use environment variable
+            let wapiApiKey = Deno.env.get("WAPI_API_KEY");
+            
+            if (!wapiApiKey && instance.workspace_id) {
+              // Try to get from integrations table
+              const { data: wapiIntegration } = await supabase
+                .from("integrations")
+                .select("config")
+                .eq("workspace_id", instance.workspace_id)
+                .eq("type", "wapi")
+                .eq("is_active", true)
+                .maybeSingle();
+              
+              wapiApiKey = (wapiIntegration?.config as any)?.api_key || null;
+            }
+            
+            // Use W-API download if we have credentials, otherwise try direct URL
+            audioTranscription = await transcribeAudioFromUrl(
+              audioUrl!, 
+              "por",
+              messageId,
+              wapiInstanceKey || undefined,
+              wapiApiKey || undefined
+            );
+            
             if (audioTranscription) {
               msgContent = audioTranscription; // Use transcription as message content for AI
               console.log("Audio transcribed successfully:", audioTranscription.substring(0, 100));
+            } else {
+              console.log("Audio transcription returned empty - message will be processed without text content");
             }
           } catch (transcribeErr) {
             console.error("Audio transcription failed:", transcribeErr);
+            // Continue processing - message will be saved even without transcription
           }
         }
 
