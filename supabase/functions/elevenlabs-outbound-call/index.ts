@@ -123,73 +123,110 @@ serve(async (req) => {
 
     const provider = telephonyNumber.provider;
     const providerType = provider?.provider_type;
-    
+
     console.log("Provider type:", providerType);
+
+    const normalizedToNumber = to_number.startsWith("+") ? to_number : `+${to_number}`;
+
+    // Helper: build conversation initiation client data (optional)
+    const buildConversationInitiationClientData = () => {
+      const hasDynamicVars = !!dynamic_variables && Object.keys(dynamic_variables).length > 0;
+      const hasFirstMessage = !!first_message && first_message.trim().length > 0;
+
+      if (!hasDynamicVars && !hasFirstMessage) return null;
+
+      const payload: Record<string, any> = {
+        type: "conversation_initiation_client_data",
+      };
+
+      if (hasDynamicVars) payload.dynamic_variables = dynamic_variables;
+
+      if (hasFirstMessage) {
+        payload.conversation_config_override = {
+          agent: {
+            first_message: first_message,
+          },
+        };
+      }
+
+      return payload;
+    };
 
     // Build the ElevenLabs API payload based on provider type
     let elevenlabsPayload: Record<string, any>;
     let apiEndpoint: string;
 
     if (providerType === "twilio") {
-      // For Twilio, check if we have an ElevenLabs phone ID (registered number)
-      if (telephonyNumber.elevenlabs_phone_id) {
-        // Use the generic phone call endpoint with the registered ElevenLabs phone ID
-        console.log("Using registered ElevenLabs phone ID:", telephonyNumber.elevenlabs_phone_id);
-        apiEndpoint = "https://api.elevenlabs.io/v1/convai/conversation/phone_call";
-        elevenlabsPayload = {
-          agent_id: agentId,
-          agent_phone_number_id: telephonyNumber.elevenlabs_phone_id,
-          to_number: to_number.startsWith("+") ? to_number : `+${to_number}`,
-        };
-      } else {
-        // Fallback: use Twilio-specific endpoint with credentials
-        const config = provider.config as { account_sid?: string; auth_token?: string };
-        
-        if (!config.account_sid || !config.auth_token) {
-          return new Response(
-            JSON.stringify({ error: "Twilio credentials not configured" }),
-            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-          );
-        }
+      // Twilio native outbound call endpoint requires the phone number to be registered in ElevenLabs.
+      const agentPhoneNumberId =
+        telephonyNumber.elevenlabs_phone_id ||
+        (typeof telephonyNumber.provider_number_id === "string" &&
+        telephonyNumber.provider_number_id.startsWith("PN")
+          ? telephonyNumber.provider_number_id
+          : null);
 
-        console.log("Using Twilio direct integration");
-        apiEndpoint = "https://api.elevenlabs.io/v1/convai/twilio/outbound_call";
-        elevenlabsPayload = {
-          agent_id: agentId,
-          twilio_account_sid: config.account_sid,
-          twilio_auth_token: config.auth_token,
-          twilio_phone_number: telephonyNumber.phone_number,
-          to_phone_number: to_number.startsWith("+") ? to_number : `+${to_number}`,
-        };
-      }
-    } else {
-      // For other providers (SIP, etc.), use the generic phone number endpoint
-      // This requires the number to be registered with ElevenLabs first
-      if (!telephonyNumber.provider_number_id?.startsWith("PN")) {
+      if (!agentPhoneNumberId) {
         return new Response(
-          JSON.stringify({ 
-            error: "Número não registrado no ElevenLabs. Configure o SIP forwarding primeiro.",
-            details: "Para chamadas outbound com provedores não-Twilio, registre o número no ElevenLabs."
+          JSON.stringify({
+            error: "Número Twilio não registrado no ElevenLabs",
+            details:
+              "Registre o número em ElevenLabs e cole o Phone ID (agent_phone_number_id) nas configurações do número.",
           }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
         );
       }
 
-      apiEndpoint = "https://api.elevenlabs.io/v1/convai/conversation/phone_call";
+      apiEndpoint = "https://api.elevenlabs.io/v1/convai/twilio/outbound-call";
       elevenlabsPayload = {
         agent_id: agentId,
-        agent_phone_number_id: telephonyNumber.provider_number_id,
-        to_number: to_number.startsWith("+") ? to_number : `+${to_number}`,
+        agent_phone_number_id: agentPhoneNumberId,
+        to_number: normalizedToNumber,
       };
+    } else if (providerType === "sip") {
+      const agentPhoneNumberId =
+        telephonyNumber.elevenlabs_phone_id || telephonyNumber.provider_number_id;
+
+      if (!agentPhoneNumberId) {
+        return new Response(
+          JSON.stringify({
+            error: "Número SIP não registrado no ElevenLabs",
+            details:
+              "Registre o número SIP no ElevenLabs para obter o agent_phone_number_id.",
+          }),
+          {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          }
+        );
+      }
+
+      apiEndpoint = "https://api.elevenlabs.io/v1/convai/sip-trunk/outbound-call";
+      elevenlabsPayload = {
+        agent_id: agentId,
+        agent_phone_number_id: agentPhoneNumberId,
+        to_number: normalizedToNumber,
+      };
+    } else {
+      return new Response(
+        JSON.stringify({
+          error: "Provedor não suporta chamadas outbound via ElevenLabs",
+          details: `provider_type=${providerType}`,
+        }),
+        {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
     }
 
-    // Add optional fields
-    if (first_message) {
-      elevenlabsPayload.first_message = first_message;
-    }
-
-    if (dynamic_variables && Object.keys(dynamic_variables).length > 0) {
-      elevenlabsPayload.dynamic_variables = dynamic_variables;
+    const conversationInitiationClientData =
+      buildConversationInitiationClientData();
+    if (conversationInitiationClientData) {
+      elevenlabsPayload.conversation_initiation_client_data =
+        conversationInitiationClientData;
     }
 
     console.log("Calling ElevenLabs API:", apiEndpoint);

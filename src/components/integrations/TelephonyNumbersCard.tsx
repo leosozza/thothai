@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
@@ -77,6 +78,7 @@ export function TelephonyNumbersCard() {
   const [configDialogOpen, setConfigDialogOpen] = useState(false);
   const [selectedNumber, setSelectedNumber] = useState<TelephonyNumber | null>(null);
   const [selectedPersonaId, setSelectedPersonaId] = useState<string>("");
+  const [elevenlabsPhoneId, setElevenlabsPhoneId] = useState<string>("");
   const [saving, setSaving] = useState(false);
   const [registeringNumber, setRegisteringNumber] = useState<string | null>(null);
 
@@ -157,6 +159,7 @@ export function TelephonyNumbersCard() {
   const handleOpenConfig = (number: TelephonyNumber) => {
     setSelectedNumber(number);
     setSelectedPersonaId(number.persona_id || "");
+    setElevenlabsPhoneId(number.elevenlabs_phone_id || "");
     setConfigDialogOpen(true);
   };
 
@@ -174,7 +177,7 @@ export function TelephonyNumbersCard() {
         .update({
           persona_id: selectedPersonaId === "none" ? null : selectedPersonaId || null,
           elevenlabs_agent_id: elevenlabsAgentId,
-          elevenlabs_phone_id: selectedNumber.elevenlabs_phone_id,
+          elevenlabs_phone_id: elevenlabsPhoneId.trim() ? elevenlabsPhoneId.trim() : null,
           updated_at: new Date().toISOString(),
         })
         .eq("id", selectedNumber.id);
@@ -383,6 +386,10 @@ export function TelephonyNumbersCard() {
               {numbers.map((number) => {
                 const IconComponent = providerIcons[number.provider_type || "twilio"] || Phone;
                 const colorClass = providerColors[number.provider_type || "twilio"] || "bg-gray-500";
+                const isElevenLabsRegistered =
+                  number.provider_type === "twilio"
+                    ? !!number.elevenlabs_phone_id
+                    : !!number.provider_number_id;
 
                 return (
                   <div
@@ -419,16 +426,25 @@ export function TelephonyNumbersCard() {
                             ⚠ Nenhuma persona associada
                           </p>
                         )}
-                        {!number.provider_number_id && number.provider_type === "sip" && (
+
+                        {number.provider_type === "twilio" && !number.elevenlabs_phone_id && (
+                          <p className="text-xs text-orange-500 mt-1">
+                            ⚠ Cole o ElevenLabs Phone ID nas configurações do número
+                          </p>
+                        )}
+
+                        {!isElevenLabsRegistered && number.provider_type === "sip" && (
                           <p className="text-xs text-orange-500 mt-1">
                             ⚠ Não registrado no ElevenLabs
                           </p>
                         )}
-                        {number.provider_number_id && (
+
+                        {isElevenLabsRegistered && (
                           <p className="text-xs text-green-600 mt-1">
                             ✓ Registrado no ElevenLabs
                           </p>
                         )}
+
                         {!supportsOutbound(number.provider_type) && (
                           <p className="text-xs text-muted-foreground mt-1">
                             ℹ SIP/Wavoip só recebe chamadas. Use Twilio/Telnyx para fazer chamadas.
