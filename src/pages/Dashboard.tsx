@@ -444,7 +444,7 @@ export default function Dashboard() {
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
             <h2 className="text-2xl font-bold tracking-tight">
-              Bem-vindo ao <span className="text-gradient-gold">thoth.AI</span>
+              Bem-vindo ao <span className="text-gradient-gold">THOTH.AI</span>
             </h2>
             <p className="text-muted-foreground">
               Seu agente inteligente de atendimento está pronto para começar.
