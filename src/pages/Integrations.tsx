@@ -59,6 +59,7 @@ import {
   Bug,
   Mic,
   Cog,
+  Plug,
 } from "lucide-react";
 import {
   Table,
@@ -73,6 +74,8 @@ import { TelephonyProviderCard } from "@/components/integrations/TelephonyProvid
 import { TelephonyNumbersCard } from "@/components/integrations/TelephonyNumbersCard";
 import { TransferRulesCard } from "@/components/integrations/TransferRulesCard";
 import { TelephonyGuideCard } from "@/components/integrations/TelephonyGuideCard";
+import { MCPConnectionsCard } from "@/components/integrations/MCPConnectionsCard";
+import { MCPServerCard } from "@/components/integrations/MCPServerCard";
 
 interface Integration {
   id: string;
@@ -1446,6 +1449,10 @@ export default function Integrations() {
               <Phone className="h-4 w-4" />
               Telefonia
             </TabsTrigger>
+            <TabsTrigger value="mcp" className="gap-2">
+              <Plug className="h-4 w-4" />
+              MCPs
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="channels" className="mt-6">
@@ -2239,6 +2246,50 @@ export default function Integrations() {
                     <li>Cole a URL acima no campo de webhook</li>
                     <li>Ative os eventos: call.started, call.ended, transcript</li>
                   </ol>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          {/* MCP Tab */}
+          <TabsContent value="mcp" className="space-y-6">
+            <div className="grid gap-6 lg:grid-cols-2">
+              {/* MCP Connections */}
+              {workspace && (
+                <MCPConnectionsCard workspaceId={workspace.id} />
+              )}
+
+              {/* MCP Server */}
+              {workspace && (
+                <MCPServerCard workspaceId={workspace.id} />
+              )}
+            </div>
+
+            {/* MCP Info Card */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg">O que é MCP?</CardTitle>
+              </CardHeader>
+              <CardContent className="text-sm text-muted-foreground space-y-3">
+                <p>
+                  <strong>Model Context Protocol (MCP)</strong> é um protocolo aberto que permite conectar 
+                  aplicações de IA a fontes de dados e ferramentas externas.
+                </p>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="p-3 rounded-lg bg-muted/50">
+                    <h4 className="font-medium text-foreground mb-1">Conexões MCP (Client)</h4>
+                    <p className="text-xs">
+                      Conecte-se a servidores MCP externos (como n8n, outras aplicações) para dar 
+                      às suas personas acesso a ferramentas e dados externos.
+                    </p>
+                  </div>
+                  <div className="p-3 rounded-lg bg-muted/50">
+                    <h4 className="font-medium text-foreground mb-1">Servidor MCP Thoth</h4>
+                    <p className="text-xs">
+                      Exponha as funcionalidades do Thoth (enviar mensagens, consultar contatos, 
+                      perguntar às personas) para outras aplicações via MCP.
+                    </p>
+                  </div>
                 </div>
               </CardContent>
             </Card>

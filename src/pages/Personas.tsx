@@ -23,6 +23,7 @@ import { useWorkspace } from "@/hooks/useWorkspace";
 import { AIModelSelector } from "@/components/personas/AIModelSelector";
 import { VoiceModelSelector } from "@/components/personas/VoiceModelSelector";
 import { KnowledgeSelector } from "@/components/personas/KnowledgeSelector";
+import { MCPSelector } from "@/components/personas/MCPSelector";
 import {
   Plus,
   Bot,
@@ -38,6 +39,7 @@ import {
   Brain,
   BookOpen,
   Phone,
+  Plug,
 } from "lucide-react";
 import { VoiceTestButton } from "@/components/calls/VoiceTestButton";
 
@@ -107,6 +109,9 @@ export default function Personas() {
   // Form states - Knowledge
   const [selectedDocumentIds, setSelectedDocumentIds] = useState<string[]>([]);
   const [voiceId, setVoiceId] = useState<string | null>(null);
+  
+  // Form states - MCP
+  const [selectedMcpIds, setSelectedMcpIds] = useState<string[]>([]);
   
   // Form states - ElevenLabs Telephony
   const [elevenlabsAgentId, setElevenlabsAgentId] = useState("");
@@ -178,6 +183,8 @@ export default function Personas() {
     setVoiceId(null);
     // Knowledge
     setSelectedDocumentIds([]);
+    // MCP
+    setSelectedMcpIds([]);
     // ElevenLabs Telephony
     setElevenlabsAgentId("");
   };
@@ -363,6 +370,20 @@ export default function Personas() {
           document_id: docId,
         }));
         await supabase.from("persona_knowledge_documents").insert(links);
+      }
+
+      // Sync MCP connections
+      await supabase
+        .from("persona_mcp_connections")
+        .delete()
+        .eq("persona_id", personaId);
+
+      if (selectedMcpIds.length > 0) {
+        const mcpLinks = selectedMcpIds.map((mcpId) => ({
+          persona_id: personaId,
+          mcp_connection_id: mcpId,
+        }));
+        await supabase.from("persona_mcp_connections").insert(mcpLinks);
       }
 
       toast.success(editingPersona ? "Persona atualizada!" : "Persona criada!");
@@ -756,6 +777,16 @@ export default function Personas() {
                 selectedDocumentIds={selectedDocumentIds}
                 onSelectionChange={setSelectedDocumentIds}
               />
+
+              {/* MCP Selector */}
+              {workspace && (
+                <MCPSelector
+                  workspaceId={workspace.id}
+                  personaId={editingPersona?.id}
+                  selectedMcpIds={selectedMcpIds}
+                  onSelectionChange={setSelectedMcpIds}
+                />
+              )}
 
               {/* ElevenLabs Telephony */}
               <div className="space-y-3 p-4 rounded-lg bg-muted/50 border">
