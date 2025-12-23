@@ -180,7 +180,7 @@ serve(async (req) => {
       // Check conversation attendance_mode
       const { data: conversation } = await supabase
         .from("conversations")
-        .select("attendance_mode, bot_state")
+        .select("attendance_mode, bot_state, assigned_to")
         .eq("id", conversation_id)
         .single();
 
@@ -192,6 +192,30 @@ serve(async (req) => {
         }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
+      }
+
+      // === ANTI-LOOP MECHANISM 3: Check if human agent responded recently ===
+      const { data: lastOutgoing } = await supabase
+        .from("messages")
+        .select("is_from_bot, metadata, created_at")
+        .eq("conversation_id", conversation_id)
+        .eq("direction", "outgoing")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (lastOutgoing && !lastOutgoing.is_from_bot) {
+        const source = lastOutgoing.metadata?.source;
+        if (source === "bitrix24_operator" || source === "whatsapp_manual" || source === "thoth_app") {
+          console.log("SKIP: Human agent responded recently via:", source);
+          return new Response(JSON.stringify({ 
+            skipped: true, 
+            reason: "Human agent responded",
+            source: source
+          }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
       }
 
       // Fetch the default persona for this workspace

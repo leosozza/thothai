@@ -37,7 +37,8 @@ serve(async (req) => {
       audio_base64, // Base64 encoded audio from TTS
       workspaceId,
       workspace_id, // Alternative naming
-      internal_call // Flag for internal edge function calls
+      internal_call, // Flag for internal edge function calls
+      source // Message source: "bot", "thoth_app", "bitrix24_operator"
     } = await req.json();
 
     // Normalize parameter names
@@ -48,6 +49,9 @@ serve(async (req) => {
     const finalMessageType = messageType || message_type || "text";
     const finalMediaUrl = mediaUrl || media_url;
     const finalWorkspaceId = workspaceId || workspace_id;
+    
+    // Determine message source
+    const messageSource = source || (internal_call ? "bot" : "thoth_app");
 
     console.log("Send message request:", { instanceId: finalInstanceId, phoneNumber: finalPhoneNumber, messageType: finalMessageType, internal_call });
 
@@ -198,6 +202,8 @@ serve(async (req) => {
     // Save message to database (only if we have conversation info)
     let savedMessage = null;
     if (finalConversationId && finalContactId) {
+      const isFromBot = messageSource === "bot";
+      
       const { data: msgData, error: saveError } = await supabaseAdmin
         .from("messages")
         .insert({
@@ -210,7 +216,8 @@ serve(async (req) => {
           content: message,
           media_url: finalMediaUrl,
           status: "sent",
-          is_from_bot: !!internal_call, // Mark as bot message if internal call
+          is_from_bot: isFromBot,
+          metadata: { source: messageSource }
         })
         .select()
         .single();
@@ -220,14 +227,28 @@ serve(async (req) => {
       }
       savedMessage = msgData;
 
-      // Update conversation last_message_at
-      await supabaseAdmin
-        .from("conversations")
-        .update({
-          last_message_at: new Date().toISOString(),
-          unread_count: 0,
-        })
-        .eq("id", finalConversationId);
+      // If human agent sent the message, switch to human mode
+      if (messageSource === "thoth_app") {
+        await supabaseAdmin
+          .from("conversations")
+          .update({
+            attendance_mode: "human",
+            assigned_to: "thoth_app",
+            last_message_at: new Date().toISOString(),
+            unread_count: 0,
+          })
+          .eq("id", finalConversationId);
+        console.log("Human agent sent message via ThothAI app - switched to human mode");
+      } else {
+        // Just update timestamp for bot messages
+        await supabaseAdmin
+          .from("conversations")
+          .update({
+            last_message_at: new Date().toISOString(),
+            unread_count: 0,
+          })
+          .eq("id", finalConversationId);
+      }
     }
 
     return new Response(JSON.stringify({ 

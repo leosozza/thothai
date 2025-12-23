@@ -162,7 +162,7 @@ serve(async (req) => {
       // Check conversation mode
       const { data: conversation } = await supabase
         .from("conversations")
-        .select("attendance_mode, bot_state, last_bot_message_hash")
+        .select("attendance_mode, bot_state, last_bot_message_hash, assigned_to")
         .eq("id", conversation_id)
         .single();
 
@@ -176,7 +176,31 @@ serve(async (req) => {
         });
       }
 
-      // === ANTI-LOOP MECHANISM 2: Check recent messages ===
+      // === ANTI-LOOP MECHANISM 2: Check if human agent responded recently ===
+      const { data: lastOutgoing } = await supabase
+        .from("messages")
+        .select("is_from_bot, metadata, created_at")
+        .eq("conversation_id", conversation_id)
+        .eq("direction", "outgoing")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (lastOutgoing && !lastOutgoing.is_from_bot) {
+        const source = lastOutgoing.metadata?.source;
+        if (source === "bitrix24_operator" || source === "whatsapp_manual" || source === "thoth_app") {
+          console.log("SKIP: Human agent responded recently via:", source);
+          return new Response(JSON.stringify({ 
+            skipped: true, 
+            reason: "Human agent responded",
+            source: source
+          }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      }
+
+      // === ANTI-LOOP MECHANISM 3: Check recent bot messages ===
       const { data: recentOutgoing } = await supabase
         .from("messages")
         .select("created_at, content")
