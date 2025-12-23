@@ -40,28 +40,68 @@ serve(async (req) => {
           );
         }
 
-        // Validate connection with WaVoIP API
-        const wavoipResponse = await fetch("https://api.wavoip.com/v1/instance/info", {
-          method: "GET",
-          headers: {
-            "Authorization": `Bearer ${api_token}`,
-            "X-Instance-Key": instance_key,
-          },
-        });
+        // Validate connection with WaVoIP API (endpoint/method may vary)
+        const baseUrl = "https://api.wavoip.com";
+        const candidates = [
+          { url: `${baseUrl}/v1/instance/info`, method: "POST" },
+          { url: `${baseUrl}/v1/instance/info`, method: "GET" },
+          { url: `${baseUrl}/v1/instance/info/${instance_key}`, method: "GET" },
+          { url: `${baseUrl}/v1/instance/info/${instance_key}`, method: "POST" },
+        ] as const;
 
-        if (!wavoipResponse.ok) {
-          const errorText = await wavoipResponse.text();
-          console.error("[WaVoIP] Connection failed:", errorText);
+        let instanceInfo: any = null;
+        let lastError: { url: string; method: string; status: number; body: string } | null = null;
+
+        for (const c of candidates) {
+          const res = await fetch(c.url, {
+            method: c.method,
+            headers: {
+              Authorization: `Bearer ${api_token}`,
+              "X-Instance-Key": instance_key,
+              "Content-Type": "application/json",
+            },
+            body: c.method === "POST" ? "{}" : undefined,
+          });
+
+          const text = await res.text();
+
+          if (!res.ok) {
+            lastError = {
+              url: c.url,
+              method: c.method,
+              status: res.status,
+              body: text.slice(0, 500),
+            };
+            continue;
+          }
+
+          try {
+            instanceInfo = JSON.parse(text);
+            break;
+          } catch {
+            lastError = {
+              url: c.url,
+              method: c.method,
+              status: res.status,
+              body: text.slice(0, 500),
+            };
+          }
+        }
+
+        if (!instanceInfo) {
+          console.error("[WaVoIP] Connection failed:", lastError);
           return new Response(
-            JSON.stringify({ 
-              success: false, 
-              error: "Falha na conexão com WaVoIP. Verifique suas credenciais." 
+            JSON.stringify({
+              success: false,
+              error:
+                lastError
+                  ? `Falha ao consultar WaVoIP (${lastError.status}). Última tentativa: ${lastError.method} ${lastError.url}`
+                  : "Falha na conexão com WaVoIP. Verifique suas credenciais.",
             }),
             { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
           );
         }
 
-        const instanceInfo = await wavoipResponse.json();
         console.log("[WaVoIP] Instance info:", instanceInfo);
 
         // Get the phone number from the instance
