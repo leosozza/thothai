@@ -34,7 +34,6 @@ import {
   FileText,
   MessageSquare,
   Trash2,
-  RefreshCw,
   Search,
   Brain,
   BookOpen,
@@ -43,7 +42,11 @@ import {
   Link,
   History,
   CheckCircle,
+  Pencil,
+  Eye,
 } from "lucide-react";
+import { DocumentDetailsDialog } from "@/components/training/DocumentDetailsDialog";
+import { EditDocumentDialog } from "@/components/training/EditDocumentDialog";
 
 interface KnowledgeDocument {
   id: string;
@@ -72,8 +75,17 @@ const statusConfig: Record<string, { label: string; color: string }> = {
   failed: { label: "Falhou", color: "bg-red-500" },
 };
 
-const ACCEPTED_FILE_TYPES = ".pdf,.doc,.docx,.xls,.xlsx,.txt,.csv";
+// Expanded file types
+const ACCEPTED_FILE_TYPES = ".pdf,.doc,.docx,.xls,.xlsx,.txt,.csv,.ppt,.pptx,.json,.xml,.html,.md,.rtf";
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+
+// File type categories for display
+const FILE_TYPE_CATEGORIES = [
+  { label: "Documentos", types: "PDF, DOC, DOCX, RTF" },
+  { label: "Planilhas", types: "XLS, XLSX, CSV" },
+  { label: "Apresentações", types: "PPT, PPTX" },
+  { label: "Código/Dados", types: "JSON, XML, HTML, MD, TXT" },
+];
 
 export default function Training() {
   const [documents, setDocuments] = useState<KnowledgeDocument[]>([]);
@@ -94,6 +106,11 @@ export default function Training() {
   const [docTitle, setDocTitle] = useState("");
   const [docContent, setDocContent] = useState("");
   const [urlInput, setUrlInput] = useState("");
+
+  // Edit and details dialogs
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
+  const [selectedDocument, setSelectedDocument] = useState<KnowledgeDocument | null>(null);
 
   useEffect(() => {
     if (workspace) {
@@ -260,6 +277,16 @@ export default function Training() {
     }
   };
 
+  const handleEditClick = (doc: KnowledgeDocument) => {
+    setSelectedDocument(doc);
+    setEditDialogOpen(true);
+  };
+
+  const handleViewDetails = (doc: KnowledgeDocument) => {
+    setSelectedDocument(doc);
+    setDetailsDialogOpen(true);
+  };
+
   const filteredDocuments = documents.filter((doc) =>
     doc.title.toLowerCase().includes(searchTerm.toLowerCase())
   );
@@ -380,9 +407,14 @@ export default function Training() {
                           <p className="text-sm text-muted-foreground mb-2">
                             {isDragging ? "Solte o arquivo aqui" : "Arraste arquivos aqui ou clique para selecionar"}
                           </p>
-                          <p className="text-xs text-muted-foreground">
-                            PDF, Word, Excel, TXT (máx. 10MB)
-                          </p>
+                          <div className="text-xs text-muted-foreground space-y-1">
+                            {FILE_TYPE_CATEGORIES.map((cat) => (
+                              <p key={cat.label}>
+                                <span className="font-medium">{cat.label}:</span> {cat.types}
+                              </p>
+                            ))}
+                            <p className="mt-2 text-muted-foreground/70">Máx. 10MB</p>
+                          </div>
                           <Button variant="outline" size="sm" className="mt-4">
                             Selecionar Arquivo
                           </Button>
@@ -558,12 +590,12 @@ export default function Training() {
                 <Card key={doc.id} className="relative overflow-hidden">
                   <CardHeader className="pb-3">
                     <div className="flex items-start justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className={`p-2 rounded-lg ${sourceConfig.color}/10`}>
+                      <div className="flex items-center gap-3 flex-1 min-w-0">
+                        <div className={`p-2 rounded-lg ${sourceConfig.color}/10 shrink-0`}>
                           <SourceIcon className={`h-5 w-5 text-${sourceConfig.color.replace("bg-", "")}`} />
                         </div>
-                        <div>
-                          <CardTitle className="text-base">{doc.title}</CardTitle>
+                        <div className="min-w-0">
+                          <CardTitle className="text-base truncate">{doc.title}</CardTitle>
                           <CardDescription className="text-xs">
                             {sourceConfig.label}
                             {doc.source_url && (
@@ -572,14 +604,35 @@ export default function Training() {
                           </CardDescription>
                         </div>
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-destructive hover:text-destructive"
-                        onClick={() => handleDeleteDocument(doc.id)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => handleViewDetails(doc)}
+                          title="Ver detalhes"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => handleEditClick(doc)}
+                          title="Editar"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-destructive hover:text-destructive"
+                          onClick={() => handleDeleteDocument(doc.id)}
+                          title="Excluir"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </div>
                   </CardHeader>
                   <CardContent>
@@ -604,6 +657,21 @@ export default function Training() {
           </div>
         )}
       </div>
+
+      {/* Edit Dialog */}
+      <EditDocumentDialog
+        open={editDialogOpen}
+        onOpenChange={setEditDialogOpen}
+        document={selectedDocument}
+        onUpdated={fetchDocuments}
+      />
+
+      {/* Details Dialog */}
+      <DocumentDetailsDialog
+        open={detailsDialogOpen}
+        onOpenChange={setDetailsDialogOpen}
+        document={selectedDocument}
+      />
     </AppLayout>
   );
 }
