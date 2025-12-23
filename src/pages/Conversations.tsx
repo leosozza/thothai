@@ -48,6 +48,8 @@ import {
   RefreshCw,
   ArrowLeftRight,
   UserCheck,
+  Smartphone,
+  Building2,
 } from "lucide-react";
 import { OutboundCallDialog } from "@/components/calls/OutboundCallDialog";
 
@@ -88,6 +90,8 @@ interface Message {
   status: string;
   is_from_bot: boolean;
   created_at: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  metadata?: any;
 }
 
 export default function Conversations() {
@@ -887,43 +891,79 @@ export default function Conversations() {
                       </p>
                     </div>
                   ) : (
-                    messages.map((msg) => (
-                      <div
-                        key={msg.id}
-                        className={`flex ${msg.direction === "outgoing" ? "justify-end" : "justify-start"}`}
-                      >
-                        <div
-                          className={`max-w-[70%] rounded-2xl px-4 py-2 ${
-                            msg.direction === "outgoing"
-                              ? "bg-primary text-primary-foreground rounded-br-md"
-                              : "bg-card border border-border rounded-bl-md"
-                          }`}
-                        >
-                          {msg.is_from_bot && msg.direction === "outgoing" && (
+                    messages.map((msg) => {
+                      // Determine message source for outgoing messages
+                      const getSourceIcon = () => {
+                        if (msg.direction !== "outgoing") return null;
+                        if (msg.is_from_bot) {
+                          return (
                             <div className="flex items-center gap-1 text-xs opacity-70 mb-1">
                               <Bot className="h-3 w-3" />
                               <span>Thoth.AI</span>
                             </div>
-                          )}
-                          <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                          );
+                        }
+                        const source = msg.metadata?.source as string | undefined;
+                        if (source === "thoth_app") {
+                          return (
+                            <div className="flex items-center gap-1 text-xs opacity-70 mb-1">
+                              <User className="h-3 w-3" />
+                              <span>Atendente</span>
+                            </div>
+                          );
+                        }
+                        if (source === "bitrix24_operator") {
+                          return (
+                            <div className="flex items-center gap-1 text-xs opacity-70 mb-1">
+                              <Building2 className="h-3 w-3" />
+                              <span>Bitrix24</span>
+                            </div>
+                          );
+                        }
+                        if (source === "whatsapp_manual") {
+                          return (
+                            <div className="flex items-center gap-1 text-xs opacity-70 mb-1">
+                              <Smartphone className="h-3 w-3" />
+                              <span>WhatsApp</span>
+                            </div>
+                          );
+                        }
+                        return null;
+                      };
+
+                      return (
+                        <div
+                          key={msg.id}
+                          className={`flex ${msg.direction === "outgoing" ? "justify-end" : "justify-start"}`}
+                        >
                           <div
-                            className={`flex items-center justify-end gap-1 mt-1 ${
+                            className={`max-w-[70%] rounded-2xl px-4 py-2 ${
                               msg.direction === "outgoing"
-                                ? "text-primary-foreground/70"
-                                : "text-muted-foreground"
+                                ? "bg-primary text-primary-foreground rounded-br-md"
+                                : "bg-card border border-border rounded-bl-md"
                             }`}
                           >
-                            <span className="text-xs">
-                              {new Date(msg.created_at).toLocaleTimeString("pt-BR", {
-                                hour: "2-digit",
-                                minute: "2-digit",
-                              })}
-                            </span>
-                            {msg.direction === "outgoing" && getStatusIcon(msg.status)}
+                            {getSourceIcon()}
+                            <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                            <div
+                              className={`flex items-center justify-end gap-1 mt-1 ${
+                                msg.direction === "outgoing"
+                                  ? "text-primary-foreground/70"
+                                  : "text-muted-foreground"
+                              }`}
+                            >
+                              <span className="text-xs">
+                                {new Date(msg.created_at).toLocaleTimeString("pt-BR", {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })}
+                              </span>
+                              {msg.direction === "outgoing" && getStatusIcon(msg.status)}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                   <div ref={messagesEndRef} />
                 </div>

@@ -578,15 +578,18 @@ async function processOperatorMessage(
       });
   }
 
-  // Update conversation timestamp
+  // Update conversation - switch to human mode when operator responds
   if (conversationId) {
     await supabase
       .from("conversations")
       .update({ 
+        attendance_mode: "human",
+        assigned_to: "bitrix24_operator",
         last_message_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
       })
       .eq("id", conversationId);
+    console.log("Operator assumed conversation via Bitrix24 - switched to human mode");
   }
 
   console.log("Operator message processed successfully");

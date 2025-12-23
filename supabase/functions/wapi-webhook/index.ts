@@ -124,9 +124,72 @@ serve(async (req) => {
         const pushName = payload.sender?.pushName || "";
         const profilePic = payload.sender?.profilePicture || payload.chat?.profilePicture;
 
-        // ANTI-LOOP: Skip messages sent by the connected WhatsApp account
+        // Handle outgoing messages (fromMe=true)
         if (isFromMe) {
-          console.log("Skipping own message (fromMe=true):", messageId);
+          // Check if this message was sent by our system (bot, app, or API)
+          const { data: existingOurMessage } = await supabase
+            .from("messages")
+            .select("id, is_from_bot, metadata")
+            .eq("whatsapp_message_id", messageId)
+            .maybeSingle();
+
+          if (existingOurMessage) {
+            // Message already exists in DB - was sent by our system (echo)
+            console.log("Skipping - message sent by our system:", existingOurMessage.metadata?.source || "unknown");
+            break;
+          }
+
+          // Message from WhatsApp but NOT in our DB = sent via phone/manual
+          console.log("Detected message from human agent via WhatsApp mobile");
+          
+          // Get or create contact for this conversation
+          const { data: manualContact } = await supabase
+            .from("contacts")
+            .select("*")
+            .eq("instance_id", instanceId)
+            .ilike("phone_number", `%${contactPhone.slice(-10)}`)
+            .maybeSingle();
+
+          if (manualContact) {
+            // Get conversation
+            const { data: manualConversation } = await supabase
+              .from("conversations")
+              .select("*")
+              .eq("instance_id", instanceId)
+              .eq("contact_id", manualContact.id)
+              .maybeSingle();
+
+            if (manualConversation) {
+              // Extract message content
+              const manualMsgContent = payload.msgContent?.conversation ||
+                payload.msgContent?.extendedTextMessage?.text || "";
+
+              // Save message as human agent message
+              await supabase.from("messages").insert({
+                instance_id: instanceId,
+                contact_id: manualContact.id,
+                conversation_id: manualConversation.id,
+                whatsapp_message_id: messageId,
+                direction: "outgoing",
+                message_type: "text",
+                content: manualMsgContent,
+                status: "sent",
+                is_from_bot: false,
+                metadata: { source: "whatsapp_manual" }
+              });
+
+              // Switch to human mode - agent took over via WhatsApp
+              await supabase.from("conversations").update({
+                attendance_mode: "human",
+                assigned_to: "whatsapp_manual",
+                last_message_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+              }).eq("id", manualConversation.id);
+
+              console.log("Human agent assumed via WhatsApp - switched to human mode");
+            }
+          }
+          
           break;
         }
 
