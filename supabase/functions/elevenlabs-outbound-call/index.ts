@@ -70,7 +70,7 @@ serve(async (req) => {
       );
     }
 
-    // Get telephony number configuration
+    // Get telephony number configuration with provider
     const { data: telephonyNumber, error: telephonyError } = await supabase
       .from("telephony_numbers")
       .select(`
@@ -121,12 +121,54 @@ serve(async (req) => {
       );
     }
 
-    // Build the ElevenLabs API payload
-    const elevenlabsPayload: Record<string, any> = {
-      agent_id: agentId,
-      agent_phone_number_id: telephonyNumber.provider_number_id,
-      to_number: to_number.startsWith("+") ? to_number : `+${to_number}`,
-    };
+    const provider = telephonyNumber.provider;
+    const providerType = provider?.provider_type;
+    
+    console.log("Provider type:", providerType);
+
+    // Build the ElevenLabs API payload based on provider type
+    let elevenlabsPayload: Record<string, any>;
+    let apiEndpoint: string;
+
+    if (providerType === "twilio") {
+      // For Twilio, use the Twilio-specific endpoint with credentials
+      const config = provider.config as { account_sid?: string; auth_token?: string };
+      
+      if (!config.account_sid || !config.auth_token) {
+        return new Response(
+          JSON.stringify({ error: "Twilio credentials not configured" }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      apiEndpoint = "https://api.elevenlabs.io/v1/convai/twilio/outbound_call";
+      elevenlabsPayload = {
+        agent_id: agentId,
+        twilio_account_sid: config.account_sid,
+        twilio_auth_token: config.auth_token,
+        twilio_phone_number: telephonyNumber.phone_number,
+        to_phone_number: to_number.startsWith("+") ? to_number : `+${to_number}`,
+      };
+    } else {
+      // For other providers (SIP, etc.), use the generic phone number endpoint
+      // This requires the number to be registered with ElevenLabs first
+      if (!telephonyNumber.provider_number_id?.startsWith("PN")) {
+        return new Response(
+          JSON.stringify({ 
+            error: "Número não registrado no ElevenLabs. Configure o SIP forwarding primeiro.",
+            details: "Para chamadas outbound com provedores não-Twilio, registre o número no ElevenLabs."
+          }),
+          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      apiEndpoint = "https://api.elevenlabs.io/v1/convai/conversation/phone_call";
+      elevenlabsPayload = {
+        agent_id: agentId,
+        agent_phone_number_id: telephonyNumber.provider_number_id,
+        to_number: to_number.startsWith("+") ? to_number : `+${to_number}`,
+      };
+    }
 
     // Add optional fields
     if (first_message) {
@@ -137,20 +179,18 @@ serve(async (req) => {
       elevenlabsPayload.dynamic_variables = dynamic_variables;
     }
 
-    console.log("Calling ElevenLabs API:", JSON.stringify(elevenlabsPayload));
+    console.log("Calling ElevenLabs API:", apiEndpoint);
+    console.log("Payload:", JSON.stringify(elevenlabsPayload));
 
     // Call ElevenLabs outbound call API
-    const elevenlabsResponse = await fetch(
-      "https://api.elevenlabs.io/v1/convai/twilio/outbound_call",
-      {
-        method: "POST",
-        headers: {
-          "xi-api-key": ELEVENLABS_API_KEY,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(elevenlabsPayload),
-      }
-    );
+    const elevenlabsResponse = await fetch(apiEndpoint, {
+      method: "POST",
+      headers: {
+        "xi-api-key": ELEVENLABS_API_KEY,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(elevenlabsPayload),
+    });
 
     const responseText = await elevenlabsResponse.text();
     console.log("ElevenLabs response status:", elevenlabsResponse.status);
