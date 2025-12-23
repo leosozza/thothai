@@ -216,19 +216,28 @@ async function handleMessage(supabase: any, instance: any, webhookData: any) {
   if (conversation.attendance_mode === "ai") {
     try {
       const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
-      await fetch(`${supabaseUrl}/functions/v1/ai-process-message`, {
+      
+      // Get workspace_id from instance for multi-tenant support
+      const workspaceId = instance.workspace_id;
+      
+      await fetch(`${supabaseUrl}/functions/v1/flow-engine`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
         },
         body: JSON.stringify({
-          conversationId: conversation.id,
-          instanceId: instance.id,
-          contactId: contact.id,
-          messageContent: messageContent,
+          message_id: gupshupMessageId,
+          conversation_id: conversation.id,
+          instance_id: instance.id,
+          contact_id: contact.id,
+          content: messageContent,
+          workspace_id: workspaceId,
+          is_first_message: !convError, // True if conversation was just created
+          original_message_type: dbMessageType,
         }),
       });
+      console.log("[gupshup-webhook] Triggered flow-engine with workspace_id:", workspaceId);
     } catch (aiError) {
       console.error("[gupshup-webhook] Error triggering AI processing:", aiError);
     }
