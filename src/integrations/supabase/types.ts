@@ -1604,6 +1604,7 @@ export type Database = {
           capabilities: Json | null
           created_at: string | null
           elevenlabs_agent_id: string | null
+          elevenlabs_phone_id: string | null
           friendly_name: string | null
           id: string
           is_active: boolean | null
@@ -1618,6 +1619,7 @@ export type Database = {
           capabilities?: Json | null
           created_at?: string | null
           elevenlabs_agent_id?: string | null
+          elevenlabs_phone_id?: string | null
           friendly_name?: string | null
           id?: string
           is_active?: boolean | null
@@ -1632,6 +1634,7 @@ export type Database = {
           capabilities?: Json | null
           created_at?: string | null
           elevenlabs_agent_id?: string | null
+          elevenlabs_phone_id?: string | null
           friendly_name?: string | null
           id?: string
           is_active?: boolean | null

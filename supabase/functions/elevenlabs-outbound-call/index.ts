@@ -131,24 +131,37 @@ serve(async (req) => {
     let apiEndpoint: string;
 
     if (providerType === "twilio") {
-      // For Twilio, use the Twilio-specific endpoint with credentials
-      const config = provider.config as { account_sid?: string; auth_token?: string };
-      
-      if (!config.account_sid || !config.auth_token) {
-        return new Response(
-          JSON.stringify({ error: "Twilio credentials not configured" }),
-          { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-        );
-      }
+      // For Twilio, check if we have an ElevenLabs phone ID (registered number)
+      if (telephonyNumber.elevenlabs_phone_id) {
+        // Use the generic phone call endpoint with the registered ElevenLabs phone ID
+        console.log("Using registered ElevenLabs phone ID:", telephonyNumber.elevenlabs_phone_id);
+        apiEndpoint = "https://api.elevenlabs.io/v1/convai/conversation/phone_call";
+        elevenlabsPayload = {
+          agent_id: agentId,
+          agent_phone_number_id: telephonyNumber.elevenlabs_phone_id,
+          to_number: to_number.startsWith("+") ? to_number : `+${to_number}`,
+        };
+      } else {
+        // Fallback: use Twilio-specific endpoint with credentials
+        const config = provider.config as { account_sid?: string; auth_token?: string };
+        
+        if (!config.account_sid || !config.auth_token) {
+          return new Response(
+            JSON.stringify({ error: "Twilio credentials not configured" }),
+            { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+          );
+        }
 
-      apiEndpoint = "https://api.elevenlabs.io/v1/convai/twilio/outbound_call";
-      elevenlabsPayload = {
-        agent_id: agentId,
-        twilio_account_sid: config.account_sid,
-        twilio_auth_token: config.auth_token,
-        twilio_phone_number: telephonyNumber.phone_number,
-        to_phone_number: to_number.startsWith("+") ? to_number : `+${to_number}`,
-      };
+        console.log("Using Twilio direct integration");
+        apiEndpoint = "https://api.elevenlabs.io/v1/convai/twilio/outbound_call";
+        elevenlabsPayload = {
+          agent_id: agentId,
+          twilio_account_sid: config.account_sid,
+          twilio_auth_token: config.auth_token,
+          twilio_phone_number: telephonyNumber.phone_number,
+          to_phone_number: to_number.startsWith("+") ? to_number : `+${to_number}`,
+        };
+      }
     } else {
       // For other providers (SIP, etc.), use the generic phone number endpoint
       // This requires the number to be registered with ElevenLabs first

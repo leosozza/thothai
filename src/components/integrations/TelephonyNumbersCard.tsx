@@ -31,6 +31,7 @@ interface TelephonyNumber {
   friendly_name: string | null;
   persona_id: string | null;
   elevenlabs_agent_id: string | null;
+  elevenlabs_phone_id: string | null;
   provider_number_id: string | null;
   is_active: boolean;
   provider_type?: string;
@@ -109,6 +110,7 @@ export function TelephonyNumbersCard() {
           friendly_name,
           persona_id,
           elevenlabs_agent_id,
+          elevenlabs_phone_id,
           provider_number_id,
           is_active,
           telephony_providers (provider_type, name),
@@ -125,6 +127,7 @@ export function TelephonyNumbersCard() {
         friendly_name: item.friendly_name,
         persona_id: item.persona_id,
         elevenlabs_agent_id: item.elevenlabs_agent_id,
+        elevenlabs_phone_id: item.elevenlabs_phone_id,
         provider_number_id: item.provider_number_id,
         is_active: item.is_active,
         provider_type: item.telephony_providers?.provider_type,
@@ -171,6 +174,7 @@ export function TelephonyNumbersCard() {
         .update({
           persona_id: selectedPersonaId === "none" ? null : selectedPersonaId || null,
           elevenlabs_agent_id: elevenlabsAgentId,
+          elevenlabs_phone_id: selectedNumber.elevenlabs_phone_id,
           updated_at: new Date().toISOString(),
         })
         .eq("id", selectedNumber.id);
@@ -527,6 +531,35 @@ export function TelephonyNumbersCard() {
                 Selecione uma persona com ElevenLabs Agent ID configurado para atendimento automático.
               </p>
             </div>
+
+            {selectedNumber?.provider_type === "twilio" && (
+              <div className="space-y-2">
+                <Label htmlFor="elevenlabs_phone_id">ElevenLabs Phone ID</Label>
+                <input
+                  id="elevenlabs_phone_id"
+                  type="text"
+                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                  placeholder="ph_xxxxxxxxx"
+                  defaultValue={selectedNumber?.elevenlabs_phone_id || ""}
+                  onChange={(e) => {
+                    if (selectedNumber) {
+                      selectedNumber.elevenlabs_phone_id = e.target.value || null;
+                    }
+                  }}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Após registrar o número no ElevenLabs, cole o ID aqui (ex: ph_abc123xyz).
+                  <a 
+                    href="https://elevenlabs.io/app/agents/phone-numbers" 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="ml-1 text-primary underline"
+                  >
+                    Registrar número →
+                  </a>
+                </p>
+              </div>
+            )}
           </div>
 
           <DialogFooter>
