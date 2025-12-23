@@ -272,12 +272,40 @@ serve(async (req) => {
       let voiceEnabled = false;
 
       if (workspace_id) {
-        const { data: persona } = await supabase
+        // Try to find active default persona first
+        const { data: defaultPersona, error: personaError } = await supabase
           .from("personas")
           .select("*")
           .eq("workspace_id", workspace_id)
           .eq("is_default", true)
-          .single();
+          .eq("is_active", true)
+          .order("updated_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (personaError) {
+          console.error("Error fetching default persona:", personaError);
+        }
+
+        let persona = defaultPersona;
+
+        // Fallback: if no active default, get any active persona
+        if (!persona) {
+          console.log("No active default persona found, trying fallback...");
+          const { data: fallbackPersona } = await supabase
+            .from("personas")
+            .select("*")
+            .eq("workspace_id", workspace_id)
+            .eq("is_active", true)
+            .order("updated_at", { ascending: false })
+            .limit(1)
+            .maybeSingle();
+          
+          if (fallbackPersona) {
+            persona = fallbackPersona;
+            console.log("Using fallback persona:", fallbackPersona.name);
+          }
+        }
 
         if (persona) {
           systemPrompt = persona.system_prompt || systemPrompt;
@@ -286,6 +314,8 @@ serve(async (req) => {
           voiceId = persona.voice_id || null;
           voiceEnabled = persona.voice_enabled || false;
           console.log("Using persona:", personaName, "voice_enabled:", voiceEnabled, "voice_id:", voiceId);
+        } else {
+          console.warn("No persona found for workspace:", workspace_id);
         }
       }
 
