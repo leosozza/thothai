@@ -61,7 +61,19 @@ serve(async (req) => {
 
   try {
     const url = new URL(req.url);
-    const instanceId = url.searchParams.get("instance_id");
+
+    // Parse payload once (we may need it for health checks and for instance_id fallback)
+    const payload = await req.json().catch(() => null) as any;
+
+    // Lightweight health check (used by the Diagnostics screen)
+    if (payload?.action === "health_check") {
+      return new Response(JSON.stringify({ status: "ok", function: "wapi-webhook" }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const instanceId = url.searchParams.get("instance_id") || payload?.instance_id || payload?.instanceId;
 
     if (!instanceId) {
       console.error("Missing instance_id in webhook");
@@ -71,7 +83,13 @@ serve(async (req) => {
       });
     }
 
-    const payload = await req.json();
+    if (!payload) {
+      return new Response(JSON.stringify({ error: "Invalid JSON payload" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     console.log("W-API Webhook received:", JSON.stringify(payload, null, 2));
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
