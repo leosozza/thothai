@@ -39,7 +39,22 @@ import {
   Loader2,
   Wrench,
   ExternalLink,
+  Zap,
 } from "lucide-react";
+
+// Pre-configured MCP connection templates
+const QUICK_CONNECTIONS = [
+  {
+    id: "bitrix24",
+    name: "Bitrix24 REST API",
+    description: "Acesso à documentação e métodos da API REST do Bitrix24",
+    mcp_url: "https://mcp-dev.bitrix24.com/mcp",
+    transport_type: "http",
+    auth_type: "none",
+    icon: "🟠",
+    color: "border-orange-500/50 hover:border-orange-500 hover:bg-orange-500/5",
+  },
+];
 
 interface MCPConnection {
   id: string;
@@ -70,6 +85,7 @@ export function MCPConnectionsCard({ workspaceId }: MCPConnectionsCardProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [discoveringId, setDiscoveringId] = useState<string | null>(null);
+  const [addingQuickConnection, setAddingQuickConnection] = useState<string | null>(null);
 
   // Form states
   const [name, setName] = useState("");
@@ -217,6 +233,51 @@ export function MCPConnectionsCard({ workspaceId }: MCPConnectionsCardProps) {
     }
   };
 
+  const handleQuickConnect = async (template: typeof QUICK_CONNECTIONS[0]) => {
+    // Check if already connected
+    const existingConnection = connections.find(c => c.mcp_url === template.mcp_url);
+    if (existingConnection) {
+      toast.info("Esta conexão já existe");
+      return;
+    }
+
+    setAddingQuickConnection(template.id);
+    try {
+      const { data, error } = await supabase
+        .from("mcp_connections")
+        .insert({
+          workspace_id: workspaceId,
+          name: template.name,
+          description: template.description,
+          mcp_url: template.mcp_url,
+          transport_type: template.transport_type,
+          auth_type: template.auth_type,
+          auth_config: null,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      toast.success(`${template.name} conectado!`);
+      await fetchConnections();
+
+      // Auto-discover tools
+      if (data) {
+        handleDiscover(data.id);
+      }
+    } catch (error) {
+      console.error("Error adding quick connection:", error);
+      toast.error("Erro ao adicionar conexão");
+    } finally {
+      setAddingQuickConnection(null);
+    }
+  };
+
+  const isQuickConnectionAdded = (template: typeof QUICK_CONNECTIONS[0]) => {
+    return connections.some(c => c.mcp_url === template.mcp_url);
+  };
+
   return (
     <Card>
       <CardHeader>
@@ -236,7 +297,63 @@ export function MCPConnectionsCard({ workspaceId }: MCPConnectionsCardProps) {
           </Button>
         </div>
       </CardHeader>
-      <CardContent>
+      <CardContent className="space-y-6">
+        {/* Quick Connections Section */}
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+            <Zap className="h-4 w-4" />
+            Conexões Rápidas
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {QUICK_CONNECTIONS.map((template) => {
+              const isAdded = isQuickConnectionAdded(template);
+              const isLoading = addingQuickConnection === template.id;
+              
+              return (
+                <div
+                  key={template.id}
+                  className={`relative border rounded-lg p-4 transition-all cursor-pointer ${
+                    isAdded 
+                      ? "border-green-500/50 bg-green-500/5" 
+                      : template.color
+                  }`}
+                  onClick={() => !isAdded && !isLoading && handleQuickConnect(template)}
+                >
+                  <div className="flex items-start gap-3">
+                    <span className="text-2xl">{template.icon}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-medium text-sm truncate">{template.name}</h4>
+                        {isAdded && (
+                          <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground line-clamp-2 mt-1">
+                        {template.description}
+                      </p>
+                    </div>
+                  </div>
+                  {isLoading && (
+                    <div className="absolute inset-0 flex items-center justify-center bg-background/50 rounded-lg">
+                      <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                    </div>
+                  )}
+                  {!isAdded && !isLoading && (
+                    <div className="mt-3 text-xs text-primary font-medium flex items-center gap-1">
+                      <Plus className="h-3 w-3" />
+                      Conectar
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Divider */}
+        <div className="border-t" />
+
+        {/* Existing Connections */}
         {loading ? (
           <div className="flex items-center justify-center py-8">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -245,7 +362,7 @@ export function MCPConnectionsCard({ workspaceId }: MCPConnectionsCardProps) {
           <div className="text-center py-8 text-muted-foreground">
             <Plug className="h-12 w-12 mx-auto mb-4 opacity-50" />
             <p>Nenhuma conexão MCP configurada</p>
-            <p className="text-sm">Conecte-se a servidores MCP como n8n, outras aplicações, etc.</p>
+            <p className="text-sm">Use as conexões rápidas acima ou crie uma conexão personalizada</p>
           </div>
         ) : (
           <div className="space-y-4">
