@@ -64,29 +64,64 @@ serve(async (req) => {
 
         const config = provider.config as { api_token?: string; instance_key?: string; instance_info?: any };
         
-        // Get the phone number from provider
-        let phoneFromProvider = config.instance_info?.phone_number || config.instance_info?.wid;
-        
-        if (!phoneFromProvider) {
-          // Try to fetch fresh from WaVoIP
-          if (provider.provider_type === "wavoip" && config.api_token && config.instance_key) {
-            const wavoipResponse = await fetch("https://api.wavoip.com/v1/instance/info", {
-              headers: {
-                "Authorization": `Bearer ${config.api_token}`,
-                "X-Instance-Key": config.instance_key,
-              },
-            });
+        let phoneFromProvider: string | null = null;
+
+        // For WaVoIP, fetch from API
+        if (provider.provider_type === "wavoip" && config.api_token && config.instance_key) {
+          console.log(`[ElevenLabs Phone] Fetching WaVoIP instance info...`);
+          
+          const wavoipResponse = await fetch("https://api.wavoip.com/v1/instance/info", {
+            headers: {
+              "Authorization": `Bearer ${config.api_token}`,
+              "X-Instance-Key": config.instance_key,
+            },
+          });
+          
+          if (wavoipResponse.ok) {
+            const instanceInfo = await wavoipResponse.json();
+            console.log(`[ElevenLabs Phone] WaVoIP response:`, JSON.stringify(instanceInfo));
             
-            if (wavoipResponse.ok) {
-              const instanceInfo = await wavoipResponse.json();
-              phoneFromProvider = instanceInfo.phone_number || instanceInfo.wid;
+            // Try different field names that WaVoIP might use
+            phoneFromProvider = instanceInfo.phone_number 
+              || instanceInfo.phoneNumber 
+              || instanceInfo.phone 
+              || instanceInfo.wid 
+              || instanceInfo.jid
+              || instanceInfo.me?.user
+              || instanceInfo.me?.id
+              || instanceInfo.instance?.wid
+              || null;
+            
+            // If wid/jid format (e.g., "5511999999999@s.whatsapp.net"), extract number
+            if (phoneFromProvider && phoneFromProvider.includes("@")) {
+              phoneFromProvider = phoneFromProvider.split("@")[0];
             }
+            
+            console.log(`[ElevenLabs Phone] Extracted phone: ${phoneFromProvider}`);
+          } else {
+            const errorText = await wavoipResponse.text();
+            console.error(`[ElevenLabs Phone] WaVoIP API error:`, errorText);
+          }
+        }
+
+        // Check stored instance_info as fallback
+        if (!phoneFromProvider && config.instance_info) {
+          phoneFromProvider = config.instance_info.phone_number 
+            || config.instance_info.wid 
+            || config.instance_info.jid
+            || null;
+            
+          if (phoneFromProvider && phoneFromProvider.includes("@")) {
+            phoneFromProvider = phoneFromProvider.split("@")[0];
           }
         }
 
         if (!phoneFromProvider) {
           return new Response(
-            JSON.stringify({ success: false, error: "Nenhum número encontrado no provedor" }),
+            JSON.stringify({ 
+              success: false, 
+              error: "Nenhum número encontrado. Verifique se a instância WaVoIP está conectada com um número ativo." 
+            }),
             { headers: { ...corsHeaders, "Content-Type": "application/json" }, status: 400 }
           );
         }
