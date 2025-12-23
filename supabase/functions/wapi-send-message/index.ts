@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { decode as base64Decode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -146,17 +147,39 @@ serve(async (req) => {
       phone: formattedPhone,
       message: message,
     };
+    
+    let mediaUrlToSave = finalMediaUrl;
 
     // Handle different message types
     if (finalMessageType === "audio" && audio_base64) {
-      // Audio from base64 (TTS generated)
-      endpoint = "message/send-audio-base64";
-      body = { 
-        phone: formattedPhone, 
-        audioBase64: audio_base64,
-        mimetype: "audio/mpeg"
-      };
-      console.log("Sending audio from base64, length:", audio_base64.length);
+      // W-API doesn't support audio base64 directly (endpoint returns 404).
+      // Upload to public storage and send as URL.
+      const audioBytes = new Uint8Array(base64Decode(audio_base64));
+      const objectPath = `tts/${effectiveWorkspaceId}/${crypto.randomUUID()}.mp3`;
+
+      const audioBlob = new Blob([audioBytes], { type: "audio/mpeg" });
+      const { error: uploadError } = await supabaseAdmin.storage
+        .from("assets")
+        .upload(objectPath, audioBlob, {
+          contentType: "audio/mpeg",
+          upsert: true,
+        });
+
+      if (uploadError) {
+        console.error("Audio upload error:", uploadError);
+        return new Response(JSON.stringify({ error: "Erro ao preparar áudio" }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      const { data: publicData } = supabaseAdmin.storage.from("assets").getPublicUrl(objectPath);
+      const publicUrl = publicData.publicUrl;
+
+      endpoint = "message/send-audio";
+      body = { phone: formattedPhone, audioUrl: publicUrl };
+      mediaUrlToSave = publicUrl;
+      console.log("Sending audio via public URL:", publicUrl);
     } else if (finalMessageType === "audio" && finalMediaUrl) {
       endpoint = "message/send-audio";
       body = { phone: formattedPhone, audioUrl: finalMediaUrl };
@@ -214,7 +237,7 @@ serve(async (req) => {
           direction: "outgoing",
           message_type: finalMessageType,
           content: message,
-          media_url: finalMediaUrl,
+          media_url: mediaUrlToSave,
           status: "sent",
           is_from_bot: isFromBot,
           metadata: { source: messageSource }
