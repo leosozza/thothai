@@ -30,7 +30,7 @@ serve(async (req) => {
       phoneNumber, 
       phone_number, // Alternative naming
       message, 
-      messageType = "text",
+      messageType,
       message_type, // Alternative naming
       mediaUrl,
       media_url, // Alternative naming
@@ -46,7 +46,7 @@ serve(async (req) => {
     const finalConversationId = conversationId || conversation_id;
     const finalContactId = contactId || contact_id;
     const finalPhoneNumber = phoneNumber || phone_number;
-    const finalMessageType = messageType || message_type || "text";
+    const finalMessageType = message_type || messageType || "text";
     const finalMediaUrl = mediaUrl || media_url;
     const finalWorkspaceId = workspaceId || workspace_id;
     
