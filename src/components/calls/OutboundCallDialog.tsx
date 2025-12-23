@@ -19,8 +19,9 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { Phone, Loader2, AlertCircle } from "lucide-react";
+import { Phone, Loader2, AlertCircle, AlertTriangle } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 
 interface Contact {
   id: string;
@@ -42,7 +43,16 @@ interface TelephonyNumber {
   provider_number_id: string | null;
   elevenlabs_agent_id: string | null;
   persona_id: string | null;
+  provider_type?: string;
+  provider_name?: string;
 }
+
+// Providers that support outbound calls
+const OUTBOUND_CAPABLE_PROVIDERS = ["twilio", "telnyx"];
+
+const supportsOutbound = (providerType: string | undefined): boolean => {
+  return OUTBOUND_CAPABLE_PROVIDERS.includes(providerType || "");
+};
 
 interface OutboundCallDialogProps {
   contact?: Contact;
@@ -82,14 +92,29 @@ export function OutboundCallDialog({ contact, workspaceId, trigger }: OutboundCa
 
       setPersonas(personasData || []);
 
-      // Fetch telephony numbers
+      // Fetch telephony numbers with provider info
       const { data: numbersData } = await supabase
         .from("telephony_numbers")
-        .select("id, phone_number, friendly_name, provider_number_id, elevenlabs_agent_id, persona_id")
+        .select(`
+          id, phone_number, friendly_name, provider_number_id, elevenlabs_agent_id, persona_id,
+          telephony_providers (provider_type, name)
+        `)
         .eq("workspace_id", workspaceId)
         .eq("is_active", true);
 
-      setTelephonyNumbers(numbersData || []);
+      // Map to include provider info
+      const mappedNumbers: TelephonyNumber[] = (numbersData || []).map((item: any) => ({
+        id: item.id,
+        phone_number: item.phone_number,
+        friendly_name: item.friendly_name,
+        provider_number_id: item.provider_number_id,
+        elevenlabs_agent_id: item.elevenlabs_agent_id,
+        persona_id: item.persona_id,
+        provider_type: item.telephony_providers?.provider_type,
+        provider_name: item.telephony_providers?.name,
+      }));
+
+      setTelephonyNumbers(mappedNumbers);
 
       // Auto-select if only one option
       if (personasData?.length === 1) {
@@ -152,7 +177,11 @@ export function OutboundCallDialog({ contact, workspaceId, trigger }: OutboundCa
   };
 
   const contactName = contact?.name || contact?.push_name || "Contato";
-  const hasRequiredConfig = telephonyNumbers.length > 0 && (personas.length > 0 || telephonyNumbers.some(n => n.elevenlabs_agent_id));
+  
+  // Filter numbers that support outbound calls
+  const outboundCapableNumbers = telephonyNumbers.filter(n => supportsOutbound(n.provider_type));
+  const hasOutboundNumbers = outboundCapableNumbers.length > 0;
+  const hasRequiredConfig = hasOutboundNumbers && (personas.length > 0 || outboundCapableNumbers.some(n => n.elevenlabs_agent_id));
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -185,8 +214,19 @@ export function OutboundCallDialog({ contact, workspaceId, trigger }: OutboundCa
           <Alert variant="destructive">
             <AlertCircle className="h-4 w-4" />
             <AlertDescription>
-              Nenhum número de telefonia ou persona com agente ElevenLabs configurado.
-              Configure primeiro em Integrações → Telefonia.
+              {!hasOutboundNumbers ? (
+                <>
+                  Nenhum número com suporte a chamadas de saída.
+                  <br />
+                  <span className="font-medium">Twilio ou Telnyx</span> são necessários para fazer ligações.
+                  Números SIP/WaVoIP só podem receber chamadas.
+                </>
+              ) : (
+                <>
+                  Nenhum número de telefonia ou persona com agente ElevenLabs configurado.
+                  Configure primeiro em Integrações → Telefonia.
+                </>
+              )}
             </AlertDescription>
           </Alert>
         ) : (
@@ -232,17 +272,32 @@ export function OutboundCallDialog({ contact, workspaceId, trigger }: OutboundCa
                   <SelectValue placeholder="Selecione o número" />
                 </SelectTrigger>
                 <SelectContent>
-                  {telephonyNumbers.map((number) => (
+                  {outboundCapableNumbers.map((number) => (
                     <SelectItem key={number.id} value={number.id}>
-                      {number.friendly_name || number.phone_number}
+                      <span className="flex items-center gap-2">
+                        {number.friendly_name || number.phone_number}
+                        <Badge variant="outline" className="text-xs ml-1">
+                          {number.provider_name || number.provider_type}
+                        </Badge>
+                      </span>
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                Número que aparecerá no identificador de chamadas
+                Apenas números Twilio/Telnyx podem fazer chamadas de saída
               </p>
             </div>
+
+            {/* Warning if there are SIP numbers that can't be used */}
+            {telephonyNumbers.length > outboundCapableNumbers.length && (
+              <Alert>
+                <AlertTriangle className="h-4 w-4" />
+                <AlertDescription className="text-xs">
+                  {telephonyNumbers.length - outboundCapableNumbers.length} número(s) SIP/WaVoIP não listado(s) - só recebem chamadas.
+                </AlertDescription>
+              </Alert>
+            )}
 
             {/* Call Button */}
             <Button
