@@ -24,6 +24,48 @@ interface MCPDiscoverResponse {
   };
 }
 
+// Helper function to parse SSE response
+async function parseSSEResponse(response: Response): Promise<unknown> {
+  const contentType = response.headers.get("content-type") || "";
+  
+  // If it's JSON, parse directly
+  if (contentType.includes("application/json")) {
+    return await response.json();
+  }
+  
+  // If it's SSE, parse the event stream
+  const text = await response.text();
+  console.log(`[MCP Discover] Raw response: ${text.substring(0, 500)}`);
+  
+  // Parse SSE format: "event: message\ndata: {...}\n\n"
+  const lines = text.split("\n");
+  let jsonData = "";
+  
+  for (const line of lines) {
+    if (line.startsWith("data: ")) {
+      jsonData = line.substring(6);
+      break;
+    }
+  }
+  
+  if (jsonData) {
+    try {
+      return JSON.parse(jsonData);
+    } catch (e) {
+      console.error(`[MCP Discover] Failed to parse SSE data: ${jsonData}`);
+      throw new Error("Falha ao parsear resposta SSE");
+    }
+  }
+  
+  // Try to parse the entire text as JSON as fallback
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    console.error(`[MCP Discover] Failed to parse response: ${text.substring(0, 200)}`);
+    throw new Error("Formato de resposta não suportado");
+  }
+}
+
 serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, { headers: corsHeaders });
@@ -73,7 +115,7 @@ serve(async (req) => {
     console.log(`[MCP Discover] Connecting to: ${targetUrl}`);
 
     // MCP uses JSON-RPC over HTTP
-    // Some servers (like Bitrix24) require accepting both JSON and SSE
+    // Some servers (like Bitrix24) return SSE format
     const requestHeaders = {
       "Content-Type": "application/json",
       "Accept": "application/json, text/event-stream",
@@ -107,7 +149,7 @@ serve(async (req) => {
       throw new Error(`Falha ao conectar ao MCP: ${initResponse.status}`);
     }
 
-    const initResult = await initResponse.json();
+    const initResult = await parseSSEResponse(initResponse);
     console.log(`[MCP Discover] Init result:`, JSON.stringify(initResult));
 
     // Send initialized notification
@@ -138,7 +180,7 @@ serve(async (req) => {
       throw new Error(`Falha ao listar ferramentas: ${toolsResponse.status}`);
     }
 
-    const toolsResult = await toolsResponse.json();
+    const toolsResult = await parseSSEResponse(toolsResponse) as { result?: { tools?: MCPTool[] } };
     console.log(`[MCP Discover] Tools result:`, JSON.stringify(toolsResult));
 
     const tools: MCPTool[] = toolsResult.result?.tools || [];
@@ -154,9 +196,10 @@ serve(async (req) => {
         .eq("id", mcp_connection_id);
     }
 
+    const initResultTyped = initResult as { result?: { serverInfo?: { name: string; version: string } } };
     const response: MCPDiscoverResponse = {
       tools,
-      serverInfo: initResult.result?.serverInfo,
+      serverInfo: initResultTyped.result?.serverInfo,
     };
 
     return new Response(JSON.stringify(response), {
