@@ -609,6 +609,7 @@ export type Database = {
       }
       conversations: {
         Row: {
+          assigned_operator_id: string | null
           assigned_to: string | null
           attendance_mode: string | null
           bot_state: Json | null
@@ -625,6 +626,7 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          assigned_operator_id?: string | null
           assigned_to?: string | null
           attendance_mode?: string | null
           bot_state?: Json | null
@@ -641,6 +643,7 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          assigned_operator_id?: string | null
           assigned_to?: string | null
           attendance_mode?: string | null
           bot_state?: Json | null
@@ -657,6 +660,13 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "conversations_assigned_operator_id_fkey"
+            columns: ["assigned_operator_id"]
+            isOneToOne: false
+            referencedRelation: "operators"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "conversations_contact_id_fkey"
             columns: ["contact_id"]
@@ -1302,6 +1312,80 @@ export type Database = {
           voice_id?: string | null
         }
         Relationships: []
+      }
+      operators: {
+        Row: {
+          access_level:
+            | Database["public"]["Enums"]["operator_access_level"]
+            | null
+          allowed_instance_ids: string[] | null
+          avatar_url: string | null
+          bitrix24_department_ids: number[] | null
+          bitrix24_user_id: number | null
+          can_transfer_to_ai: boolean | null
+          created_at: string | null
+          department_ids: string[] | null
+          display_name: string | null
+          id: string
+          is_active: boolean | null
+          is_online: boolean | null
+          last_seen_at: string | null
+          max_concurrent_conversations: number | null
+          updated_at: string | null
+          user_id: string
+          workspace_id: string
+        }
+        Insert: {
+          access_level?:
+            | Database["public"]["Enums"]["operator_access_level"]
+            | null
+          allowed_instance_ids?: string[] | null
+          avatar_url?: string | null
+          bitrix24_department_ids?: number[] | null
+          bitrix24_user_id?: number | null
+          can_transfer_to_ai?: boolean | null
+          created_at?: string | null
+          department_ids?: string[] | null
+          display_name?: string | null
+          id?: string
+          is_active?: boolean | null
+          is_online?: boolean | null
+          last_seen_at?: string | null
+          max_concurrent_conversations?: number | null
+          updated_at?: string | null
+          user_id: string
+          workspace_id: string
+        }
+        Update: {
+          access_level?:
+            | Database["public"]["Enums"]["operator_access_level"]
+            | null
+          allowed_instance_ids?: string[] | null
+          avatar_url?: string | null
+          bitrix24_department_ids?: number[] | null
+          bitrix24_user_id?: number | null
+          can_transfer_to_ai?: boolean | null
+          created_at?: string | null
+          department_ids?: string[] | null
+          display_name?: string | null
+          id?: string
+          is_active?: boolean | null
+          is_online?: boolean | null
+          last_seen_at?: string | null
+          max_concurrent_conversations?: number | null
+          updated_at?: string | null
+          user_id?: string
+          workspace_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "operators_workspace_id_fkey"
+            columns: ["workspace_id"]
+            isOneToOne: false
+            referencedRelation: "workspaces"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       persona_knowledge_documents: {
         Row: {
@@ -1994,6 +2078,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      can_operator_access_conversation: {
+        Args: { _conversation_id: string; _user_id: string }
+        Returns: boolean
+      }
       is_workspace_member: {
         Args: { _user_id: string; _workspace_id: string }
         Returns: boolean
@@ -2005,6 +2093,7 @@ export type Database = {
     }
     Enums: {
       app_role: "admin" | "moderator" | "user"
+      operator_access_level: "own" | "department" | "all"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -2133,6 +2222,7 @@ export const Constants = {
   public: {
     Enums: {
       app_role: ["admin", "moderator", "user"],
+      operator_access_level: ["own", "department", "all"],
     },
   },
 } as const
