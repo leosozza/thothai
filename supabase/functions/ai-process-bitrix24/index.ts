@@ -7,6 +7,19 @@ const corsHeaders = {
 };
 
 /**
+ * Generate a simple hash of a message for duplicate detection
+ */
+function hashMessage(content: string): string {
+  let hash = 0;
+  for (let i = 0; i < content.length; i++) {
+    const char = content.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash;
+  }
+  return hash.toString(16);
+}
+
+/**
  * Search knowledge base for relevant chunks
  */
 async function searchKnowledge(
@@ -16,7 +29,6 @@ async function searchKnowledge(
   limit: number = 5
 ): Promise<string[]> {
   try {
-    // Get all completed documents for this workspace
     const { data: documents } = await supabase
       .from("knowledge_documents")
       .select("id")
@@ -29,18 +41,16 @@ async function searchKnowledge(
 
     const documentIds = documents.map((d: any) => d.id);
 
-    // Get chunks from these documents
     const { data: chunks } = await supabase
       .from("knowledge_chunks")
       .select("content")
       .in("document_id", documentIds)
-      .limit(limit * 3); // Get more to filter
+      .limit(limit * 3);
 
     if (!chunks || chunks.length === 0) {
       return [];
     }
 
-    // Simple keyword matching (in production, use embeddings)
     const queryWords = query.toLowerCase().split(/\s+/).filter(w => w.length > 2);
     
     const scoredChunks = chunks.map((chunk: any) => {
@@ -54,7 +64,6 @@ async function searchKnowledge(
       return { content: chunk.content, score };
     });
 
-    // Sort by relevance and take top chunks
     scoredChunks.sort((a: any, b: any) => b.score - a.score);
     
     return scoredChunks
@@ -65,6 +74,42 @@ async function searchKnowledge(
     console.error("Error searching knowledge:", error);
     return [];
   }
+}
+
+/**
+ * Try to acquire a processing lock on the conversation
+ */
+async function tryAcquireLock(
+  supabase: any, 
+  conversationId: string, 
+  lockTimeoutMs: number = 30000
+): Promise<boolean> {
+  const now = new Date();
+  const lockExpiry = new Date(now.getTime() - lockTimeoutMs);
+
+  const { data, error } = await supabase
+    .from("conversations")
+    .update({ processing_lock_at: now.toISOString() })
+    .eq("id", conversationId)
+    .or(`processing_lock_at.is.null,processing_lock_at.lt.${lockExpiry.toISOString()}`)
+    .select("id");
+
+  if (error) {
+    console.error("Error acquiring lock:", error);
+    return false;
+  }
+
+  return data && data.length > 0;
+}
+
+/**
+ * Release the processing lock
+ */
+async function releaseLock(supabase: any, conversationId: string): Promise<void> {
+  await supabase
+    .from("conversations")
+    .update({ processing_lock_at: null })
+    .eq("id", conversationId);
 }
 
 serve(async (req) => {
@@ -86,11 +131,11 @@ serve(async (req) => {
       bitrix24_dialog_id,
       line_id,
       persona_id,
-      message_type = "connector" // "connector" or "bot"
+      message_type = "connector"
     } = await req.json();
     
     console.log("=== AI PROCESS BITRIX24 ===");
-    console.log("Input:", { conversation_id, contact_id, content, workspace_id, line_id, message_type, persona_id });
+    console.log("Input:", { conversation_id, contact_id, content: content?.substring(0, 50), workspace_id, line_id, message_type, persona_id });
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
@@ -101,360 +146,430 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // 1. Fetch persona for this workspace
-    let systemPrompt = "Você é um assistente prestativo e profissional. Responda de forma clara e objetiva.";
-    let personaName = "Assistente";
-    let temperature = 0.7;
-    let actualWorkspaceId = workspace_id;
-
-    // If persona_id is provided directly (from bitrix24-worker), use it
-    if (persona_id) {
-      const { data: persona } = await supabase
-        .from("personas")
-        .select("*")
-        .eq("id", persona_id)
-        .single();
-
-      if (persona) {
-        systemPrompt = persona.system_prompt || systemPrompt;
-        personaName = persona.name || personaName;
-        temperature = persona.temperature || temperature;
-        actualWorkspaceId = persona.workspace_id || workspace_id;
-        console.log("Using persona from persona_id:", personaName);
-      }
-    } else if (integration_id) {
-      // Check if integration has a specific persona configured
-      const { data: integration } = await supabase
-        .from("integrations")
-        .select("config, workspace_id")
-        .eq("id", integration_id)
-        .single();
-
-      if (integration) {
-        actualWorkspaceId = integration.workspace_id || workspace_id;
-        
-        const personaIdToUse = message_type === "bot" 
-          ? integration.config?.bot_persona_id 
-          : integration.config?.persona_id;
-
-        if (personaIdToUse) {
-          const { data: persona } = await supabase
-            .from("personas")
-            .select("*")
-            .eq("id", personaIdToUse)
-            .single();
-
-          if (persona) {
-            systemPrompt = persona.system_prompt || systemPrompt;
-            personaName = persona.name || personaName;
-            temperature = persona.temperature || temperature;
-            console.log("Using integration persona:", personaName, "for message_type:", message_type);
-          }
-        }
-      }
+    // === ANTI-LOOP MECHANISM 1: Processing Lock ===
+    const lockAcquired = await tryAcquireLock(supabase, conversation_id);
+    if (!lockAcquired) {
+      console.log("ANTI-LOOP: Could not acquire lock, another process is handling this conversation");
+      return new Response(JSON.stringify({ 
+        skipped: true, 
+        reason: "Processing lock active" 
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
     }
 
-    // Fallback to workspace default persona
-    if (personaName === "Assistente" && actualWorkspaceId) {
-      const { data: persona } = await supabase
-        .from("personas")
-        .select("*")
-        .eq("workspace_id", actualWorkspaceId)
-        .eq("is_default", true)
+    try {
+      // Check conversation mode
+      const { data: conversation } = await supabase
+        .from("conversations")
+        .select("attendance_mode, bot_state, last_bot_message_hash")
+        .eq("id", conversation_id)
         .single();
 
-      if (persona) {
-        systemPrompt = persona.system_prompt || systemPrompt;
-        personaName = persona.name || personaName;
-        temperature = persona.temperature || temperature;
-        console.log("Using workspace default persona:", personaName);
+      if (conversation?.attendance_mode === "human") {
+        console.log("SKIP: Conversation is in human mode");
+        return new Response(JSON.stringify({ 
+          skipped: true, 
+          reason: "Conversation in human mode" 
+        }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
       }
-    }
 
-    // 2. Search knowledge base for relevant context
-    let knowledgeContext = "";
-    if (actualWorkspaceId && content) {
-      const relevantChunks = await searchKnowledge(supabase, actualWorkspaceId, content);
-      
-      if (relevantChunks.length > 0) {
-        knowledgeContext = `\n\n## Base de Conhecimento\nUse as seguintes informações para responder quando relevante:\n\n${relevantChunks.join("\n\n---\n\n")}`;
-        console.log(`Found ${relevantChunks.length} relevant knowledge chunks`);
-      }
-    }
+      // === ANTI-LOOP MECHANISM 2: Check recent messages ===
+      const { data: recentOutgoing } = await supabase
+        .from("messages")
+        .select("created_at, content")
+        .eq("conversation_id", conversation_id)
+        .eq("direction", "outgoing")
+        .eq("is_from_bot", true)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-    // 3. Build system prompt with knowledge context
-    const fullSystemPrompt = systemPrompt + knowledgeContext;
-
-    // 4. Fetch conversation history (last 10 messages for context)
-    const { data: history } = await supabase
-      .from("messages")
-      .select("content, direction, is_from_bot")
-      .eq("conversation_id", conversation_id)
-      .order("created_at", { ascending: false })
-      .limit(10);
-
-    const messages = [
-      { role: "system", content: fullSystemPrompt },
-    ];
-
-    // Add conversation history in chronological order
-    if (history && history.length > 0) {
-      const reversedHistory = [...history].reverse();
-      for (const msg of reversedHistory) {
-        if (msg.content) {
-          messages.push({
-            role: msg.direction === "incoming" ? "user" : "assistant",
-            content: msg.content,
+      if (recentOutgoing) {
+        const timeSince = Date.now() - new Date(recentOutgoing.created_at).getTime();
+        if (timeSince < 3000) {
+          console.log("ANTI-LOOP: Bot responded recently:", timeSince, "ms ago");
+          return new Response(JSON.stringify({ 
+            skipped: true, 
+            reason: "Bot message sent recently",
+            time_since_ms: timeSince 
+          }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
       }
-    }
 
-    // Add current message if not already in history
-    if (content && !history?.some(h => h.content === content)) {
-      messages.push({ role: "user", content });
-    }
+      // 1. Fetch persona for this workspace
+      let systemPrompt = "Você é um assistente prestativo e profissional. Responda de forma clara e objetiva.";
+      let personaName = "Assistente";
+      let temperature = 0.7;
+      let actualWorkspaceId = workspace_id;
 
-    console.log("Sending to AI with", messages.length, "messages (knowledge context:", knowledgeContext.length > 0 ? "yes" : "no", ")");
+      if (persona_id) {
+        const { data: persona } = await supabase
+          .from("personas")
+          .select("*")
+          .eq("id", persona_id)
+          .single();
 
-    // 3. Call Lovable AI Gateway
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
-        messages,
-        temperature,
-        max_tokens: 1024,
-      }),
-    });
+        if (persona) {
+          systemPrompt = persona.system_prompt || systemPrompt;
+          personaName = persona.name || personaName;
+          temperature = persona.temperature || temperature;
+          actualWorkspaceId = persona.workspace_id || workspace_id;
+          console.log("Using persona from persona_id:", personaName);
+        }
+      } else if (integration_id) {
+        const { data: integration } = await supabase
+          .from("integrations")
+          .select("config, workspace_id")
+          .eq("id", integration_id)
+          .single();
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("AI Gateway error:", response.status, errorText);
-      
-      if (response.status === 429) {
-        return new Response(JSON.stringify({ error: "Rate limit exceeded" }), {
-          status: 429,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      if (response.status === 402) {
-        return new Response(JSON.stringify({ error: "Payment required" }), {
-          status: 402,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-      throw new Error(`AI Gateway error: ${response.status}`);
-    }
-
-    const aiResponse = await response.json();
-    const aiContent = aiResponse.choices?.[0]?.message?.content;
-
-    if (!aiContent) {
-      throw new Error("No content in AI response");
-    }
-
-    console.log("AI Response:", aiContent.substring(0, 100) + "...");
-
-    // 4. Save AI response message to database
-    const { error: msgError } = await supabase
-      .from("messages")
-      .insert({
-        conversation_id,
-        contact_id,
-        instance_id,
-        content: aiContent,
-        direction: "outgoing",
-        is_from_bot: true,
-        message_type: "text",
-        status: "pending",
-        metadata: { source: "ai_bitrix24", persona: personaName }
-      });
-
-    if (msgError) {
-      console.error("Error saving message:", msgError);
-    }
-
-    // 5. Send response to Bitrix24
-    const { data: integration } = await supabase
-      .from("integrations")
-      .select("*")
-      .eq("id", integration_id)
-      .single();
-
-    if (!integration) {
-      throw new Error("Integration not found");
-    }
-
-    const config = integration.config;
-    const connectorId = config?.connector_id || "thoth_whatsapp";
-    
-    // Get fresh access token with proactive refresh
-    let accessToken = config.access_token;
-    
-    // Check if token needs refresh (10 minute buffer)
-    if (config.token_expires_at) {
-      const expiresAt = new Date(config.token_expires_at);
-      const now = new Date();
-      const bufferMs = 10 * 60 * 1000; // 10 minutes
-      
-      if (expiresAt.getTime() - now.getTime() <= bufferMs && config.refresh_token) {
-        console.log("Token expiring soon, refreshing proactively...");
-        // MARKETPLACE: Use credentials from environment variables, NOT from database
-        const bitrixClientId = Deno.env.get("BITRIX24_CLIENT_ID") || "";
-        const bitrixClientSecret = Deno.env.get("BITRIX24_CLIENT_SECRET") || "";
-        const refreshUrl = `https://oauth.bitrix.info/oauth/token/?grant_type=refresh_token&client_id=${bitrixClientId}&client_secret=${bitrixClientSecret}&refresh_token=${config.refresh_token}`;
-        
-        try {
-          const tokenResponse = await fetch(refreshUrl);
-          const tokenData = await tokenResponse.json();
+        if (integration) {
+          actualWorkspaceId = integration.workspace_id || workspace_id;
           
-          if (tokenData.error) {
-            console.error("Token refresh failed:", tokenData.error, tokenData.error_description);
-            // Mark refresh failure but continue with existing token
-            await supabase
-              .from("integrations")
-              .update({
-                config: {
-                  ...config,
-                  token_refresh_failed: true,
-                  token_refresh_error: tokenData.error_description || tokenData.error,
-                  token_refresh_failed_at: new Date().toISOString(),
-                },
-              })
-              .eq("id", integration_id);
-          } else if (tokenData.access_token) {
-            accessToken = tokenData.access_token;
-            const newExpiresAt = new Date(Date.now() + (tokenData.expires_in || 3600) * 1000).toISOString();
-            // Update token in database
-            await supabase
-              .from("integrations")
-              .update({
-                config: {
-                  ...config,
-                  access_token: tokenData.access_token,
-                  refresh_token: tokenData.refresh_token || config.refresh_token,
-                  token_expires_at: newExpiresAt,
-                  token_refresh_failed: false,
-                  token_refresh_error: null,
-                  last_token_refresh_at: new Date().toISOString(),
-                },
-              })
-              .eq("id", integration_id);
-            console.log("Token refreshed successfully, new expiry:", newExpiresAt);
+          const personaIdToUse = message_type === "bot" 
+            ? integration.config?.bot_persona_id 
+            : integration.config?.persona_id;
+
+          if (personaIdToUse) {
+            const { data: persona } = await supabase
+              .from("personas")
+              .select("*")
+              .eq("id", personaIdToUse)
+              .single();
+
+            if (persona) {
+              systemPrompt = persona.system_prompt || systemPrompt;
+              personaName = persona.name || personaName;
+              temperature = persona.temperature || temperature;
+              console.log("Using integration persona:", personaName);
+            }
           }
-        } catch (e) {
-          console.error("Token refresh error:", e);
         }
       }
-    }
-    
-    // Check if token is available
-    if (!accessToken) {
-      console.error("No access token available to send message to Bitrix24");
-      throw new Error("Token de acesso não disponível. Reconecte o Bitrix24.");
-    }
 
-    const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
-    
-    let sendResult: any;
+      // Fallback to workspace default persona
+      if (personaName === "Assistente" && actualWorkspaceId) {
+        const { data: persona } = await supabase
+          .from("personas")
+          .select("*")
+          .eq("workspace_id", actualWorkspaceId)
+          .eq("is_default", true)
+          .single();
 
-    // Send message based on message_type
-    if (message_type === "bot") {
-      // Send via imbot.message.add
-      const botId = bitrix24_bot_id || config.bot_id;
-      const dialogId = bitrix24_dialog_id;
-
-      if (!botId) {
-        throw new Error("Bot ID not configured");
+        if (persona) {
+          systemPrompt = persona.system_prompt || systemPrompt;
+          personaName = persona.name || personaName;
+          temperature = persona.temperature || temperature;
+          console.log("Using workspace default persona:", personaName);
+        }
       }
 
-      const botMessagePayload = {
-        auth: accessToken,
-        BOT_ID: botId,
-        DIALOG_ID: dialogId,
-        MESSAGE: aiContent,
-        // Optional: Add keyboard or attachments
-        // KEYBOARD: [],
-        // ATTACH: []
-      };
+      // 2. Search knowledge base for relevant context
+      let knowledgeContext = "";
+      if (actualWorkspaceId && content) {
+        const relevantChunks = await searchKnowledge(supabase, actualWorkspaceId, content);
+        
+        if (relevantChunks.length > 0) {
+          knowledgeContext = `\n\n## Base de Conhecimento\nUse as seguintes informações para responder quando relevante:\n\n${relevantChunks.join("\n\n---\n\n")}`;
+          console.log(`Found ${relevantChunks.length} relevant knowledge chunks`);
+        }
+      }
 
-      console.log("Sending to Bitrix24 via imbot.message.add:", JSON.stringify(botMessagePayload, null, 2));
-
-      const sendUrl = `${clientEndpoint}imbot.message.add`;
-      const sendResponse = await fetch(sendUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(botMessagePayload)
-      });
-
-      sendResult = await sendResponse.json();
-      console.log("Bitrix24 imbot.message.add result:", JSON.stringify(sendResult, null, 2));
-
-    } else {
-      // Send via imconnector.send.messages (default for connector)
-      const messagePayload = {
-        auth: accessToken,
-        CONNECTOR: connectorId,
-        LINE: line_id,
-        MESSAGES: [{
-          user: { id: bitrix24_user_id },
-          chat: { id: bitrix24_chat_id },
-          message: {
-            id: `ai_${Date.now()}`,
-            date: Math.floor(Date.now() / 1000),
-            text: aiContent
-          }
-        }]
-      };
-
-      console.log("Sending to Bitrix24 via imconnector.send.messages:", JSON.stringify(messagePayload, null, 2));
-
-      const sendUrl = `${clientEndpoint}imconnector.send.messages`;
-      const sendResponse = await fetch(sendUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(messagePayload)
-      });
-
-      sendResult = await sendResponse.json();
-      console.log("Bitrix24 imconnector.send.messages result:", JSON.stringify(sendResult, null, 2));
-    }
-
-    // Update message status
-    if (sendResult.result) {
-      await supabase
+      // 3. Fetch conversation history (last 15 messages for better context)
+      const { data: history } = await supabase
         .from("messages")
-        .update({ status: "sent" })
+        .select("content, direction, is_from_bot")
         .eq("conversation_id", conversation_id)
-        .eq("content", aiContent)
-        .eq("is_from_bot", true);
+        .order("created_at", { ascending: false })
+        .limit(15);
+
+      // Get last bot message for anti-repetition
+      const lastBotMessage = recentOutgoing?.content || "";
+
+      // Build anti-repetition instruction
+      const antiRepetitionPrompt = lastBotMessage 
+        ? `\n\nIMPORTANTE: Sua última resposta foi: "${lastBotMessage.substring(0, 200)}..."\nNÃO repita esta mensagem. Analise o histórico completo e avance a conversa.`
+        : "";
+
+      // Build full system prompt
+      const fullSystemPrompt = systemPrompt + knowledgeContext + antiRepetitionPrompt;
+
+      const messages = [
+        { role: "system", content: fullSystemPrompt },
+      ];
+
+      // Add conversation history in chronological order
+      if (history && history.length > 0) {
+        const reversedHistory = [...history].reverse();
+        for (const msg of reversedHistory) {
+          if (msg.content) {
+            messages.push({
+              role: msg.direction === "incoming" ? "user" : "assistant",
+              content: msg.content,
+            });
+          }
+        }
+      }
+
+      // Add current message if not already in history
+      if (content && !history?.some(h => h.content === content)) {
+        messages.push({ role: "user", content });
+      }
+
+      console.log("Sending to AI with", messages.length, "messages");
+
+      // 4. Call Lovable AI Gateway
+      const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${LOVABLE_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "google/gemini-2.5-flash",
+          messages,
+          temperature,
+          max_tokens: 1024,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("AI Gateway error:", response.status, errorText);
+        
+        if (response.status === 429) {
+          return new Response(JSON.stringify({ error: "Rate limit exceeded" }), {
+            status: 429,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+        if (response.status === 402) {
+          return new Response(JSON.stringify({ error: "Payment required" }), {
+            status: 402,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+        throw new Error(`AI Gateway error: ${response.status}`);
+      }
+
+      const aiResponse = await response.json();
+      const aiContent = aiResponse.choices?.[0]?.message?.content;
+
+      if (!aiContent) {
+        throw new Error("No content in AI response");
+      }
+
+      console.log("AI Response:", aiContent.substring(0, 100) + "...");
+
+      // === ANTI-LOOP MECHANISM 3: Check for duplicate response ===
+      const responseHash = hashMessage(aiContent);
+      const lastBotHash = lastBotMessage ? hashMessage(lastBotMessage) : "";
+      
+      if (responseHash === lastBotHash || aiContent.trim() === lastBotMessage.trim()) {
+        console.log("ANTI-LOOP: Duplicate response detected, skipping");
+        await supabase
+          .from("conversations")
+          .update({ 
+            bot_state: { 
+              ...conversation?.bot_state,
+              duplicate_detected_at: new Date().toISOString()
+            }
+          })
+          .eq("id", conversation_id);
+        
+        return new Response(JSON.stringify({ 
+          skipped: true, 
+          reason: "Duplicate response detected" 
+        }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // 5. Save AI response message to database
+      const { error: msgError } = await supabase
+        .from("messages")
+        .insert({
+          conversation_id,
+          contact_id,
+          instance_id,
+          content: aiContent,
+          direction: "outgoing",
+          is_from_bot: true,
+          message_type: "text",
+          status: "pending",
+          metadata: { source: "ai_bitrix24", persona: personaName }
+        });
+
+      if (msgError) {
+        console.error("Error saving message:", msgError);
+      }
+
+      // 6. Send response to Bitrix24
+      const { data: integration } = await supabase
+        .from("integrations")
+        .select("*")
+        .eq("id", integration_id)
+        .single();
+
+      if (!integration) {
+        throw new Error("Integration not found");
+      }
+
+      const config = integration.config;
+      const connectorId = config?.connector_id || "thoth_whatsapp";
+      
+      // Get fresh access token with proactive refresh
+      let accessToken = config.access_token;
+      
+      // Check if token needs refresh (10 minute buffer)
+      if (config.token_expires_at) {
+        const expiresAt = new Date(config.token_expires_at);
+        const now = new Date();
+        const bufferMs = 10 * 60 * 1000;
+        
+        if (expiresAt.getTime() - now.getTime() <= bufferMs && config.refresh_token) {
+          console.log("Token expiring soon, refreshing...");
+          const bitrixClientId = Deno.env.get("BITRIX24_CLIENT_ID") || "";
+          const bitrixClientSecret = Deno.env.get("BITRIX24_CLIENT_SECRET") || "";
+          const refreshUrl = `https://oauth.bitrix.info/oauth/token/?grant_type=refresh_token&client_id=${bitrixClientId}&client_secret=${bitrixClientSecret}&refresh_token=${config.refresh_token}`;
+          
+          try {
+            const tokenResponse = await fetch(refreshUrl);
+            const tokenData = await tokenResponse.json();
+            
+            if (tokenData.access_token) {
+              accessToken = tokenData.access_token;
+              const newExpiresAt = new Date(Date.now() + (tokenData.expires_in || 3600) * 1000).toISOString();
+              await supabase
+                .from("integrations")
+                .update({
+                  config: {
+                    ...config,
+                    access_token: tokenData.access_token,
+                    refresh_token: tokenData.refresh_token || config.refresh_token,
+                    token_expires_at: newExpiresAt,
+                    last_token_refresh_at: new Date().toISOString(),
+                  },
+                })
+                .eq("id", integration_id);
+              console.log("Token refreshed successfully");
+            }
+          } catch (e) {
+            console.error("Token refresh error:", e);
+          }
+        }
+      }
+      
+      if (!accessToken) {
+        console.error("No access token available");
+        throw new Error("Token de acesso não disponível. Reconecte o Bitrix24.");
+      }
+
+      const clientEndpoint = config.client_endpoint || `https://${config.domain}/rest/`;
+      
+      let sendResult: any;
+
+      // Send message based on message_type
+      if (message_type === "bot") {
+        const botId = bitrix24_bot_id || config.bot_id;
+        const dialogId = bitrix24_dialog_id;
+
+        if (!botId) {
+          throw new Error("Bot ID not configured");
+        }
+
+        const botMessagePayload = {
+          auth: accessToken,
+          BOT_ID: botId,
+          DIALOG_ID: dialogId,
+          MESSAGE: aiContent,
+        };
+
+        console.log("Sending via imbot.message.add");
+
+        const sendUrl = `${clientEndpoint}imbot.message.add`;
+        const sendResponse = await fetch(sendUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(botMessagePayload)
+        });
+
+        sendResult = await sendResponse.json();
+        console.log("Bitrix24 result:", JSON.stringify(sendResult, null, 2));
+
+      } else {
+        const messagePayload = {
+          auth: accessToken,
+          CONNECTOR: connectorId,
+          LINE: line_id,
+          MESSAGES: [{
+            user: { id: bitrix24_user_id },
+            chat: { id: bitrix24_chat_id },
+            message: {
+              id: `ai_${Date.now()}`,
+              date: Math.floor(Date.now() / 1000),
+              text: aiContent
+            }
+          }]
+        };
+
+        console.log("Sending via imconnector.send.messages");
+
+        const sendUrl = `${clientEndpoint}imconnector.send.messages`;
+        const sendResponse = await fetch(sendUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(messagePayload)
+        });
+
+        sendResult = await sendResponse.json();
+        console.log("Bitrix24 result:", JSON.stringify(sendResult, null, 2));
+      }
+
+      // Update message status and conversation state
+      if (sendResult.result) {
+        await supabase
+          .from("messages")
+          .update({ status: "sent" })
+          .eq("conversation_id", conversation_id)
+          .eq("content", aiContent)
+          .eq("is_from_bot", true);
+      }
+
+      await supabase
+        .from("conversations")
+        .update({ 
+          last_message_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          last_bot_message_hash: responseHash,
+          bot_state: {
+            ...conversation?.bot_state,
+            last_processed_at: new Date().toISOString()
+          }
+        })
+        .eq("id", conversation_id);
+
+      console.log("AI message sent successfully to Bitrix24 via", message_type);
+
+      return new Response(JSON.stringify({ 
+        success: true, 
+        response: aiContent,
+        persona: personaName,
+        message_type,
+        bitrix_result: sendResult
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+
+    } finally {
+      // Always release the lock
+      await releaseLock(supabase, conversation_id);
     }
-
-    // Update conversation
-    await supabase
-      .from("conversations")
-      .update({ 
-        last_message_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      })
-      .eq("id", conversation_id);
-
-    console.log("AI message sent successfully to Bitrix24 via", message_type);
-
-    return new Response(JSON.stringify({ 
-      success: true, 
-      response: aiContent,
-      persona: personaName,
-      message_type,
-      bitrix_result: sendResult
-    }), {
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-    });
 
   } catch (error: unknown) {
     console.error("Error in ai-process-bitrix24:", error);

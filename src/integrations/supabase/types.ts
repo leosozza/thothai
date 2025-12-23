@@ -611,12 +611,15 @@ export type Database = {
         Row: {
           assigned_to: string | null
           attendance_mode: string | null
+          bot_state: Json | null
           contact_id: string
           created_at: string
           department: string | null
           id: string
           instance_id: string
+          last_bot_message_hash: string | null
           last_message_at: string | null
+          processing_lock_at: string | null
           status: string
           unread_count: number
           updated_at: string
@@ -624,12 +627,15 @@ export type Database = {
         Insert: {
           assigned_to?: string | null
           attendance_mode?: string | null
+          bot_state?: Json | null
           contact_id: string
           created_at?: string
           department?: string | null
           id?: string
           instance_id: string
+          last_bot_message_hash?: string | null
           last_message_at?: string | null
+          processing_lock_at?: string | null
           status?: string
           unread_count?: number
           updated_at?: string
@@ -637,12 +643,15 @@ export type Database = {
         Update: {
           assigned_to?: string | null
           attendance_mode?: string | null
+          bot_state?: Json | null
           contact_id?: string
           created_at?: string
           department?: string | null
           id?: string
           instance_id?: string
+          last_bot_message_hash?: string | null
           last_message_at?: string | null
+          processing_lock_at?: string | null
           status?: string
           unread_count?: number
           updated_at?: string
@@ -756,6 +765,7 @@ export type Database = {
           edges: Json
           id: string
           instance_id: string | null
+          intent_triggers: string[] | null
           is_active: boolean
           name: string
           nodes: Json
@@ -771,6 +781,7 @@ export type Database = {
           edges?: Json
           id?: string
           instance_id?: string | null
+          intent_triggers?: string[] | null
           is_active?: boolean
           name: string
           nodes?: Json
@@ -786,6 +797,7 @@ export type Database = {
           edges?: Json
           id?: string
           instance_id?: string | null
+          intent_triggers?: string[] | null
           is_active?: boolean
           name?: string
           nodes?: Json
