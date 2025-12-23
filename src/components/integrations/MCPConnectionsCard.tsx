@@ -126,7 +126,7 @@ export function MCPConnectionsCard({ workspaceId }: MCPConnectionsCardProps) {
 
     setSaving(true);
     try {
-      let authConfig: Record<string, unknown> = {};
+      let authConfig: { token?: string; api_key?: string; header_name?: string } = {};
       if (authType === "bearer") {
         authConfig = { token: authToken };
       } else if (authType === "api_key") {
@@ -135,15 +135,15 @@ export function MCPConnectionsCard({ workspaceId }: MCPConnectionsCardProps) {
 
       const { error } = await supabase
         .from("mcp_connections")
-        .insert([{
+        .insert({
           workspace_id: workspaceId,
           name: name.trim(),
           description: description.trim() || null,
           mcp_url: mcpUrl.trim(),
           transport_type: transportType,
           auth_type: authType,
-          auth_config: authConfig,
-        }]);
+          auth_config: authConfig as unknown as Record<string, never>,
+        });
 
       if (error) throw error;
 
