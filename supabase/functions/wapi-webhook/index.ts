@@ -6,7 +6,95 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Download decrypted media from W-API
+// HKDF Expand function for WhatsApp media decryption
+async function hkdfExpand(key: Uint8Array, info: Uint8Array, length: number): Promise<Uint8Array> {
+  // Step 1: Extract (PRK = HMAC(salt, key)) - salt is zeros
+  const salt = new Uint8Array(32);
+  const hmacKeyExtract = await crypto.subtle.importKey(
+    "raw", salt.buffer as ArrayBuffer, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
+  );
+  const prkBuffer = await crypto.subtle.sign("HMAC", hmacKeyExtract, key.buffer as ArrayBuffer);
+  const prk = new Uint8Array(prkBuffer);
+  
+  // Step 2: Expand
+  let keyStream = new Uint8Array(0);
+  let keyBlock = new Uint8Array(0);
+  let blockIndex = 1;
+  
+  const prkKey = await crypto.subtle.importKey(
+    "raw", prk.buffer as ArrayBuffer, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
+  );
+  
+  while (keyStream.length < length) {
+    const blockData = new Uint8Array(keyBlock.length + info.length + 1);
+    blockData.set(keyBlock);
+    blockData.set(info, keyBlock.length);
+    blockData[keyBlock.length + info.length] = blockIndex;
+    
+    const blockBuffer = await crypto.subtle.sign("HMAC", prkKey, blockData.buffer as ArrayBuffer);
+    keyBlock = new Uint8Array(blockBuffer);
+    const newStream = new Uint8Array(keyStream.length + keyBlock.length);
+    newStream.set(keyStream);
+    newStream.set(keyBlock, keyStream.length);
+    keyStream = newStream;
+    blockIndex++;
+  }
+  
+  return keyStream.slice(0, length);
+}
+
+// Decrypt WhatsApp media using mediaKey (HKDF + AES-256-CBC)
+async function decryptWhatsAppMedia(
+  encryptedData: Uint8Array,
+  mediaKeyBase64: string,
+  messageType: string = "audio"
+): Promise<Uint8Array> {
+  console.log("Decrypting WhatsApp media, type:", messageType, "encrypted size:", encryptedData.length);
+  
+  // 1. Decode mediaKey from base64
+  const mediaKey = Uint8Array.from(atob(mediaKeyBase64), c => c.charCodeAt(0));
+  console.log("MediaKey decoded, length:", mediaKey.length);
+  
+  // 2. Get the info string based on message type
+  const infoMap: Record<string, string> = {
+    audio: "WhatsApp Audio Keys",
+    ptt: "WhatsApp Audio Keys",
+    image: "WhatsApp Image Keys",
+    video: "WhatsApp Video Keys",
+    document: "WhatsApp Document Keys",
+    sticker: "WhatsApp Image Keys"
+  };
+  const infoString = infoMap[messageType] || "WhatsApp Audio Keys";
+  const info = new TextEncoder().encode(infoString);
+  console.log("Using info string:", infoString);
+  
+  // 3. HKDF expand the mediaKey to 112 bytes
+  const expandedKey = await hkdfExpand(mediaKey, info, 112);
+  console.log("Expanded key length:", expandedKey.length);
+  
+  // 4. Extract IV (bytes 0-16) and Key (bytes 16-48)
+  const iv = expandedKey.slice(0, 16);
+  const key = expandedKey.slice(16, 48);
+  console.log("IV length:", iv.length, "Key length:", key.length);
+  
+  // 5. Remove last 10 bytes (MAC/checksum)
+  const encryptedFile = encryptedData.slice(0, -10);
+  console.log("Encrypted file size after removing MAC:", encryptedFile.length);
+  
+  // 6. Decrypt using AES-256-CBC
+  const cryptoKey = await crypto.subtle.importKey(
+    "raw", key, { name: "AES-CBC" }, false, ["decrypt"]
+  );
+  
+  const decrypted = await crypto.subtle.decrypt(
+    { name: "AES-CBC", iv }, cryptoKey, encryptedFile
+  );
+  
+  console.log("Decryption successful, decrypted size:", decrypted.byteLength);
+  return new Uint8Array(decrypted);
+}
+
+// Download decrypted media from W-API (fallback method)
 async function downloadMediaFromWAPI(
   messageId: string,
   wapiInstanceKey: string,
@@ -81,15 +169,43 @@ async function transcribeAudio(audioData: ArrayBuffer, languageCode: string = "p
   return text || null;
 }
 
-// Legacy function for backward compatibility - tries W-API first, then direct URL
+// Main transcription function - tries local decryption first, then W-API, then direct URL
 async function transcribeAudioFromUrl(
   audioUrl: string, 
   languageCode: string = "por",
   messageId?: string,
   wapiInstanceKey?: string,
-  wapiApiKey?: string
+  wapiApiKey?: string,
+  mediaKey?: string,
+  messageType: string = "audio"
 ): Promise<string | null> {
-  // If we have W-API credentials and messageId, try downloading decrypted media
+  
+  // Method 1: Local decryption using mediaKey (preferred)
+  if (mediaKey && audioUrl) {
+    console.log("Attempting local decryption using mediaKey...");
+    try {
+      // Download encrypted file
+      const encryptedResponse = await fetch(audioUrl);
+      if (encryptedResponse.ok) {
+        const encryptedData = new Uint8Array(await encryptedResponse.arrayBuffer());
+        console.log("Downloaded encrypted audio, size:", encryptedData.length);
+        
+        // Decrypt using mediaKey
+        const decryptedAudio = await decryptWhatsAppMedia(encryptedData, mediaKey, messageType);
+        
+        // Transcribe decrypted audio
+        const audioArrayBuffer = new ArrayBuffer(decryptedAudio.byteLength);
+        new Uint8Array(audioArrayBuffer).set(decryptedAudio);
+        return await transcribeAudio(audioArrayBuffer, languageCode);
+      } else {
+        console.error("Failed to download encrypted audio:", encryptedResponse.status);
+      }
+    } catch (decryptError) {
+      console.error("Local decryption failed:", decryptError);
+    }
+  }
+  
+  // Method 2: W-API download (fallback)
   if (messageId && wapiInstanceKey && wapiApiKey) {
     console.log("Attempting to download decrypted audio via W-API...");
     const decryptedAudio = await downloadMediaFromWAPI(messageId, wapiInstanceKey, wapiApiKey);
@@ -97,25 +213,30 @@ async function transcribeAudioFromUrl(
     if (decryptedAudio) {
       return await transcribeAudio(decryptedAudio, languageCode);
     }
-    console.log("W-API download failed, falling back to direct URL...");
+    console.log("W-API download failed, trying direct URL...");
   }
   
-  // Fallback: try direct URL (may fail for encrypted URLs)
+  // Method 3: Direct URL (last resort - usually fails for encrypted files)
   const ELEVENLABS_API_KEY = Deno.env.get("ELEVENLABS_API_KEY");
   if (!ELEVENLABS_API_KEY) {
     console.log("ELEVENLABS_API_KEY not configured; skipping transcription");
     return null;
   }
 
-  console.log("Fetching audio for transcription (direct URL):", audioUrl);
-  const audioResponse = await fetch(audioUrl);
-  if (!audioResponse.ok) {
-    const t = await audioResponse.text().catch(() => "");
-    throw new Error(`Failed to fetch audio from URL (${audioResponse.status}): ${t}`);
-  }
+  console.log("Fetching audio for transcription (direct URL - may fail for encrypted files):", audioUrl);
+  try {
+    const audioResponse = await fetch(audioUrl);
+    if (!audioResponse.ok) {
+      const t = await audioResponse.text().catch(() => "");
+      throw new Error(`Failed to fetch audio from URL (${audioResponse.status}): ${t}`);
+    }
 
-  const audioBuffer = await audioResponse.arrayBuffer();
-  return await transcribeAudio(audioBuffer, languageCode);
+    const audioBuffer = await audioResponse.arrayBuffer();
+    return await transcribeAudio(audioBuffer, languageCode);
+  } catch (directError) {
+    console.error("Direct URL transcription failed:", directError);
+    return null;
+  }
 }
 
 serve(async (req) => {
@@ -292,15 +413,20 @@ serve(async (req) => {
           payload.msgContent?.documentMessage?.caption ||
           "";
 
-        // Transcribe audio messages using ElevenLabs STT via W-API decrypted download
+        // Transcribe audio messages using local decryption with mediaKey
         let audioTranscription: string | null = null;
         let audioUrl: string | null = null;
         if (messageType === "audio" && payload.msgContent?.audioMessage?.url) {
           audioUrl = payload.msgContent.audioMessage.url;
+          const audioMessage = payload.msgContent.audioMessage;
+          const mediaKey = audioMessage.mediaKey; // Base64 encoded key for decryption
+          
           try {
-            console.log("Transcribing audio message via W-API...");
+            console.log("Transcribing audio message...");
+            console.log("Audio URL:", audioUrl);
+            console.log("MediaKey present:", !!mediaKey);
             
-            // Get W-API credentials from instance
+            // Get W-API credentials from instance (fallback method)
             const wapiInstanceKey = instance.instance_key;
             
             // Get W-API API key from integrations or use environment variable
@@ -319,13 +445,18 @@ serve(async (req) => {
               wapiApiKey = (wapiIntegration?.config as any)?.api_key || null;
             }
             
-            // Use W-API download if we have credentials, otherwise try direct URL
+            // Determine audio subtype (ptt = voice note, audio = regular audio)
+            const audioType = audioMessage.ptt ? "ptt" : "audio";
+            
+            // Use local decryption with mediaKey (preferred), fallback to W-API, then direct URL
             audioTranscription = await transcribeAudioFromUrl(
               audioUrl!, 
               "por",
               messageId,
               wapiInstanceKey || undefined,
-              wapiApiKey || undefined
+              wapiApiKey || undefined,
+              mediaKey || undefined,
+              audioType
             );
             
             if (audioTranscription) {
