@@ -131,3 +131,12 @@ verify_jwt = false
 
 [functions.bitrix24-iframe-test]
 verify_jwt = false
+
+[functions.evolution-connect]
+verify_jwt = true
+
+[functions.evolution-webhook]
+verify_jwt = false
+
+[functions.evolution-send-message]
+verify_jwt = false

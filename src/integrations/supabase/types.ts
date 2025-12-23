@@ -828,6 +828,7 @@ export type Database = {
         Row: {
           connection_type: string | null
           created_at: string
+          evolution_instance_name: string | null
           gupshup_api_key: string | null
           gupshup_app_id: string | null
           id: string
@@ -835,6 +836,7 @@ export type Database = {
           name: string
           phone_number: string | null
           profile_picture_url: string | null
+          provider_type: string | null
           qr_code: string | null
           status: string
           updated_at: string
@@ -844,6 +846,7 @@ export type Database = {
         Insert: {
           connection_type?: string | null
           created_at?: string
+          evolution_instance_name?: string | null
           gupshup_api_key?: string | null
           gupshup_app_id?: string | null
           id?: string
@@ -851,6 +854,7 @@ export type Database = {
           name: string
           phone_number?: string | null
           profile_picture_url?: string | null
+          provider_type?: string | null
           qr_code?: string | null
           status?: string
           updated_at?: string
@@ -860,6 +864,7 @@ export type Database = {
         Update: {
           connection_type?: string | null
           created_at?: string
+          evolution_instance_name?: string | null
           gupshup_api_key?: string | null
           gupshup_app_id?: string | null
           id?: string
@@ -867,6 +872,7 @@ export type Database = {
           name?: string
           phone_number?: string | null
           profile_picture_url?: string | null
+          provider_type?: string | null
           qr_code?: string | null
           status?: string
           updated_at?: string
