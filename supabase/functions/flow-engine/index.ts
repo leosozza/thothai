@@ -115,11 +115,12 @@ serve(async (req) => {
       content, 
       workspace_id,
       is_first_message = false,
-      original_message_type = "text"
+      original_message_type = "text",
+      image_url = null  // New: Image URL for vision processing
     } = await req.json();
 
     console.log(`=== FLOW ENGINE (${FUNCTION_VERSION}) ===`);
-    console.log("Input:", { message_id, content: content?.substring(0, 50), is_first_message, workspace_id });
+    console.log("Input:", { message_id, content: content?.substring(0, 50), is_first_message, workspace_id, image_url: !!image_url });
 
     const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
@@ -158,7 +159,7 @@ serve(async (req) => {
     if (!flows || flows.length === 0) {
       console.log("No active flows found, falling back to AI");
       return await callAIProcessor(supabaseUrl, supabaseKey, {
-        message_id, conversation_id, instance_id, contact_id, content, workspace_id, original_message_type
+        message_id, conversation_id, instance_id, contact_id, content, workspace_id, original_message_type, image_url
       });
     }
 
@@ -250,7 +251,7 @@ serve(async (req) => {
     if (!matchedFlow) {
       console.log("No flow matched, falling back to AI");
       return await callAIProcessor(supabaseUrl, supabaseKey, {
-        message_id, conversation_id, instance_id, contact_id, content, workspace_id, original_message_type
+        message_id, conversation_id, instance_id, contact_id, content, workspace_id, original_message_type, image_url
       });
     }
 
@@ -263,7 +264,7 @@ serve(async (req) => {
     if (nodes.length === 0) {
       console.log("Flow has no nodes, falling back to AI");
       return await callAIProcessor(supabaseUrl, supabaseKey, {
-        message_id, conversation_id, instance_id, contact_id, content, workspace_id, original_message_type
+        message_id, conversation_id, instance_id, contact_id, content, workspace_id, original_message_type, image_url
       });
     }
 
@@ -321,7 +322,7 @@ serve(async (req) => {
 
         case "ai_response":
           await callAIProcessor(supabaseUrl, supabaseKey, {
-            message_id, conversation_id, instance_id, contact_id, content, workspace_id, original_message_type
+            message_id, conversation_id, instance_id, contact_id, content, workspace_id, original_message_type, image_url
           });
           break;
 

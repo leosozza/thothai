@@ -171,10 +171,10 @@ serve(async (req) => {
   }
 
   try {
-    const { message_id, conversation_id, instance_id, contact_id, content, workspace_id, original_message_type = "text" } = await req.json();
+    const { message_id, conversation_id, instance_id, contact_id, content, workspace_id, original_message_type = "text", image_url = null } = await req.json();
     
     console.log(`=== AI PROCESS MESSAGE (${FUNCTION_VERSION}) ===`);
-    console.log("Input:", { message_id, conversation_id, instance_id, content: content?.substring(0, 50), original_message_type });
+    console.log("Input:", { message_id, conversation_id, instance_id, content: content?.substring(0, 50), original_message_type, image_url: !!image_url });
 
     const LOVABLE_API_KEY = Deno.env.get("LOVABLE_API_KEY");
     if (!LOVABLE_API_KEY) {
@@ -349,7 +349,8 @@ serve(async (req) => {
       // Build full system prompt with knowledge context and anti-repetition
       const fullSystemPrompt = systemPrompt + knowledgeContext + antiRepetitionPrompt;
 
-      const messages = [
+      // Build messages array - handle multimodal content for images
+      const messages: any[] = [
         { role: "system", content: fullSystemPrompt },
       ];
 
@@ -366,12 +367,30 @@ serve(async (req) => {
         }
       }
 
-      // Add current message if not already in history
-      if (content && !history?.some(h => h.content === content)) {
+      // Add current message - handle image if present
+      if (image_url) {
+        // Multimodal message with image
+        const userContent: any[] = [];
+        
+        if (content) {
+          userContent.push({ type: "text", text: content });
+        } else {
+          userContent.push({ type: "text", text: "O que você vê nesta imagem?" });
+        }
+        
+        userContent.push({
+          type: "image_url",
+          image_url: { url: image_url }
+        });
+        
+        messages.push({ role: "user", content: userContent });
+        console.log("Added multimodal message with image");
+      } else if (content && !history?.some(h => h.content === content)) {
+        // Text-only message
         messages.push({ role: "user", content });
       }
 
-      console.log("Sending to AI with", messages.length, "messages (knowledge context:", knowledgeContext.length > 0 ? "yes" : "no", ")");
+      console.log("Sending to AI with", messages.length, "messages (knowledge context:", knowledgeContext.length > 0 ? "yes" : "no", ", image:", !!image_url, ")");
 
       // Call Lovable AI Gateway
       const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {

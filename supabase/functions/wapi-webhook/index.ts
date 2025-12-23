@@ -130,6 +130,103 @@ async function downloadMediaFromWAPI(
   }
 }
 
+// Download and store image to Supabase storage
+async function downloadAndStoreImage(
+  imageUrl: string,
+  supabase: any,
+  workspaceId: string,
+  messageId?: string,
+  wapiInstanceKey?: string,
+  wapiApiKey?: string,
+  mediaKey?: string
+): Promise<string | null> {
+  console.log("Downloading image for storage...");
+  
+  let imageData: ArrayBuffer | null = null;
+  let mimeType = "image/jpeg";
+  
+  // Method 1: Local decryption using mediaKey (preferred)
+  if (mediaKey && imageUrl) {
+    console.log("Attempting local image decryption using mediaKey...");
+    try {
+      const encryptedResponse = await fetch(imageUrl);
+      if (encryptedResponse.ok) {
+        const encryptedData = new Uint8Array(await encryptedResponse.arrayBuffer());
+        console.log("Downloaded encrypted image, size:", encryptedData.length);
+        
+        const decryptedImage = await decryptWhatsAppMedia(encryptedData, mediaKey, "image");
+        imageData = decryptedImage.buffer as ArrayBuffer;
+        console.log("Image decrypted successfully, size:", imageData.byteLength);
+      }
+    } catch (decryptError) {
+      console.error("Local image decryption failed:", decryptError);
+    }
+  }
+  
+  // Method 2: W-API download (fallback)
+  if (!imageData && messageId && wapiInstanceKey && wapiApiKey) {
+    console.log("Attempting to download image via W-API...");
+    imageData = await downloadMediaFromWAPI(messageId, wapiInstanceKey, wapiApiKey);
+  }
+  
+  // Method 3: Direct URL download (last resort)
+  if (!imageData && imageUrl) {
+    console.log("Attempting direct image download...");
+    try {
+      const response = await fetch(imageUrl);
+      if (response.ok) {
+        imageData = await response.arrayBuffer();
+        mimeType = response.headers.get("content-type") || "image/jpeg";
+        console.log("Direct image download successful, size:", imageData.byteLength);
+      }
+    } catch (err) {
+      console.error("Direct image download failed:", err);
+    }
+  }
+  
+  if (!imageData || imageData.byteLength === 0) {
+    console.error("Failed to download image from all methods");
+    return null;
+  }
+  
+  // Validate image size (max 10MB)
+  if (imageData.byteLength > 10 * 1024 * 1024) {
+    console.error("Image too large:", imageData.byteLength);
+    return null;
+  }
+  
+  // Upload to Supabase storage
+  try {
+    const timestamp = Date.now();
+    const randomId = Math.random().toString(36).substring(7);
+    const extension = mimeType.includes("png") ? "png" : mimeType.includes("webp") ? "webp" : "jpg";
+    const fileName = `images/${workspaceId}/${timestamp}_${randomId}.${extension}`;
+    
+    const { error: uploadError } = await supabase.storage
+      .from("assets")
+      .upload(fileName, imageData, {
+        contentType: mimeType,
+        upsert: false,
+      });
+    
+    if (uploadError) {
+      console.error("Error uploading image to storage:", uploadError);
+      return null;
+    }
+    
+    // Get public URL
+    const { data: publicData } = supabase.storage
+      .from("assets")
+      .getPublicUrl(fileName);
+    
+    console.log("Image uploaded successfully:", publicData.publicUrl);
+    return publicData.publicUrl;
+  } catch (storageError) {
+    console.error("Storage upload error:", storageError);
+    return null;
+  }
+}
+
 // Transcribe audio using ElevenLabs STT
 async function transcribeAudio(audioData: ArrayBuffer, languageCode: string = "por"): Promise<string | null> {
   const ELEVENLABS_API_KEY = Deno.env.get("ELEVENLABS_API_KEY");
@@ -471,6 +568,58 @@ serve(async (req) => {
           }
         }
 
+        // Handle image messages - download and store for AI processing
+        let imageUrl: string | null = null;
+        let storedImageUrl: string | null = null;
+        if (messageType === "image" && payload.msgContent?.imageMessage?.url) {
+          imageUrl = payload.msgContent.imageMessage.url;
+          const imageMessage = payload.msgContent.imageMessage;
+          const mediaKey = imageMessage.mediaKey;
+          
+          try {
+            console.log("Processing image message...");
+            console.log("Image URL:", imageUrl);
+            console.log("MediaKey present:", !!mediaKey);
+            
+            // Get W-API credentials
+            const wapiInstanceKey = instance.instance_key;
+            let wapiApiKey = Deno.env.get("WAPI_API_KEY");
+            
+            if (!wapiApiKey && instance.workspace_id) {
+              const { data: wapiIntegration } = await supabase
+                .from("integrations")
+                .select("config")
+                .eq("workspace_id", instance.workspace_id)
+                .eq("type", "wapi")
+                .eq("is_active", true)
+                .maybeSingle();
+              
+              wapiApiKey = (wapiIntegration?.config as any)?.api_key || null;
+            }
+            
+            // Download and store image
+            storedImageUrl = await downloadAndStoreImage(
+              imageUrl!,
+              supabase,
+              instance.workspace_id,
+              messageId,
+              wapiInstanceKey || undefined,
+              wapiApiKey || undefined,
+              mediaKey || undefined
+            );
+            
+            if (storedImageUrl) {
+              console.log("Image stored successfully:", storedImageUrl);
+            } else {
+              console.log("Failed to store image - will try to use original URL");
+              storedImageUrl = imageUrl; // Fallback to original URL
+            }
+          } catch (imageErr) {
+            console.error("Image processing failed:", imageErr);
+            storedImageUrl = imageUrl; // Fallback to original URL
+          }
+        }
+
         console.log(`Message from ${contactPhone}: ${msgContent} (type: ${messageType})`);
 
         // Get or create contact
@@ -565,7 +714,7 @@ serve(async (req) => {
             direction: isFromMe ? "outgoing" : "incoming",
             message_type: messageType,
             content: msgContent,
-            media_url: audioUrl,
+            media_url: storedImageUrl || audioUrl, // Store image URL or audio URL
             audio_transcription: audioTranscription,
             status: isFromMe ? "sent" : "delivered",
             is_from_bot: false,
@@ -635,8 +784,9 @@ serve(async (req) => {
         const attendanceMode = conversation.attendance_mode || 'ai';
         const assignedTo = conversation.assigned_to;
         
-        // Only trigger AI processing if message has content
-        if (msgContent) {
+        // Trigger AI processing if message has content OR has an image
+        const hasContent = msgContent || storedImageUrl;
+        if (hasContent) {
           const shouldProcessWithAI = attendanceMode === 'ai' || 
             (attendanceMode === 'hybrid' && !assignedTo);
           
@@ -676,7 +826,8 @@ serve(async (req) => {
                   content: msgContent,
                   workspace_id: instance.workspace_id,
                   is_first_message: isFirstMessage,
-                  original_message_type: messageType, // Pass original type so AI knows to respond with audio
+                  original_message_type: messageType,
+                  image_url: storedImageUrl, // Pass image URL for AI vision
                 }),
               });
 
