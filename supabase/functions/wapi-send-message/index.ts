@@ -177,12 +177,12 @@ serve(async (req) => {
       const publicUrl = publicData.publicUrl;
 
       endpoint = "message/send-audio";
-      body = { phone: formattedPhone, audioUrl: publicUrl };
+      body = { phone: formattedPhone, audio: publicUrl };
       mediaUrlToSave = publicUrl;
       console.log("Sending audio via public URL:", publicUrl);
     } else if (finalMessageType === "audio" && finalMediaUrl) {
       endpoint = "message/send-audio";
-      body = { phone: formattedPhone, audioUrl: finalMediaUrl };
+      body = { phone: formattedPhone, audio: finalMediaUrl };
     } else if (finalMessageType === "image" && finalMediaUrl) {
       endpoint = "message/send-image";
       body = { phone: formattedPhone, imageUrl: finalMediaUrl, caption: message };
