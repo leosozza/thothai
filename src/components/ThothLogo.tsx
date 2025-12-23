@@ -32,8 +32,8 @@ export function ThothLogo({
             <span className="text-gradient-primary">THOTH</span>
             <span className="text-destructive-foreground">.​AI</span>
           </span>
-          {size !== "sm" && <span className="text-[0.65rem] uppercase tracking-[0.25em] text-muted-foreground mt-0.5">
-              Parceiro Bitrix24
+          {size !== "sm" && <span className="text-[0.65rem] uppercase tracking-[0.25em] text-muted-foreground mt-0.5 text-center">
+              MESSENGER  
             </span>}
         </div>}
     </div>;
