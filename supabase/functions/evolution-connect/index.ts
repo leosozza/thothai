@@ -38,8 +38,8 @@ serve(async (req) => {
       });
     }
 
-    const { instanceId, workspaceId, action } = await req.json();
-    console.log("Evolution Connect request:", { instanceId, workspaceId, action });
+    const { instanceId, workspaceId, action, evolutionInstanceName: requestEvolutionName } = await req.json();
+    console.log("Evolution Connect request:", { instanceId, workspaceId, action, requestEvolutionName });
 
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 
@@ -117,6 +117,115 @@ serve(async (req) => {
     // Configure webhook URL
     const webhookUrl = `${supabaseUrl}/functions/v1/evolution-webhook?instance_id=${instanceId}`;
     console.log("Webhook URL:", webhookUrl);
+
+    // Action: logout - Disconnect WhatsApp session
+    if (action === "logout") {
+      console.log("Logging out Evolution instance...");
+      
+      try {
+        const logoutResponse = await fetch(
+          `${evolutionServerUrl}/instance/logout/${evolutionInstanceName}`,
+          {
+            method: "DELETE",
+            headers: {
+              "Content-Type": "application/json",
+              "apikey": evolutionApiKey,
+            },
+          }
+        );
+
+        if (logoutResponse.ok) {
+          await supabaseAdmin
+            .from("instances")
+            .update({ 
+              status: "disconnected",
+              qr_code: null,
+              phone_number: null,
+              updated_at: new Date().toISOString()
+            })
+            .eq("id", instanceId);
+
+          return new Response(JSON.stringify({ 
+            success: true, 
+            message: "WhatsApp desconectado com sucesso"
+          }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        } else {
+          const errorText = await logoutResponse.text();
+          console.error("Logout failed:", errorText);
+          return new Response(JSON.stringify({ 
+            error: `Erro ao desconectar: ${errorText}` 
+          }), {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      } catch (logoutError) {
+        console.error("Logout error:", logoutError);
+        return new Response(JSON.stringify({ 
+          error: `Erro ao desconectar: ${logoutError}` 
+        }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
+
+    // Action: delete - Delete instance from Evolution server
+    if (action === "delete") {
+      console.log("Deleting Evolution instance...");
+      
+      try {
+        const deleteResponse = await fetch(
+          `${evolutionServerUrl}/instance/delete/${evolutionInstanceName}`,
+          {
+            method: "DELETE",
+            headers: {
+              "Content-Type": "application/json",
+              "apikey": evolutionApiKey,
+            },
+          }
+        );
+
+        if (deleteResponse.ok || deleteResponse.status === 404) {
+          // Update local instance status
+          await supabaseAdmin
+            .from("instances")
+            .update({ 
+              status: "disconnected",
+              qr_code: null,
+              evolution_instance_name: null,
+              updated_at: new Date().toISOString()
+            })
+            .eq("id", instanceId);
+
+          return new Response(JSON.stringify({ 
+            success: true, 
+            message: "Instância Evolution removida com sucesso"
+          }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        } else {
+          const errorText = await deleteResponse.text();
+          console.error("Delete failed:", errorText);
+          return new Response(JSON.stringify({ 
+            error: `Erro ao remover: ${errorText}` 
+          }), {
+            status: 400,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      } catch (deleteError) {
+        console.error("Delete error:", deleteError);
+        return new Response(JSON.stringify({ 
+          error: `Erro ao remover: ${deleteError}` 
+        }), {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+    }
 
     // Action: create - Create new instance on Evolution
     if (action === "create" || !instance.evolution_instance_name) {

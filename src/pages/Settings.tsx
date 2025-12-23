@@ -30,7 +30,11 @@ import {
   Moon,
   Sparkles,
   Smartphone,
-  ExternalLink
+  ExternalLink,
+  CheckCircle,
+  XCircle,
+  RefreshCw,
+  AlertCircle
 } from "lucide-react";
 
 interface Profile {
@@ -54,6 +58,12 @@ interface ProviderConfig {
   wapi_instance_id: string;
   evolution_server_url: string;
   evolution_api_key: string;
+}
+
+interface EvolutionServerStatus {
+  status: 'online' | 'offline' | 'checking' | 'unknown';
+  instanceCount?: number;
+  error?: string;
 }
 
 const Settings = () => {
@@ -98,6 +108,7 @@ const Settings = () => {
   const [loadingProviders, setLoadingProviders] = useState(false);
   const [savingProviders, setSavingProviders] = useState(false);
   const [showProviderKeys, setShowProviderKeys] = useState(false);
+  const [evolutionStatus, setEvolutionStatus] = useState<EvolutionServerStatus>({ status: 'unknown' });
 
 
   useEffect(() => {
@@ -170,11 +181,63 @@ const Settings = () => {
         evolution_server_url: evolutionConfig?.server_url || "",
         evolution_api_key: evolutionConfig?.api_key || "",
       });
+
+      // Check Evolution status if configured
+      if (evolutionConfig?.server_url && evolutionConfig?.api_key) {
+        checkEvolutionServerStatus(evolutionConfig.server_url, evolutionConfig.api_key);
+      }
     } catch (error) {
       console.error("Error fetching provider config:", error);
     } finally {
       setLoadingProviders(false);
     }
+  };
+
+  const checkEvolutionServerStatus = async (serverUrl?: string, apiKey?: string) => {
+    const url = serverUrl || providerConfig.evolution_server_url;
+    const key = apiKey || providerConfig.evolution_api_key;
+    
+    if (!url || !key) {
+      setEvolutionStatus({ status: 'unknown' });
+      return;
+    }
+
+    setEvolutionStatus({ status: 'checking' });
+
+    try {
+      const cleanUrl = url.replace(/\/$/, '');
+      const response = await fetch(`${cleanUrl}/instance/fetchInstances`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': key,
+        },
+      });
+
+      if (response.ok) {
+        const instances = await response.json();
+        setEvolutionStatus({ 
+          status: 'online', 
+          instanceCount: Array.isArray(instances) ? instances.length : 0 
+        });
+      } else {
+        const errorText = await response.text();
+        setEvolutionStatus({ 
+          status: 'offline', 
+          error: `HTTP ${response.status}: ${errorText.slice(0, 100)}` 
+        });
+      }
+    } catch (error) {
+      console.error('Evolution status check error:', error);
+      setEvolutionStatus({ 
+        status: 'offline', 
+        error: error instanceof Error ? error.message : 'Erro de conexão' 
+      });
+    }
+  };
+
+  const checkEvolutionStatus = () => {
+    checkEvolutionServerStatus();
   };
 
   const saveProviderConfig = async () => {
@@ -252,6 +315,11 @@ const Settings = () => {
         title: "Configurações salvas",
         description: "As configurações de provedores foram atualizadas.",
       });
+
+      // Check Evolution status after saving
+      if (providerConfig.evolution_server_url && providerConfig.evolution_api_key) {
+        checkEvolutionStatus();
+      }
     } catch (error: any) {
       toast({
         title: "Erro ao salvar",
@@ -655,6 +723,62 @@ const Settings = () => {
                       </div>
                     </div>
                   </div>
+
+                  {/* Server Status Indicator */}
+                  {providerConfig.evolution_server_url && providerConfig.evolution_api_key && (
+                    <div className={`flex items-center justify-between p-3 rounded-lg border ${
+                      evolutionStatus.status === 'online' 
+                        ? 'bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-800'
+                        : evolutionStatus.status === 'offline'
+                        ? 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800'
+                        : evolutionStatus.status === 'checking'
+                        ? 'bg-yellow-50 dark:bg-yellow-950/30 border-yellow-200 dark:border-yellow-800'
+                        : 'bg-muted/50 border-border'
+                    }`}>
+                      <div className="flex items-center gap-2">
+                        {evolutionStatus.status === 'online' && (
+                          <CheckCircle className="h-4 w-4 text-green-600" />
+                        )}
+                        {evolutionStatus.status === 'offline' && (
+                          <XCircle className="h-4 w-4 text-red-600" />
+                        )}
+                        {evolutionStatus.status === 'checking' && (
+                          <Loader2 className="h-4 w-4 text-yellow-600 animate-spin" />
+                        )}
+                        {evolutionStatus.status === 'unknown' && (
+                          <AlertCircle className="h-4 w-4 text-muted-foreground" />
+                        )}
+                        <div>
+                          <span className={`text-sm font-medium ${
+                            evolutionStatus.status === 'online' ? 'text-green-700 dark:text-green-300'
+                            : evolutionStatus.status === 'offline' ? 'text-red-700 dark:text-red-300'
+                            : evolutionStatus.status === 'checking' ? 'text-yellow-700 dark:text-yellow-300'
+                            : 'text-muted-foreground'
+                          }`}>
+                            {evolutionStatus.status === 'online' && `Servidor Online (${evolutionStatus.instanceCount || 0} instâncias)`}
+                            {evolutionStatus.status === 'offline' && 'Servidor Offline'}
+                            {evolutionStatus.status === 'checking' && 'Verificando conexão...'}
+                            {evolutionStatus.status === 'unknown' && 'Status desconhecido'}
+                          </span>
+                          {evolutionStatus.error && (
+                            <p className="text-xs text-red-600 dark:text-red-400 mt-0.5">
+                              {evolutionStatus.error}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={checkEvolutionStatus}
+                        disabled={evolutionStatus.status === 'checking'}
+                        className="gap-1"
+                      >
+                        <RefreshCw className={`h-3 w-3 ${evolutionStatus.status === 'checking' ? 'animate-spin' : ''}`} />
+                        Testar
+                      </Button>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
 

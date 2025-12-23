@@ -174,6 +174,7 @@ serve(async (req) => {
           let content = "";
           let mediaUrl = null;
           let mediaMimeType = null;
+          let mediaBase64 = null;
 
           if (messageInfo.conversation) {
             content = messageInfo.conversation;
@@ -184,23 +185,88 @@ serve(async (req) => {
             content = messageInfo.imageMessage.caption || "";
             mediaUrl = messageInfo.imageMessage.url;
             mediaMimeType = messageInfo.imageMessage.mimetype || "image/jpeg";
+            mediaBase64 = messageInfo.imageMessage.base64 || payload.data?.base64;
           } else if (messageInfo.audioMessage) {
             messageType = messageInfo.audioMessage.ptt ? "ptt" : "audio";
             mediaUrl = messageInfo.audioMessage.url;
             mediaMimeType = messageInfo.audioMessage.mimetype || "audio/ogg";
+            mediaBase64 = messageInfo.audioMessage.base64 || payload.data?.base64;
           } else if (messageInfo.videoMessage) {
             messageType = "video";
             content = messageInfo.videoMessage.caption || "";
             mediaUrl = messageInfo.videoMessage.url;
             mediaMimeType = messageInfo.videoMessage.mimetype || "video/mp4";
+            mediaBase64 = messageInfo.videoMessage.base64 || payload.data?.base64;
           } else if (messageInfo.documentMessage) {
             messageType = "document";
             content = messageInfo.documentMessage.fileName || "";
             mediaUrl = messageInfo.documentMessage.url;
             mediaMimeType = messageInfo.documentMessage.mimetype;
+            mediaBase64 = messageInfo.documentMessage.base64 || payload.data?.base64;
           } else if (messageInfo.stickerMessage) {
             messageType = "sticker";
             mediaUrl = messageInfo.stickerMessage.url;
+            mediaBase64 = messageInfo.stickerMessage.base64 || payload.data?.base64;
+          }
+
+          // Try to download media if we have a URL but no base64
+          // Evolution API often provides media URLs that need to be fetched
+          if (mediaUrl && !mediaBase64 && instance.evolution_instance_name) {
+            try {
+              // Get Evolution API config
+              const { data: integration } = await supabase
+                .from("integrations")
+                .select("config")
+                .eq("workspace_id", instance.workspace_id)
+                .eq("type", "evolution")
+                .eq("is_active", true)
+                .single();
+
+              if (integration?.config) {
+                const config = integration.config as { server_url?: string; api_key?: string };
+                const evolutionServerUrl = config?.server_url?.replace(/\/$/, "");
+                const evolutionApiKey = config?.api_key;
+
+                if (evolutionServerUrl && evolutionApiKey) {
+                  // Try to get media base64 from Evolution
+                  const mediaEndpoint = `${evolutionServerUrl}/chat/getBase64FromMediaMessage/${instance.evolution_instance_name}`;
+                  
+                  const mediaResponse = await fetch(mediaEndpoint, {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                      "apikey": evolutionApiKey,
+                    },
+                    body: JSON.stringify({
+                      message: msg,
+                      convertToMp4: messageType === "video" || messageType === "audio" || messageType === "ptt"
+                    }),
+                  });
+
+                  if (mediaResponse.ok) {
+                    const mediaData = await mediaResponse.json();
+                    if (mediaData.base64) {
+                      mediaBase64 = mediaData.base64;
+                      console.log(`Media downloaded successfully: ${messageType}`);
+                    }
+                  }
+                }
+              }
+            } catch (mediaError) {
+              console.warn("Failed to download media:", mediaError);
+              // Continue without media - we still have the URL
+            }
+          }
+
+          // Build final media URL - prefer base64 data URI if available
+          let finalMediaUrl = mediaUrl;
+          if (mediaBase64) {
+            // Convert base64 to data URI if it's not already
+            if (!mediaBase64.startsWith("data:")) {
+              finalMediaUrl = `data:${mediaMimeType || "application/octet-stream"};base64,${mediaBase64}`;
+            } else {
+              finalMediaUrl = mediaBase64;
+            }
           }
 
           // Skip if outgoing and already in DB
@@ -290,13 +356,15 @@ serve(async (req) => {
               direction: isFromMe ? "outgoing" : "incoming",
               message_type: messageType,
               content: content,
-              media_url: mediaUrl,
+              media_url: finalMediaUrl,
               media_mime_type: mediaMimeType,
               status: isFromMe ? "sent" : "received",
               is_from_bot: false,
               metadata: { 
                 source: isFromMe ? "evolution_echo" : "evolution_webhook",
-                pushName: pushName
+                pushName: pushName,
+                originalMediaUrl: mediaUrl !== finalMediaUrl ? mediaUrl : undefined,
+                hasBase64: !!mediaBase64
               }
             });
 
