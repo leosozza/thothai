@@ -73,13 +73,17 @@ serve(async (req) => {
     console.log(`[MCP Discover] Connecting to: ${targetUrl}`);
 
     // MCP uses JSON-RPC over HTTP
+    // Some servers (like Bitrix24) require accepting both JSON and SSE
+    const requestHeaders = {
+      "Content-Type": "application/json",
+      "Accept": "application/json, text/event-stream",
+      ...authHeaders,
+    };
+
     // First, initialize the connection
     const initResponse = await fetch(targetUrl, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...authHeaders,
-      },
+      headers: requestHeaders,
       body: JSON.stringify({
         jsonrpc: "2.0",
         id: 1,
@@ -109,10 +113,7 @@ serve(async (req) => {
     // Send initialized notification
     await fetch(targetUrl, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...authHeaders,
-      },
+      headers: requestHeaders,
       body: JSON.stringify({
         jsonrpc: "2.0",
         method: "notifications/initialized",
@@ -122,10 +123,7 @@ serve(async (req) => {
     // Now list the available tools
     const toolsResponse = await fetch(targetUrl, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...authHeaders,
-      },
+      headers: requestHeaders,
       body: JSON.stringify({
         jsonrpc: "2.0",
         id: 2,
