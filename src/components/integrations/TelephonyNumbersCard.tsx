@@ -47,14 +47,14 @@ const providerIcons: Record<string, typeof Phone> = {
   wavoip: MessageSquare,
   twilio: Phone,
   telnyx: Phone,
-  falefacil: Phone,
+  sip: Phone,
 };
 
 const providerColors: Record<string, string> = {
   wavoip: "bg-green-500",
   twilio: "bg-red-500",
   telnyx: "bg-emerald-500",
-  falefacil: "bg-purple-500",
+  sip: "bg-purple-500",
 };
 
 export function TelephonyNumbersCard() {

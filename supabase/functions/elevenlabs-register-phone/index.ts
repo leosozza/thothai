@@ -78,10 +78,10 @@ switch (action) {
 
         let phoneFromProvider: string | null = null;
 
-        // For SIP providers (falefacil, twilio, telnyx), use config phone_number directly
-        if (provider.provider_type === "falefacil" && config.phone_number) {
+        // For SIP providers, use config phone_number directly
+        if (provider.provider_type === "sip" && config.phone_number) {
           phoneFromProvider = config.phone_number;
-          console.log(`[ElevenLabs Phone] Using phone from Fale Fácil config: ${phoneFromProvider}`);
+          console.log(`[ElevenLabs Phone] Using phone from SIP config: ${phoneFromProvider}`);
         }
 
         // For WaVoIP, fetch from API (endpoint/method may vary between deployments)
@@ -249,7 +249,7 @@ switch (action) {
               voice: true, 
               sms: false, 
               whatsapp: provider.provider_type === "wavoip",
-              sip: provider.provider_type === "falefacil" || provider.provider_type === "twilio" || provider.provider_type === "telnyx",
+              sip: provider.provider_type === "sip" || provider.provider_type === "twilio" || provider.provider_type === "telnyx",
             },
             is_active: true,
           })
