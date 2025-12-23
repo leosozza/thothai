@@ -222,7 +222,25 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    const request: AIGatewayRequest = await req.json();
+    const rawRequest = await req.json().catch(() => null) as any;
+
+    // Lightweight health check (used by the Diagnostics screen)
+    if (rawRequest?.action === "health_check") {
+      const responseTime = Date.now() - startTime;
+      return new Response(JSON.stringify({ status: "ok", function: "ai-gateway", response_time_ms: responseTime }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (!rawRequest) {
+      return new Response(JSON.stringify({ error: "Invalid JSON payload" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const request: AIGatewayRequest = rawRequest;
     const {
       messages,
       model: requestedModel,
