@@ -360,6 +360,74 @@ serve(async (req) => {
       }
     }
 
+    // === AUTO-REGISTER AUTOMATION ROBOT ===
+    console.log("=== AUTO-REGISTERING AUTOMATION ROBOT ===");
+    let robotRegistered = false;
+    let robotError: string | null = null;
+    
+    try {
+      // Call bizproc.robot.add to register the automation robot
+      const robotRegisterUrl = `${clientEndpoint}bizproc.robot.add?auth=${accessToken}`;
+      
+      const robotPayload = {
+        CODE: "thoth_send_whatsapp",
+        HANDLER: `${supabaseUrl}/functions/v1/bitrix24-robot-handler`,
+        AUTH_USER_ID: 1,
+        NAME: "Enviar WhatsApp (Thoth)",
+        DESCRIPTION: "Envia mensagem WhatsApp para o contato usando Thoth AI",
+        USE_SUBSCRIPTION: "Y",
+        PROPERTIES: {
+          PhoneNumber: {
+            Name: "Telefone",
+            Type: "string",
+            Required: "Y",
+            Default: "{{phone}}",
+          },
+          Message: {
+            Name: "Mensagem",
+            Type: "text",
+            Required: "Y",
+          },
+          InstanceId: {
+            Name: "ID da Instância WhatsApp",
+            Type: "string",
+            Required: "N",
+            Description: "Deixe vazio para usar a instância padrão",
+          },
+        },
+        RETURN_PROPERTIES: {
+          MessageId: {
+            Name: "ID da Mensagem",
+            Type: "string",
+          },
+          Status: {
+            Name: "Status",
+            Type: "string",
+          },
+        },
+      };
+
+      const robotResponse = await fetch(robotRegisterUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(robotPayload),
+      });
+
+      const robotResult = await robotResponse.json();
+      console.log("bizproc.robot.add result:", JSON.stringify(robotResult));
+
+      if (robotResult.result || (robotResult.error && robotResult.error_description?.includes("already"))) {
+        robotRegistered = true;
+        console.log("Robot registered successfully or already exists");
+      } else if (robotResult.error) {
+        robotError = robotResult.error_description || robotResult.error;
+        console.log("Robot registration error:", robotError);
+      }
+    } catch (robotErr) {
+      console.error("Error registering robot:", robotErr);
+      robotError = robotErr instanceof Error ? robotErr.message : "Unknown error";
+    }
+
     // Update integration config
     const updatedConfig = {
       ...integration.config,
@@ -369,6 +437,8 @@ serve(async (req) => {
       registered_at: new Date().toISOString(),
       activated: !activateResult.error,
       activated_line_id: 1,
+      robot_registered: robotRegistered,
+      robot_registered_at: robotRegistered ? new Date().toISOString() : null,
     };
 
     await supabase
@@ -382,10 +452,12 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({ 
         success: true, 
-        message: "Conector registrado e ativado via Marketplace OAuth",
+        message: "Conector e Robot registrados automaticamente via Marketplace OAuth",
         connector_id: finalConnectorId,
         registered: !registerResult.error || registerResult.error.includes("already"),
         activated: !activateResult.error,
+        robot_registered: robotRegistered,
+        robot_error: robotError,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
