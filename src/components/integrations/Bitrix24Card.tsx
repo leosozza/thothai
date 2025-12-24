@@ -177,6 +177,41 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
     }
   }, [isConnected, integration?.id, handleVerifyAndFix]);
 
+  // Manual connector registration
+  const [registeringConnector, setRegisteringConnector] = useState(false);
+  
+  const handleRegisterConnector = async () => {
+    if (!integration?.id) {
+      toast.error("Integração não encontrada");
+      return;
+    }
+
+    setRegisteringConnector(true);
+    
+    try {
+      const response = await supabase.functions.invoke("bitrix24-register", {
+        body: {
+          member_id: memberId || domain,
+          integration_id: integration.id,
+        }
+      });
+
+      if (response.data?.success || response.data?.connector_registered) {
+        toast.success("Conector registrado com sucesso! Verifique o Contact Center.");
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        await handleVerifyAndFix(true);
+        onRefresh();
+      } else {
+        toast.error(response.data?.error || "Erro ao registrar conector");
+      }
+    } catch (error) {
+      console.error("Error registering connector:", error);
+      toast.error("Erro ao registrar conector");
+    } finally {
+      setRegisteringConnector(false);
+    }
+  };
+
   const handleReconfigureFromZero = async () => {
     if (!integration?.id) {
       toast.error("Integração não encontrada");
@@ -523,7 +558,7 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
             <Button 
               variant="outline" 
               onClick={() => handleVerifyAndFix(false)}
-              disabled={verifying || reconfiguring}
+              disabled={verifying || reconfiguring || registeringConnector}
               className="flex-1"
             >
               {verifying ? (
@@ -535,9 +570,22 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
             </Button>
 
             <Button 
+              variant="secondary"
+              onClick={handleRegisterConnector}
+              disabled={registeringConnector || verifying || reconfiguring}
+              title="Registrar Conector no Contact Center"
+            >
+              {registeringConnector ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Zap className="h-4 w-4" />
+              )}
+            </Button>
+
+            <Button 
               variant="destructive"
               onClick={handleReconfigureFromZero}
-              disabled={reconfiguring || verifying}
+              disabled={reconfiguring || verifying || registeringConnector}
               size="icon"
               title="Reconfigurar do Zero"
             >
