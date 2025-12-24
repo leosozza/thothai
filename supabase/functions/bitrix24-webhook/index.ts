@@ -3889,6 +3889,7 @@ async function handleVerifyIntegration(supabase: any, payload: any, supabaseUrl:
     mappings: [] as any[],
     issues: [] as string[],
     recommendations: [] as string[],
+    warnings: [] as string[],
     fixes_applied: [] as string[],
   };
 
@@ -4229,12 +4230,34 @@ async function handleVerifyIntegration(supabase: any, payload: any, supabaseUrl:
                 ...config,
                 robot_registered: true,
                 robot_registered_at: new Date().toISOString(),
+                robot_scope_missing: false,
               },
               updated_at: new Date().toISOString(),
             })
             .eq("id", integration_id);
         } else if (robotResult.error) {
-          console.log("Robot registration error:", robotResult.error_description || robotResult.error);
+          const errorDesc = robotResult.error_description || robotResult.error;
+          console.log("Robot registration error:", errorDesc);
+          
+          // Check for insufficient_scope error
+          if (robotResult.error === "insufficient_scope" || errorDesc?.includes("insufficient_scope") || errorDesc?.includes("higher privileges")) {
+            console.log("DETECTED: Robot requires bizproc scope - marking in config");
+            verification.warnings.push("Robot de automação requer atualização de permissões no Marketplace");
+            
+            // Update config to mark scope as missing
+            await supabase
+              .from("integrations")
+              .update({
+                config: {
+                  ...config,
+                  robot_scope_missing: true,
+                  robot_scope_error: errorDesc,
+                  robot_scope_checked_at: new Date().toISOString(),
+                },
+                updated_at: new Date().toISOString(),
+              })
+              .eq("id", integration_id);
+          }
         }
       } catch (robotErr) {
         console.error("Error registering robot:", robotErr);
