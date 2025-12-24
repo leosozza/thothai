@@ -296,46 +296,86 @@ serve(async (req) => {
       console.log("Registration error (non-duplicate):", registerResult.error);
     }
 
-    // Activate the connector on line 1
-    const activateUrl = `${clientEndpoint}imconnector.activate?auth=${accessToken}`;
-    console.log("Calling imconnector.activate...");
+    // === DETECT AVAILABLE LINES ===
+    console.log("=== DETECTING AVAILABLE OPEN LINES ===");
+    let availableLines: number[] = [];
+    let activatedLineId: number | null = null;
     
-    const activateResponse = await fetch(activateUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        CONNECTOR: finalConnectorId,
-        LINE: 1,
-        ACTIVE: 1,
-      }),
-    });
+    try {
+      const linesListUrl = `${clientEndpoint}imopenlines.config.list.get?auth=${accessToken}`;
+      const linesResponse = await fetch(linesListUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ auth: accessToken }),
+      });
+      const linesResult = await linesResponse.json();
+      console.log("imopenlines.config.list.get result:", JSON.stringify(linesResult));
+      
+      if (linesResult.result && Array.isArray(linesResult.result)) {
+        availableLines = linesResult.result.map((line: any) => parseInt(line.ID, 10)).filter((id: number) => !isNaN(id));
+        console.log("Available lines:", availableLines);
+      }
+    } catch (e) {
+      console.error("Error fetching lines:", e);
+    }
 
-    const activateResult = await activateResponse.json();
-    console.log("imconnector.activate result:", JSON.stringify(activateResult));
+    // If no lines found, default to [1]
+    if (availableLines.length === 0) {
+      availableLines = [1];
+      console.log("No lines found, defaulting to line 1");
+    }
 
-    // Set connector data with webhook URL
     const eventsUrl = `${supabaseUrl}/functions/v1/bitrix24-events`;
-    const dataSetUrl = `${clientEndpoint}imconnector.connector.data.set?auth=${accessToken}`;
-    
-    console.log("Calling imconnector.connector.data.set...");
-    
-    const dataSetResponse = await fetch(dataSetUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        CONNECTOR: finalConnectorId,
-        LINE: 1,
-        DATA: {
-          id: `${finalConnectorId}_line_1`,
-          url: eventsUrl,
-          url_im: eventsUrl,
-          name: "Thoth WhatsApp",
-        },
-      }),
-    });
 
-    const dataSetResult = await dataSetResponse.json();
-    console.log("imconnector.connector.data.set result:", JSON.stringify(dataSetResult));
+    // Activate and configure connector on ALL available lines
+    for (const lineId of availableLines) {
+      console.log(`=== Activating connector on line ${lineId} ===`);
+      
+      // Activate the connector
+      const activateUrl = `${clientEndpoint}imconnector.activate?auth=${accessToken}`;
+      try {
+        const activateResponse = await fetch(activateUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            CONNECTOR: finalConnectorId,
+            LINE: lineId,
+            ACTIVE: 1,
+          }),
+        });
+        const activateResult = await activateResponse.json();
+        console.log(`imconnector.activate line ${lineId} result:`, JSON.stringify(activateResult));
+        
+        if (!activateResult.error) {
+          activatedLineId = lineId;
+        }
+      } catch (e) {
+        console.error(`Error activating on line ${lineId}:`, e);
+      }
+
+      // Set connector data with webhook URL
+      const dataSetUrl = `${clientEndpoint}imconnector.connector.data.set?auth=${accessToken}`;
+      try {
+        const dataSetResponse = await fetch(dataSetUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            CONNECTOR: finalConnectorId,
+            LINE: lineId,
+            DATA: {
+              id: `${finalConnectorId}_line_${lineId}`,
+              url: eventsUrl,
+              url_im: eventsUrl,
+              name: "Thoth WhatsApp",
+            },
+          }),
+        });
+        const dataSetResult = await dataSetResponse.json();
+        console.log(`imconnector.connector.data.set line ${lineId} result:`, JSON.stringify(dataSetResult));
+      } catch (e) {
+        console.error(`Error setting data on line ${lineId}:`, e);
+      }
+    }
 
     // Bind events
     const events = [
@@ -483,8 +523,9 @@ serve(async (req) => {
       instance_id: instance_id || integration.config.instance_id,
       registered: true,
       registered_at: new Date().toISOString(),
-      activated: !activateResult.error,
-      activated_line_id: 1,
+      activated: activatedLineId !== null,
+      activated_line_id: activatedLineId || availableLines[0] || 1,
+      available_lines: availableLines,
       robot_registered: robotRegistered,
       robot_registered_at: robotRegistered ? new Date().toISOString() : null,
       robot_scope_missing: robotScopeMissing,
@@ -509,7 +550,8 @@ serve(async (req) => {
         message: "Conector, Robot e Provedor SMS registrados automaticamente via Marketplace OAuth",
         connector_id: finalConnectorId,
         registered: !registerResult.error || registerResult.error.includes("already"),
-        activated: !activateResult.error,
+        activated: activatedLineId !== null,
+        activated_lines: availableLines,
         robot_registered: robotRegistered,
         robot_error: robotError,
         robot_scope_missing: robotScopeMissing,
