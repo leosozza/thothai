@@ -815,6 +815,47 @@ serve(async (req) => {
         }
       }
       
+      // === AUTO-TRIGGER CONNECTOR REGISTRATION ===
+      // If integration exists but connector is not active, call bitrix24-register
+      if (integration) {
+        const config = integration.config || {};
+        const connectorRegistered = config.connector_registered === true;
+        const connectorActive = config.activated === true;
+        
+        if (!connectorRegistered || !connectorActive) {
+          console.log("=== AUTO-TRIGGERING CONNECTOR REGISTRATION ===");
+          console.log("connector_registered:", connectorRegistered, "activated:", connectorActive);
+          
+          try {
+            // Call bitrix24-register to register/activate the connector
+            const registerResponse = await fetch(`${supabaseUrl}/functions/v1/bitrix24-register`, {
+              method: "POST",
+              headers: { 
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+              },
+              body: JSON.stringify({
+                member_id: config.member_id || memberId,
+                integration_id: integration.id,
+              }),
+            });
+            
+            const registerResult = await registerResponse.json();
+            console.log("Auto-register result:", JSON.stringify(registerResult));
+            
+            if (registerResult.success || registerResult.connector_registered) {
+              console.log("✅ Auto-registration successful!");
+            } else {
+              console.log("⚠️ Auto-registration returned:", registerResult.error || "no success flag");
+            }
+          } catch (regError) {
+            console.error("Error calling bitrix24-register:", regError);
+          }
+        } else {
+          console.log("Connector already registered and active, skipping auto-registration");
+        }
+      }
+      
       // CRITICAL: Do NOT use 302 redirect - return HTML with BX24.installFinish() and JS redirect
       // 302 redirects break the Bitrix24 iframe flow
       const redirectUrl = `${supabaseUrl}/functions/v1/bitrix24-connector-settings?${new URLSearchParams(body as any).toString()}`;
