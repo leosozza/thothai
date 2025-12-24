@@ -55,6 +55,12 @@ import {
   Settings,
   Loader2,
   Copy,
+  MessageCircle,
+  Phone,
+  PhoneCall,
+  Mail,
+  UserCheck,
+  Send,
 } from "lucide-react";
 
 interface Flow {
@@ -79,10 +85,16 @@ const triggerTypes = [
 
 const nodeTypes = [
   { type: "message", label: "Mensagem", icon: MessageSquare, color: "#3b82f6" },
-  { type: "ai_response", label: "Resposta IA", icon: Bot, color: "#8b5cf6" },
+  { type: "whatsapp", label: "Enviar WhatsApp", icon: MessageCircle, color: "#25D366" },
+  { type: "sms", label: "Enviar SMS", icon: Phone, color: "#0ea5e9" },
+  { type: "call", label: "Fazer Ligação", icon: PhoneCall, color: "#8b5cf6" },
+  { type: "email", label: "Enviar Email", icon: Mail, color: "#f97316" },
+  { type: "ai_response", label: "Resposta IA", icon: Bot, color: "#a855f7" },
   { type: "condition", label: "Condição", icon: GitBranch, color: "#f59e0b" },
   { type: "delay", label: "Delay", icon: Clock, color: "#6b7280" },
   { type: "action", label: "Ação", icon: Zap, color: "#10b981" },
+  { type: "transfer_to_human", label: "Transferir Humano", icon: UserCheck, color: "#ec4899" },
+  { type: "transfer_to_ai", label: "Voltar para IA", icon: Bot, color: "#14b8a6" },
 ];
 
 const initialNodes: Node[] = [

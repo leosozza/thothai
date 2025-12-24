@@ -143,3 +143,9 @@ verify_jwt = false
 
 [functions.assign-conversation]
 verify_jwt = true
+
+[functions.bitrix24-robot-register]
+verify_jwt = false
+
+[functions.bitrix24-robot-handler]
+verify_jwt = false

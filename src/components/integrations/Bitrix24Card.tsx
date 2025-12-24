@@ -17,6 +17,8 @@ import {
   XCircle,
   RotateCcw,
   ShoppingCart,
+  Bot,
+  Zap,
 } from "lucide-react";
 
 interface Integration {
@@ -67,6 +69,7 @@ interface VerificationResult {
 export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }: Bitrix24CardProps) {
   const [verifying, setVerifying] = useState(false);
   const [reconfiguring, setReconfiguring] = useState(false);
+  const [registeringRobot, setRegisteringRobot] = useState(false);
   const [verification, setVerification] = useState<VerificationResult | null>(null);
   const [isHealthy, setIsHealthy] = useState<boolean | null>(null);
   const [summary, setSummary] = useState<string>("");
@@ -77,6 +80,7 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
   const isConnected = integration?.is_active && config.auto_setup_completed;
   const domain = config.domain as string || "";
   const instanceId = config.instance_id as string || "";
+  const robotRegistered = config.robot_registered as boolean || false;
   
   const linkedInstance = instances.find(i => i.id === instanceId);
 
@@ -332,6 +336,46 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
               </ul>
             </div>
           )}
+
+          {/* Robot for Automations */}
+          <div className={`rounded-lg p-3 border ${robotRegistered ? 'bg-green-500/10 border-green-500/20' : 'bg-muted/50 border-border'}`}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Zap className={`h-4 w-4 ${robotRegistered ? 'text-green-500' : 'text-muted-foreground'}`} />
+                <div>
+                  <p className="text-sm font-medium">Robot para Automações</p>
+                  <p className="text-xs text-muted-foreground">
+                    {robotRegistered ? 'Ativo - Use "Enviar WhatsApp" nas automações' : 'Não registrado'}
+                  </p>
+                </div>
+              </div>
+              <Button
+                variant={robotRegistered ? "outline" : "default"}
+                size="sm"
+                disabled={registeringRobot}
+                onClick={async () => {
+                  setRegisteringRobot(true);
+                  try {
+                    const response = await supabase.functions.invoke("bitrix24-robot-register", {
+                      body: { integration_id: integration?.id }
+                    });
+                    if (response.data?.success) {
+                      toast.success(response.data.message || "Robot registrado!");
+                      onRefresh();
+                    } else {
+                      toast.error(response.data?.error || "Erro ao registrar robot");
+                    }
+                  } catch (e) {
+                    toast.error("Erro ao registrar robot");
+                  } finally {
+                    setRegisteringRobot(false);
+                  }
+                }}
+              >
+                {registeringRobot ? <Loader2 className="h-4 w-4 animate-spin" /> : robotRegistered ? "Atualizar" : "Ativar"}
+              </Button>
+            </div>
+          </div>
 
           {/* How to use */}
           <Alert>
