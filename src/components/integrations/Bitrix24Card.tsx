@@ -69,7 +69,7 @@ interface VerificationResult {
 export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }: Bitrix24CardProps) {
   const [verifying, setVerifying] = useState(false);
   const [reconfiguring, setReconfiguring] = useState(false);
-  const [registeringRobot, setRegisteringRobot] = useState(false);
+  const [_registeringRobot, _setRegisteringRobot] = useState(false); // Deprecated - now auto
   const [verification, setVerification] = useState<VerificationResult | null>(null);
   const [isHealthy, setIsHealthy] = useState<boolean | null>(null);
   const [summary, setSummary] = useState<string>("");
@@ -337,43 +337,29 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
             </div>
           )}
 
-          {/* Robot for Automations */}
-          <div className={`rounded-lg p-3 border ${robotRegistered ? 'bg-green-500/10 border-green-500/20' : 'bg-muted/50 border-border'}`}>
+          {/* Robot for Automations - Auto-registered status */}
+          <div className={`rounded-lg p-3 border ${robotRegistered ? 'bg-green-500/10 border-green-500/20' : 'bg-yellow-500/10 border-yellow-500/20'}`}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Zap className={`h-4 w-4 ${robotRegistered ? 'text-green-500' : 'text-muted-foreground'}`} />
+                <Zap className={`h-4 w-4 ${robotRegistered ? 'text-green-500' : 'text-yellow-500'}`} />
                 <div>
                   <p className="text-sm font-medium">Robot para Automações</p>
                   <p className="text-xs text-muted-foreground">
-                    {robotRegistered ? 'Ativo - Use "Enviar WhatsApp" nas automações' : 'Não registrado'}
+                    {robotRegistered 
+                      ? 'Use "Enviar WhatsApp (Thoth)" nas automações do CRM' 
+                      : 'Será ativado automaticamente na próxima verificação'}
                   </p>
                 </div>
               </div>
-              <Button
-                variant={robotRegistered ? "outline" : "default"}
-                size="sm"
-                disabled={registeringRobot}
-                onClick={async () => {
-                  setRegisteringRobot(true);
-                  try {
-                    const response = await supabase.functions.invoke("bitrix24-robot-register", {
-                      body: { integration_id: integration?.id }
-                    });
-                    if (response.data?.success) {
-                      toast.success(response.data.message || "Robot registrado!");
-                      onRefresh();
-                    } else {
-                      toast.error(response.data?.error || "Erro ao registrar robot");
-                    }
-                  } catch (e) {
-                    toast.error("Erro ao registrar robot");
-                  } finally {
-                    setRegisteringRobot(false);
-                  }
-                }}
+              <Badge 
+                variant="outline" 
+                className={robotRegistered 
+                  ? 'bg-green-500/10 text-green-500 border-green-500/20' 
+                  : 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20'
+                }
               >
-                {registeringRobot ? <Loader2 className="h-4 w-4 animate-spin" /> : robotRegistered ? "Atualizar" : "Ativar"}
-              </Button>
+                {robotRegistered ? 'Ativo' : 'Pendente'}
+              </Badge>
             </div>
           </div>
 
