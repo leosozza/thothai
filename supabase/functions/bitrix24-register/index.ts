@@ -364,6 +364,7 @@ serve(async (req) => {
     console.log("=== AUTO-REGISTERING AUTOMATION ROBOT ===");
     let robotRegistered = false;
     let robotError: string | null = null;
+    let robotScopeMissing = false;
     
     try {
       // Call bizproc.robot.add to register the automation robot
@@ -421,11 +422,58 @@ serve(async (req) => {
         console.log("Robot registered successfully or already exists");
       } else if (robotResult.error) {
         robotError = robotResult.error_description || robotResult.error;
+        // Check for insufficient_scope error
+        if (robotResult.error === "insufficient_scope" || robotError?.toLowerCase().includes("scope")) {
+          robotScopeMissing = true;
+        }
         console.log("Robot registration error:", robotError);
       }
     } catch (robotErr) {
       console.error("Error registering robot:", robotErr);
       robotError = robotErr instanceof Error ? robotErr.message : "Unknown error";
+    }
+
+    // === AUTO-REGISTER SMS PROVIDER ===
+    console.log("=== AUTO-REGISTERING SMS PROVIDER ===");
+    let smsProviderRegistered = false;
+    let smsProviderError: string | null = null;
+    let smsProviderScopeMissing = false;
+    
+    try {
+      // Call messageservice.sender.add to register the SMS provider
+      const smsRegisterUrl = `${clientEndpoint}messageservice.sender.add?auth=${accessToken}`;
+      
+      const smsPayload = {
+        CODE: "thoth_whatsapp_sms",
+        TYPE: "SMS",
+        NAME: "Thoth WhatsApp",
+        DESCRIPTION: "Envio de mensagens WhatsApp via Thoth.ai",
+        HANDLER: `${supabaseUrl}/functions/v1/bitrix24-sms-handler`,
+      };
+
+      const smsResponse = await fetch(smsRegisterUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(smsPayload),
+      });
+
+      const smsResult = await smsResponse.json();
+      console.log("messageservice.sender.add result:", JSON.stringify(smsResult));
+
+      if (smsResult.result || (smsResult.error && (smsResult.error_description?.includes("already") || smsResult.error_description?.includes("exist")))) {
+        smsProviderRegistered = true;
+        console.log("SMS Provider registered successfully or already exists");
+      } else if (smsResult.error) {
+        smsProviderError = smsResult.error_description || smsResult.error;
+        // Check for insufficient_scope error
+        if (smsResult.error === "insufficient_scope" || smsProviderError?.toLowerCase().includes("scope")) {
+          smsProviderScopeMissing = true;
+        }
+        console.log("SMS Provider registration error:", smsProviderError);
+      }
+    } catch (smsErr) {
+      console.error("Error registering SMS Provider:", smsErr);
+      smsProviderError = smsErr instanceof Error ? smsErr.message : "Unknown error";
     }
 
     // Update integration config
@@ -439,6 +487,12 @@ serve(async (req) => {
       activated_line_id: 1,
       robot_registered: robotRegistered,
       robot_registered_at: robotRegistered ? new Date().toISOString() : null,
+      robot_scope_missing: robotScopeMissing,
+      robot_scope_error: robotError,
+      sms_provider_registered: smsProviderRegistered,
+      sms_provider_registered_at: smsProviderRegistered ? new Date().toISOString() : null,
+      sms_provider_scope_missing: smsProviderScopeMissing,
+      sms_provider_scope_error: smsProviderError,
     };
 
     await supabase
@@ -452,12 +506,16 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({ 
         success: true, 
-        message: "Conector e Robot registrados automaticamente via Marketplace OAuth",
+        message: "Conector, Robot e Provedor SMS registrados automaticamente via Marketplace OAuth",
         connector_id: finalConnectorId,
         registered: !registerResult.error || registerResult.error.includes("already"),
         activated: !activateResult.error,
         robot_registered: robotRegistered,
         robot_error: robotError,
+        robot_scope_missing: robotScopeMissing,
+        sms_provider_registered: smsProviderRegistered,
+        sms_provider_error: smsProviderError,
+        sms_provider_scope_missing: smsProviderScopeMissing,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

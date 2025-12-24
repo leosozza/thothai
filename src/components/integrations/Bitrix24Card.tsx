@@ -19,6 +19,7 @@ import {
   ShoppingCart,
   Bot,
   Zap,
+  MessageSquare,
 } from "lucide-react";
 
 interface Integration {
@@ -82,6 +83,8 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
   const instanceId = config.instance_id as string || "";
   const robotRegistered = config.robot_registered as boolean || false;
   const robotScopeMissing = config.robot_scope_missing as boolean || false;
+  const smsProviderRegistered = config.sms_provider_registered as boolean || false;
+  const smsProviderScopeMissing = config.sms_provider_scope_missing as boolean || false;
   const memberId = config.member_id as string || "";
   
   const linkedInstance = instances.find(i => i.id === instanceId);
@@ -114,8 +117,8 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
     const redirectUri = `https://ybqwwipwimnkonnebbys.supabase.co/functions/v1/bitrix24-install?reauth=true`;
     const state = encodeURIComponent(domain);
     
-    // Request extended scopes including bizproc
-    const scopes = "crm,user,imopenlines,imconnector,im,bizproc";
+    // Request extended scopes including bizproc and messageservice
+    const scopes = "crm,user,imopenlines,imconnector,im,bizproc,messageservice";
     
     const authUrl = `https://${domain}/oauth/authorize/?client_id=${clientId}&response_type=code&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}&scope=${scopes}`;
     
@@ -430,12 +433,72 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
             </div>
           </div>
 
+          {/* SMS Provider Status */}
+          <div className={`rounded-lg p-3 border ${
+            smsProviderRegistered 
+              ? 'bg-green-500/10 border-green-500/20' 
+              : smsProviderScopeMissing 
+                ? 'bg-orange-500/10 border-orange-500/20'
+                : 'bg-yellow-500/10 border-yellow-500/20'
+          }`}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <MessageSquare className={`h-4 w-4 ${
+                  smsProviderRegistered 
+                    ? 'text-green-500' 
+                    : smsProviderScopeMissing 
+                      ? 'text-orange-500'
+                      : 'text-yellow-500'
+                }`} />
+                <div>
+                  <p className="text-sm font-medium">Provedor SMS/WhatsApp</p>
+                  <p className="text-xs text-muted-foreground">
+                    {smsProviderRegistered 
+                      ? 'Envie WhatsApp ao criar SMS no CRM' 
+                      : smsProviderScopeMissing
+                        ? 'Requer escopo "messageservice" no Marketplace'
+                        : 'Será ativado automaticamente na próxima verificação'}
+                  </p>
+                </div>
+              </div>
+              {smsProviderScopeMissing && !smsProviderRegistered ? (
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleReinstall}
+                    className="bg-orange-500/10 text-orange-600 border-orange-500/20 hover:bg-orange-500/20"
+                  >
+                    <RotateCcw className="h-3 w-3 mr-1" />
+                    Reinstalar App
+                  </Button>
+                </div>
+              ) : (
+                <Badge 
+                  variant="outline" 
+                  className={smsProviderRegistered 
+                    ? 'bg-green-500/10 text-green-500 border-green-500/20' 
+                    : 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20'
+                  }
+                >
+                  {smsProviderRegistered ? 'Ativo' : 'Pendente'}
+                </Badge>
+              )}
+            </div>
+          </div>
+
           {/* Reinstall Notice - Only show when scope is missing */}
-          {robotScopeMissing && !robotRegistered && (
+          {(robotScopeMissing && !robotRegistered) || (smsProviderScopeMissing && !smsProviderRegistered) ? (
             <Alert className="border-orange-500/30 bg-orange-500/5">
               <AlertTriangle className="h-4 w-4 text-orange-500" />
               <AlertDescription className="text-sm">
-                <strong>Permissões desatualizadas:</strong> O escopo <code className="bg-muted px-1 rounded">bizproc</code> é necessário para registrar o robot de automação.{" "}
+                <strong>Permissões desatualizadas:</strong>{" "}
+                {robotScopeMissing && !robotRegistered && (
+                  <>O escopo <code className="bg-muted px-1 rounded">bizproc</code> é necessário para o robot de automação. </>
+                )}
+                {smsProviderScopeMissing && !smsProviderRegistered && (
+                  <>O escopo <code className="bg-muted px-1 rounded">messageservice</code> é necessário para o provedor SMS. </>
+                )}
                 <button 
                   onClick={handleReinstall}
                   className="text-orange-600 hover:underline font-medium"
@@ -445,7 +508,7 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
                 no seu portal Bitrix24 e obter as novas permissões.
               </AlertDescription>
             </Alert>
-          )}
+          ) : null}
 
           {/* How to use */}
           <Alert>
