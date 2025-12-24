@@ -9,6 +9,24 @@ const corsHeaders = {
 // Thoth Ibis Icon SVG (WhatsApp-style green background with ibis bird)
 const THOTH_IBIS_ICON_SVG = `data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%2325D366'/%3E%3Ccircle cx='50' cy='45' r='30' fill='none' stroke='white' stroke-width='4'/%3E%3Cpath d='M35 75 L50 90 L50 75' fill='white'/%3E%3Cg fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M50 65 C42 62, 36 52, 38 40 C40 30, 46 26, 52 26 C58 26, 64 32, 64 42 C64 52, 58 62, 50 65'/%3E%3Cpath d='M48 26 C45 22, 38 18, 32 14'/%3E%3Ccircle cx='30' cy='12' r='5'/%3E%3Cpath d='M25 12 C22 16, 18 22, 16 28'/%3E%3Ccircle cx='29' cy='11' r='1.5' fill='white'/%3E%3C/g%3E%3C/svg%3E`;
 
+// Disabled icon (gray version)
+const THOTH_IBIS_ICON_DISABLED_SVG = `data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%23999999'/%3E%3Ccircle cx='50' cy='45' r='30' fill='none' stroke='white' stroke-width='4'/%3E%3Cpath d='M35 75 L50 90 L50 75' fill='white'/%3E%3Cg fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M50 65 C42 62, 36 52, 38 40 C40 30, 46 26, 52 26 C58 26, 64 32, 64 42 C64 52, 58 62, 50 65'/%3E%3Cpath d='M48 26 C45 22, 38 18, 32 14'/%3E%3Ccircle cx='30' cy='12' r='5'/%3E%3Cpath d='M25 12 C22 16, 18 22, 16 28'/%3E%3Ccircle cx='29' cy='11' r='1.5' fill='white'/%3E%3C/g%3E%3C/svg%3E`;
+
+// Complete icon objects for imconnector.register API (as in bitrix24-webhook)
+const THOTH_CONNECTOR_ICON = {
+  DATA_IMAGE: THOTH_IBIS_ICON_SVG,
+  COLOR: "#25D366",
+  SIZE: "90%",
+  POSITION: "center"
+};
+
+const THOTH_CONNECTOR_ICON_DISABLED = {
+  DATA_IMAGE: THOTH_IBIS_ICON_DISABLED_SVG,
+  COLOR: "#999999",
+  SIZE: "90%",
+  POSITION: "center"
+};
+
 // Helper to refresh Bitrix24 OAuth token
 async function refreshBitrixToken(integration: any, supabase: any): Promise<string | null> {
   const config = integration.config;
@@ -281,9 +299,8 @@ serve(async (req) => {
       body: JSON.stringify({
         ID: finalConnectorId,
         NAME: "Thoth WhatsApp",
-        ICON: {
-          DATA_IMAGE: THOTH_IBIS_ICON_SVG
-        },
+        ICON: THOTH_CONNECTOR_ICON,
+        ICON_DISABLED: THOTH_CONNECTOR_ICON_DISABLED,
         PLACEMENT_HANDLER: `${supabaseUrl}/functions/v1/bitrix24-connector-settings`,
       }),
     });
