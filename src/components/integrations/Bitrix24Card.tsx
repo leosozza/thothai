@@ -81,8 +81,29 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
   const domain = config.domain as string || "";
   const instanceId = config.instance_id as string || "";
   const robotRegistered = config.robot_registered as boolean || false;
+  const robotScopeMissing = config.robot_scope_missing as boolean || false;
   
   const linkedInstance = instances.find(i => i.id === instanceId);
+
+  // Handle re-authorization for missing scopes
+  const handleReauthorize = useCallback(() => {
+    if (!domain) {
+      toast.error("Domínio do portal não encontrado");
+      return;
+    }
+    
+    const clientId = "local.67613879b2c3a8.48187943"; // Thoth app client ID
+    const redirectUri = `https://ybqwwipwimnkonnebbys.supabase.co/functions/v1/bitrix24-install?reauth=true`;
+    const state = encodeURIComponent(domain);
+    
+    // Request extended scopes including bizproc
+    const scopes = "crm,user,imopenlines,imconnector,im,bizproc";
+    
+    const authUrl = `https://${domain}/oauth/authorize/?client_id=${clientId}&response_type=code&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}&scope=${scopes}`;
+    
+    window.open(authUrl, "_blank");
+    toast.info("Após autorizar, clique em 'Verificar e Corrigir' para ativar o robot");
+  }, [domain]);
 
   // Auto-verify AND auto-fix on mount (aggressive auto-correction)
   const handleVerifyAndFix = useCallback(async (silent = false) => {
@@ -338,28 +359,54 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
           )}
 
           {/* Robot for Automations - Auto-registered status */}
-          <div className={`rounded-lg p-3 border ${robotRegistered ? 'bg-green-500/10 border-green-500/20' : 'bg-yellow-500/10 border-yellow-500/20'}`}>
+          <div className={`rounded-lg p-3 border ${
+            robotRegistered 
+              ? 'bg-green-500/10 border-green-500/20' 
+              : robotScopeMissing 
+                ? 'bg-orange-500/10 border-orange-500/20'
+                : 'bg-yellow-500/10 border-yellow-500/20'
+          }`}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
-                <Zap className={`h-4 w-4 ${robotRegistered ? 'text-green-500' : 'text-yellow-500'}`} />
+                <Zap className={`h-4 w-4 ${
+                  robotRegistered 
+                    ? 'text-green-500' 
+                    : robotScopeMissing 
+                      ? 'text-orange-500'
+                      : 'text-yellow-500'
+                }`} />
                 <div>
                   <p className="text-sm font-medium">Robot para Automações</p>
                   <p className="text-xs text-muted-foreground">
                     {robotRegistered 
                       ? 'Use "Enviar WhatsApp (Thoth)" nas automações do CRM' 
-                      : 'Será ativado automaticamente na próxima verificação'}
+                      : robotScopeMissing
+                        ? 'Requer atualização de permissões no Marketplace'
+                        : 'Será ativado automaticamente na próxima verificação'}
                   </p>
                 </div>
               </div>
-              <Badge 
-                variant="outline" 
-                className={robotRegistered 
-                  ? 'bg-green-500/10 text-green-500 border-green-500/20' 
-                  : 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20'
-                }
-              >
-                {robotRegistered ? 'Ativo' : 'Pendente'}
-              </Badge>
+              {robotScopeMissing && !robotRegistered ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleReauthorize}
+                  className="bg-orange-500/10 text-orange-600 border-orange-500/20 hover:bg-orange-500/20"
+                >
+                  <ExternalLink className="h-3 w-3 mr-1" />
+                  Atualizar Permissões
+                </Button>
+              ) : (
+                <Badge 
+                  variant="outline" 
+                  className={robotRegistered 
+                    ? 'bg-green-500/10 text-green-500 border-green-500/20' 
+                    : 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20'
+                  }
+                >
+                  {robotRegistered ? 'Ativo' : 'Pendente'}
+                </Badge>
+              )}
             </div>
           </div>
 
