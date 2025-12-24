@@ -82,10 +82,28 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
   const instanceId = config.instance_id as string || "";
   const robotRegistered = config.robot_registered as boolean || false;
   const robotScopeMissing = config.robot_scope_missing as boolean || false;
+  const memberId = config.member_id as string || "";
   
   const linkedInstance = instances.find(i => i.id === instanceId);
 
-  // Handle re-authorization for missing scopes
+  // Build reinstall URL for the app
+  const getReinstallUrl = useCallback(() => {
+    if (domain) {
+      // Direct reinstall URL for Bitrix24 Marketplace app
+      return `https://${domain}/market/detail/thoth24.thoth_whatsapp/`;
+    }
+    // Fallback to general marketplace
+    return "https://www.bitrix24.com.br/apps/app/thoth24.thoth_whatsapp/";
+  }, [domain]);
+
+  // Handle reinstall when permissions are outdated
+  const handleReinstall = useCallback(() => {
+    const reinstallUrl = getReinstallUrl();
+    toast.info("Reinstale o aplicativo para obter as novas permissões. Após reinstalar, clique em 'Verificar e Corrigir'.");
+    window.open(reinstallUrl, "_blank");
+  }, [getReinstallUrl]);
+
+  // Handle re-authorization for missing scopes (OAuth flow)
   const handleReauthorize = useCallback(() => {
     if (!domain) {
       toast.error("Domínio do portal não encontrado");
@@ -387,15 +405,17 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
                 </div>
               </div>
               {robotScopeMissing && !robotRegistered ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleReauthorize}
-                  className="bg-orange-500/10 text-orange-600 border-orange-500/20 hover:bg-orange-500/20"
-                >
-                  <ExternalLink className="h-3 w-3 mr-1" />
-                  Atualizar Permissões
-                </Button>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleReinstall}
+                    className="bg-orange-500/10 text-orange-600 border-orange-500/20 hover:bg-orange-500/20"
+                  >
+                    <RotateCcw className="h-3 w-3 mr-1" />
+                    Reinstalar App
+                  </Button>
+                </div>
               ) : (
                 <Badge 
                   variant="outline" 
@@ -409,6 +429,23 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
               )}
             </div>
           </div>
+
+          {/* Reinstall Notice - Only show when scope is missing */}
+          {robotScopeMissing && !robotRegistered && (
+            <Alert className="border-orange-500/30 bg-orange-500/5">
+              <AlertTriangle className="h-4 w-4 text-orange-500" />
+              <AlertDescription className="text-sm">
+                <strong>Permissões desatualizadas:</strong> O escopo <code className="bg-muted px-1 rounded">bizproc</code> é necessário para registrar o robot de automação.{" "}
+                <button 
+                  onClick={handleReinstall}
+                  className="text-orange-600 hover:underline font-medium"
+                >
+                  Clique aqui para reinstalar o app
+                </button>{" "}
+                no seu portal Bitrix24 e obter as novas permissões.
+              </AlertDescription>
+            </Alert>
+          )}
 
           {/* How to use */}
           <Alert>
