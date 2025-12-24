@@ -816,43 +816,45 @@ serve(async (req) => {
       }
       
       // === AUTO-TRIGGER CONNECTOR REGISTRATION ===
-      // If integration exists but connector is not active, call bitrix24-register
+      // If integration exists but connector is not active in Bitrix24, call bitrix24-register
       if (integration) {
         const config = integration.config || {};
-        const connectorRegistered = config.connector_registered === true;
-        const connectorActive = config.activated === true;
-        
-        if (!connectorRegistered || !connectorActive) {
+
+        const connectorRegistered = config.connector_registered === true || config.registered === true;
+        const connectorActivated = config.activated === true;
+        const connectorActiveInBitrix = config.connector_active === true;
+
+        const shouldAutoRegister = !connectorRegistered || !connectorActivated || !connectorActiveInBitrix;
+
+        if (shouldAutoRegister) {
           console.log("=== AUTO-TRIGGERING CONNECTOR REGISTRATION ===");
-          console.log("connector_registered:", connectorRegistered, "activated:", connectorActive);
-          
+          console.log(
+            "connector_registered:",
+            connectorRegistered,
+            "activated:",
+            connectorActivated,
+            "connector_active:",
+            connectorActiveInBitrix,
+          );
+
           try {
-            // Call bitrix24-register to register/activate the connector
-            const registerResponse = await fetch(`${supabaseUrl}/functions/v1/bitrix24-register`, {
-              method: "POST",
-              headers: { 
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
-              },
-              body: JSON.stringify({
+            const { data, error } = await supabase.functions.invoke("bitrix24-register", {
+              body: {
                 member_id: config.member_id || memberId,
                 integration_id: integration.id,
-              }),
+              },
             });
-            
-            const registerResult = await registerResponse.json();
-            console.log("Auto-register result:", JSON.stringify(registerResult));
-            
-            if (registerResult.success || registerResult.connector_registered) {
-              console.log("✅ Auto-registration successful!");
+
+            if (error) {
+              console.error("Auto-register invoke error:", error);
             } else {
-              console.log("⚠️ Auto-registration returned:", registerResult.error || "no success flag");
+              console.log("Auto-register invoke data:", JSON.stringify(data));
             }
           } catch (regError) {
-            console.error("Error calling bitrix24-register:", regError);
+            console.error("Error invoking bitrix24-register:", regError);
           }
         } else {
-          console.log("Connector already registered and active, skipping auto-registration");
+          console.log("Connector already registered + activated + active in Bitrix24; skipping auto-registration");
         }
       }
       
