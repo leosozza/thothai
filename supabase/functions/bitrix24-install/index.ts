@@ -816,26 +816,65 @@ serve(async (req) => {
       }
       
       // === AUTO-TRIGGER CONNECTOR REGISTRATION ===
-      // If integration exists but connector is not active in Bitrix24, call bitrix24-register
+      // Check REAL status in Bitrix24, not just database flags
       if (integration) {
         const config = integration.config || {};
-
-        const connectorRegistered = config.connector_registered === true || config.registered === true;
-        const connectorActivated = config.activated === true;
-        const connectorActiveInBitrix = config.connector_active === true;
-
-        const shouldAutoRegister = !connectorRegistered || !connectorActivated || !connectorActiveInBitrix;
+        const accessToken = config.access_token;
+        const clientEndpoint = config.client_endpoint;
+        
+        let shouldAutoRegister = true;
+        
+        if (accessToken && clientEndpoint) {
+          console.log("=== CHECKING REAL CONNECTOR STATUS IN BITRIX24 ===");
+          
+          try {
+            // 1. Check if connector is registered in Bitrix24
+            const listResponse = await fetch(`${clientEndpoint}imconnector.list?auth=${accessToken}`);
+            const connectorList = await listResponse.json();
+            const registeredConnectors = Object.keys(connectorList.result || {});
+            const isRegisteredInBitrix = registeredConnectors.includes('thoth_whatsapp');
+            console.log("Registered connectors in Bitrix24:", registeredConnectors);
+            console.log("thoth_whatsapp registered:", isRegisteredInBitrix);
+            
+            // 2. Check if connector is active on any line
+            let isActiveOnAnyLine = false;
+            if (isRegisteredInBitrix) {
+              const linesResponse = await fetch(`${clientEndpoint}imopenlines.config.list.get?auth=${accessToken}`);
+              const linesData = await linesResponse.json();
+              const lines = linesData.result || [];
+              console.log("Open lines found:", lines.length);
+              
+              for (const line of lines) {
+                const lineId = parseInt(line.ID);
+                const statusResponse = await fetch(
+                  `${clientEndpoint}imconnector.status?auth=${accessToken}&CONNECTOR=thoth_whatsapp&LINE=${lineId}`
+                );
+                const statusData = await statusResponse.json();
+                console.log(`Line ${lineId} status:`, JSON.stringify(statusData.result));
+                
+                if (statusData.result?.STATUS === true && statusData.result?.CONFIGURED === true) {
+                  isActiveOnAnyLine = true;
+                  console.log(`✅ Connector is active on line ${lineId}`);
+                  break;
+                }
+              }
+            }
+            
+            // Only skip auto-register if REALLY registered AND active
+            shouldAutoRegister = !isRegisteredInBitrix || !isActiveOnAnyLine;
+            console.log("Should auto-register based on REAL status:", shouldAutoRegister);
+            
+          } catch (checkError) {
+            console.error("Error checking real status in Bitrix24:", checkError);
+            // On error, proceed with registration to be safe
+            shouldAutoRegister = true;
+          }
+        } else {
+          console.log("No access token or endpoint, will try to auto-register anyway");
+        }
 
         if (shouldAutoRegister) {
           console.log("=== AUTO-TRIGGERING CONNECTOR REGISTRATION ===");
-          console.log(
-            "connector_registered:",
-            connectorRegistered,
-            "activated:",
-            connectorActivated,
-            "connector_active:",
-            connectorActiveInBitrix,
-          );
 
           try {
             const { data, error } = await supabase.functions.invoke("bitrix24-register", {
@@ -848,13 +887,13 @@ serve(async (req) => {
             if (error) {
               console.error("Auto-register invoke error:", error);
             } else {
-              console.log("Auto-register invoke data:", JSON.stringify(data));
+              console.log("Auto-register invoke result:", JSON.stringify(data));
             }
           } catch (regError) {
             console.error("Error invoking bitrix24-register:", regError);
           }
         } else {
-          console.log("Connector already registered + activated + active in Bitrix24; skipping auto-registration");
+          console.log("✅ Connector already registered AND active in Bitrix24; skipping auto-registration");
         }
       }
       
