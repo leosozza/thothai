@@ -22,6 +22,13 @@ interface FlowNode {
     action?: string;
     department?: string;
     transferMessage?: string;
+    // New properties for enhanced nodes
+    instanceId?: string;
+    phoneNumber?: string;
+    personaId?: string;
+    firstMessage?: string;
+    email?: string;
+    subject?: string;
   };
 }
 
@@ -320,6 +327,75 @@ serve(async (req) => {
           }
           break;
 
+        case "whatsapp":
+          // Send WhatsApp message (same as message but explicit)
+          if (currentNode.data.message) {
+            const targetInstance = currentNode.data.instanceId || instance_id;
+            await sendMessage(supabaseUrl, supabaseKey, {
+              instance_id: targetInstance, contact_id, conversation_id,
+              message: currentNode.data.message
+            });
+          }
+          break;
+
+        case "sms":
+          // Send SMS via Twilio (if configured)
+          console.log("Sending SMS:", currentNode.data.message);
+          if (currentNode.data.message && currentNode.data.phoneNumber) {
+            try {
+              const smsResponse = await fetch(`${supabaseUrl}/functions/v1/twilio-send-sms`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${supabaseKey}`,
+                },
+                body: JSON.stringify({
+                  to: currentNode.data.phoneNumber,
+                  message: currentNode.data.message,
+                  workspace_id,
+                }),
+              });
+              console.log("SMS send result:", await smsResponse.json());
+            } catch (e) {
+              console.error("SMS send error:", e);
+            }
+          }
+          break;
+
+        case "call":
+          // Initiate outbound call via ElevenLabs
+          console.log("Initiating call:", currentNode.data);
+          if (currentNode.data.phoneNumber && currentNode.data.personaId) {
+            try {
+              const callResponse = await fetch(`${supabaseUrl}/functions/v1/elevenlabs-outbound-call`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${supabaseKey}`,
+                },
+                body: JSON.stringify({
+                  phone_number: currentNode.data.phoneNumber,
+                  persona_id: currentNode.data.personaId,
+                  workspace_id,
+                  first_message: currentNode.data.firstMessage,
+                }),
+              });
+              console.log("Call initiation result:", await callResponse.json());
+            } catch (e) {
+              console.error("Call initiation error:", e);
+            }
+          }
+          break;
+
+        case "email":
+          // Email sending placeholder (to be implemented with email provider)
+          console.log("Email node - placeholder:", {
+            to: currentNode.data.email,
+            subject: currentNode.data.subject,
+            body: currentNode.data.message,
+          });
+          break;
+
         case "ai_response":
           await callAIProcessor(supabaseUrl, supabaseKey, {
             message_id, conversation_id, instance_id, contact_id, content, workspace_id, original_message_type, image_url
@@ -367,6 +443,7 @@ serve(async (req) => {
             .update({ 
               attendance_mode: "human",
               status: "waiting_human",
+              department: currentNode.data.department || null,
               bot_state: {
                 ...conversation?.bot_state,
                 transferred_at: new Date().toISOString(),
@@ -396,6 +473,7 @@ serve(async (req) => {
             .update({ 
               attendance_mode: "ai",
               assigned_to: null,
+              assigned_operator_id: null,
               status: "open"
             })
             .eq("id", conversation_id);
