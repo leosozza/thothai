@@ -574,12 +574,14 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
               onClick={handleRegisterConnector}
               disabled={registeringConnector || verifying || reconfiguring}
               title="Registrar Conector no Contact Center"
+              className="whitespace-nowrap"
             >
               {registeringConnector ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
               ) : (
-                <Zap className="h-4 w-4" />
+                <Zap className="h-4 w-4 mr-2" />
               )}
+              Registrar conector
             </Button>
 
             <Button 
