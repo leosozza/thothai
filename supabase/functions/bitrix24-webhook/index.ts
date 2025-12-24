@@ -4174,6 +4174,75 @@ async function handleVerifyIntegration(supabase: any, payload: any, supabaseUrl:
       is_active: m.is_active
     }));
 
+    // ========== STEP 6: AUTO-REGISTER AUTOMATION ROBOT ==========
+    if (auto_fix && !config.robot_registered) {
+      console.log("Step 6: Auto-registering automation robot...");
+      try {
+        const robotPayload = {
+          auth: accessToken,
+          CODE: "thoth_send_whatsapp",
+          HANDLER: `${supabaseUrl}/functions/v1/bitrix24-robot-handler`,
+          AUTH_USER_ID: 1,
+          NAME: "Enviar WhatsApp (Thoth)",
+          DESCRIPTION: "Envia mensagem WhatsApp para o contato usando Thoth AI",
+          USE_SUBSCRIPTION: "Y",
+          PROPERTIES: {
+            PhoneNumber: {
+              Name: "Telefone",
+              Type: "string",
+              Required: "Y",
+              Default: "{{phone}}",
+            },
+            Message: {
+              Name: "Mensagem",
+              Type: "text",
+              Required: "Y",
+            },
+            InstanceId: {
+              Name: "ID da Instância WhatsApp",
+              Type: "string",
+              Required: "N",
+              Description: "Deixe vazio para usar a instância padrão",
+            },
+          },
+          RETURN_PROPERTIES: {
+            MessageId: { Name: "ID da Mensagem", Type: "string" },
+            Status: { Name: "Status", Type: "string" },
+          },
+        };
+
+        const robotResponse = await fetch(`${clientEndpoint}bizproc.robot.add`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(robotPayload),
+        });
+        const robotResult = await robotResponse.json();
+        console.log("Robot registration result:", JSON.stringify(robotResult));
+
+        if (robotResult.result || (robotResult.error && (robotResult.error_description?.includes("already") || robotResult.error === "ERROR_ACTIVITY_ALREADY_INSTALLED"))) {
+          verification.fixes_applied.push("Robot de automação 'Enviar WhatsApp (Thoth)' registrado");
+          // Update config
+          await supabase
+            .from("integrations")
+            .update({
+              config: {
+                ...config,
+                robot_registered: true,
+                robot_registered_at: new Date().toISOString(),
+              },
+              updated_at: new Date().toISOString(),
+            })
+            .eq("id", integration_id);
+        } else if (robotResult.error) {
+          console.log("Robot registration error:", robotResult.error_description || robotResult.error);
+        }
+      } catch (robotErr) {
+        console.error("Error registering robot:", robotErr);
+      }
+    } else if (config.robot_registered) {
+      console.log("Step 6: Robot already registered, skipping...");
+    }
+
     // ========== FINAL ASSESSMENT ==========
     // Re-check for any remaining issues after auto-fix
     const activeLines = verification.lines.filter(l => l.active);
