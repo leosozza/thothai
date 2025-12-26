@@ -46,18 +46,30 @@ async function fetchWithTimeout(
   }
 }
 
+// Result from parsing SSE response
+interface ParsedSSEResult {
+  data: unknown;
+  sessionId?: string;
+}
+
 // Helper function to parse SSE response - handles multiple formats
-async function parseSSEResponse(response: Response): Promise<unknown> {
+async function parseSSEResponse(response: Response): Promise<ParsedSSEResult> {
   const contentType = response.headers.get("content-type") || "";
   const text = await response.text();
+  
+  // Check for session ID in headers (Mcp-Session-Id or similar)
+  const sessionId = response.headers.get("mcp-session-id") || 
+                    response.headers.get("x-session-id") ||
+                    response.headers.get("session-id");
 
   console.log(`[MCP Discover] Content-Type: ${contentType}`);
+  console.log(`[MCP Discover] Session-ID from headers: ${sessionId}`);
   console.log(`[MCP Discover] Raw response (first 1000 chars): ${text.substring(0, 1000)}`);
 
   // If it's plain JSON, parse directly
   if (contentType.includes("application/json")) {
     try {
-      return JSON.parse(text);
+      return { data: JSON.parse(text), sessionId: sessionId || undefined };
     } catch (e) {
       console.error(`[MCP Discover] Failed to parse JSON: ${e}`);
       throw new Error("Falha ao parsear resposta JSON");
@@ -67,6 +79,7 @@ async function parseSSEResponse(response: Response): Promise<unknown> {
   // Parse SSE format: "event: message\ndata: {...}\n\n" or just "data: {...}\n"
   const lines = text.split("\n");
   let lastValidJson: unknown = null;
+  let extractedSessionId = sessionId;
 
   for (const line of lines) {
     const trimmed = line.trim();
@@ -87,11 +100,22 @@ async function parseSSEResponse(response: Response): Promise<unknown> {
 
       try {
         lastValidJson = JSON.parse(jsonStr);
-        // If we found a valid result, return it immediately
+        // Check if the response contains a session ID
         if (lastValidJson && typeof lastValidJson === "object") {
           const obj = lastValidJson as Record<string, unknown>;
+          // Some servers return session in the result
+          if (obj.sessionId) {
+            extractedSessionId = obj.sessionId as string;
+          }
+          if (obj.result && typeof obj.result === "object") {
+            const result = obj.result as Record<string, unknown>;
+            if (result.sessionId) {
+              extractedSessionId = result.sessionId as string;
+            }
+          }
+          // If we found a valid result, return it immediately
           if (obj.result !== undefined || obj.error !== undefined) {
-            return lastValidJson;
+            return { data: lastValidJson, sessionId: extractedSessionId || undefined };
           }
         }
       } catch (e) {
@@ -102,12 +126,12 @@ async function parseSSEResponse(response: Response): Promise<unknown> {
 
   // Return last valid JSON if found
   if (lastValidJson !== null) {
-    return lastValidJson;
+    return { data: lastValidJson, sessionId: extractedSessionId || undefined };
   }
 
   // Fallback: try to parse the entire text as JSON
   try {
-    return JSON.parse(text);
+    return { data: JSON.parse(text), sessionId: extractedSessionId || undefined };
   } catch (e) {
     console.error(`[MCP Discover] Failed to parse response: ${text.substring(0, 500)}`);
     throw new Error(`Formato de resposta não suportado: ${text.substring(0, 200)}`);
@@ -228,9 +252,19 @@ serve(async (req) => {
       throw new Error(`Falha ao conectar ao MCP: ${initResponse.status} - ${errorText}`);
     }
 
-    const initResult = await parseSSEResponse(initResponse);
-    console.log(`[MCP Discover] Init result:`, JSON.stringify(initResult));
-    await logToDebug(supabase, "info", "Init successful", { initResult });
+    const initParsed = await parseSSEResponse(initResponse);
+    const sessionId = initParsed.sessionId;
+    console.log(`[MCP Discover] Init result:`, JSON.stringify(initParsed.data));
+    console.log(`[MCP Discover] Session ID: ${sessionId}`);
+    await logToDebug(supabase, "info", "Init successful", { initResult: initParsed.data, sessionId });
+
+    // Build headers for subsequent requests (include session ID if present)
+    const sessionHeaders: Record<string, string> = {
+      ...requestHeaders,
+    };
+    if (sessionId) {
+      sessionHeaders["Mcp-Session-Id"] = sessionId;
+    }
 
     // Send initialized notification
     console.log(`[MCP Discover] Sending initialized notification...`);
@@ -238,7 +272,7 @@ serve(async (req) => {
       targetUrl,
       {
         method: "POST",
-        headers: requestHeaders,
+        headers: sessionHeaders,
         body: JSON.stringify({
           jsonrpc: "2.0",
           method: "notifications/initialized",
@@ -253,7 +287,7 @@ serve(async (req) => {
       targetUrl,
       {
         method: "POST",
-        headers: requestHeaders,
+        headers: sessionHeaders,
         body: JSON.stringify({
           jsonrpc: "2.0",
           id: 2,
@@ -302,7 +336,7 @@ serve(async (req) => {
         .eq("id", mcp_connection_id);
     }
 
-    const initResultTyped = initResult as {
+    const initResultTyped = initParsed.data as {
       result?: { serverInfo?: { name: string; version: string } };
     };
     const response: MCPDiscoverResponse = {
