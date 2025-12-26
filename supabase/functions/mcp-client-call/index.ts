@@ -28,18 +28,30 @@ async function fetchWithTimeout(
   }
 }
 
+// Result from parsing SSE response
+interface ParsedSSEResult {
+  data: unknown;
+  sessionId?: string;
+}
+
 // Helper function to parse SSE response - handles multiple formats
-async function parseSSEResponse(response: Response): Promise<unknown> {
+async function parseSSEResponse(response: Response): Promise<ParsedSSEResult> {
   const contentType = response.headers.get("content-type") || "";
   const text = await response.text();
+  
+  // Check for session ID in headers
+  const sessionId = response.headers.get("mcp-session-id") || 
+                    response.headers.get("x-session-id") ||
+                    response.headers.get("session-id");
 
   console.log(`[MCP Call] Content-Type: ${contentType}`);
+  console.log(`[MCP Call] Session-ID from headers: ${sessionId}`);
   console.log(`[MCP Call] Raw response (first 500 chars): ${text.substring(0, 500)}`);
 
   // If it's plain JSON, parse directly
   if (contentType.includes("application/json")) {
     try {
-      return JSON.parse(text);
+      return { data: JSON.parse(text), sessionId: sessionId || undefined };
     } catch (e) {
       console.error(`[MCP Call] Failed to parse JSON: ${e}`);
       throw new Error("Falha ao parsear resposta JSON");
@@ -49,6 +61,7 @@ async function parseSSEResponse(response: Response): Promise<unknown> {
   // Parse SSE format: "event: message\ndata: {...}\n\n" or just "data: {...}\n"
   const lines = text.split("\n");
   let lastValidJson: unknown = null;
+  let extractedSessionId = sessionId;
 
   for (const line of lines) {
     const trimmed = line.trim();
@@ -69,11 +82,14 @@ async function parseSSEResponse(response: Response): Promise<unknown> {
 
       try {
         lastValidJson = JSON.parse(jsonStr);
-        // If we found a valid result, return it immediately
         if (lastValidJson && typeof lastValidJson === "object") {
           const obj = lastValidJson as Record<string, unknown>;
+          // Check for session in response
+          if (obj.sessionId) {
+            extractedSessionId = obj.sessionId as string;
+          }
           if (obj.result !== undefined || obj.error !== undefined) {
-            return lastValidJson;
+            return { data: lastValidJson, sessionId: extractedSessionId || undefined };
           }
         }
       } catch (e) {
@@ -84,12 +100,12 @@ async function parseSSEResponse(response: Response): Promise<unknown> {
 
   // Return last valid JSON if found
   if (lastValidJson !== null) {
-    return lastValidJson;
+    return { data: lastValidJson, sessionId: extractedSessionId || undefined };
   }
 
   // Fallback: try to parse the entire text as JSON
   try {
-    return JSON.parse(text);
+    return { data: JSON.parse(text), sessionId: extractedSessionId || undefined };
   } catch (e) {
     console.error(`[MCP Call] Failed to parse response: ${text.substring(0, 500)}`);
     throw new Error(`Formato de resposta não suportado: ${text.substring(0, 200)}`);
@@ -140,25 +156,18 @@ serve(async (req) => {
     console.log(`[MCP Call] Arguments:`, JSON.stringify(toolArgs));
 
     // Bitrix24 MCP requires BOTH application/json AND text/event-stream
-    const requestHeaders = {
+    const requestHeaders: Record<string, string> = {
       "Content-Type": "application/json",
       "Accept": "application/json, text/event-stream",
       ...authHeaders,
     };
 
-    // Streamable HTTP: ensure we always send a session id
-    const sessionId = crypto.randomUUID();
-    const sessionHeaders: Record<string, string> = {
-      ...requestHeaders,
-      "mcp-session-id": sessionId,
-    };
-
-    // Initialize connection first
+    // Initialize connection first WITHOUT session ID - server will issue one
     const initResponse = await fetchWithTimeout(
       connection.mcp_url,
       {
         method: "POST",
-        headers: sessionHeaders,
+        headers: requestHeaders,
         body: JSON.stringify({
           jsonrpc: "2.0",
           id: 1,
@@ -179,7 +188,15 @@ serve(async (req) => {
       throw new Error(`Falha na inicialização: ${initResponse.status} - ${errorText}`);
     }
 
-    await parseSSEResponse(initResponse);
+    const initParsed = await parseSSEResponse(initResponse);
+    const sessionId = initParsed.sessionId;
+    console.log(`[MCP Call] Session ID from server: ${sessionId}`);
+
+    // Build session headers for subsequent requests
+    const sessionHeaders: Record<string, string> = { ...requestHeaders };
+    if (sessionId) {
+      sessionHeaders["mcp-session-id"] = sessionId;
+    }
 
     // Send initialized notification
     await fetchWithTimeout(
@@ -220,20 +237,21 @@ serve(async (req) => {
       throw new Error(`Falha ao executar ferramenta: ${callResponse.status}`);
     }
 
-    const result = (await parseSSEResponse(callResponse)) as {
+    const callParsed = await parseSSEResponse(callResponse);
+    const callResult = callParsed.data as {
       result?: unknown;
       error?: { message: string };
     };
-    console.log(`[MCP Call] Result:`, JSON.stringify(result));
+    console.log(`[MCP Call] Result:`, JSON.stringify(callResult));
 
-    if (result.error) {
-      throw new Error(result.error.message || "Erro na execução da ferramenta");
+    if (callResult.error) {
+      throw new Error(callResult.error.message || "Erro na execução da ferramenta");
     }
 
     return new Response(
       JSON.stringify({
         success: true,
-        result: result.result,
+        result: callResult.result,
       }),
       {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
