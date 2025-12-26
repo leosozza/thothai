@@ -17,7 +17,8 @@ serve(async (req) => {
 
   try {
     const body = await req.text();
-    console.log("Raw body:", body);
+    console.log("Raw body (first 500 chars):", body.substring(0, 500));
+    console.log("Content-Type:", req.headers.get("content-type"));
     
     // Parse the request - Bitrix24 sends form-urlencoded data
     let data: Record<string, string> = {};
@@ -38,22 +39,53 @@ serve(async (req) => {
       }
     }
     
+    console.log("Parsed data keys:", Object.keys(data));
     console.log("Parsed data:", JSON.stringify(data));
 
     // Extract message parameters from Bitrix24 SMS provider call
-    const phoneNumber = data.PHONE_NUMBER || data.phone_number || data.to || "";
-    const messageText = data.MESSAGE_TEXT || data.message_text || data.message || data.text || "";
-    const authMemberId = data.AUTH_MEMBER_ID || data.auth_member_id || data.member_id || "";
-    const messageId = data.MESSAGE_ID || data.message_id || "";
+    // Bitrix24 can send these in many different formats depending on the context
+    const phoneNumber = 
+      data.PHONE_NUMBER || data.phone_number || 
+      data.MESSAGE_TO || data.message_to ||
+      data.to || data.TO ||
+      data["properties[phone_number]"] || data["properties[PHONE_NUMBER]"] ||
+      data["PROPERTIES[phone_number]"] || data["PROPERTIES[PHONE_NUMBER]"] ||
+      "";
     
-    console.log("Extracted params:", { phoneNumber, messageText, authMemberId, messageId });
+    const messageText = 
+      data.MESSAGE_TEXT || data.message_text || 
+      data.MESSAGE_BODY || data.message_body ||
+      data.message || data.MESSAGE ||
+      data.text || data.TEXT ||
+      data["properties[message_text]"] || data["properties[MESSAGE_TEXT]"] ||
+      data["PROPERTIES[message_text]"] || data["PROPERTIES[MESSAGE_TEXT]"] ||
+      "";
+    
+    const authMemberId = 
+      data.AUTH_MEMBER_ID || data.auth_member_id || 
+      data.member_id || data.MEMBER_ID ||
+      "";
+    
+    const messageId = 
+      data.MESSAGE_ID || data.message_id || 
+      data.ID || data.id ||
+      "";
+    
+    console.log("Extracted params:", { 
+      phoneNumber: phoneNumber ? `${phoneNumber.substring(0, 5)}...` : "(empty)", 
+      messageTextLength: messageText.length,
+      authMemberId: authMemberId ? `${authMemberId.substring(0, 10)}...` : "(empty)", 
+      messageId 
+    });
 
     if (!phoneNumber || !messageText) {
-      console.error("Missing required parameters");
+      console.error("Missing required parameters. Phone:", !!phoneNumber, "Message:", !!messageText);
+      console.error("Available keys:", Object.keys(data).join(", "));
       return new Response(
         JSON.stringify({ 
           error: "phone_number and message_text are required",
-          received: data 
+          received_keys: Object.keys(data),
+          hint: "Check Bitrix24 SMS provider configuration"
         }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );

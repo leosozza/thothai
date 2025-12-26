@@ -70,7 +70,8 @@ interface VerificationResult {
 export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }: Bitrix24CardProps) {
   const [verifying, setVerifying] = useState(false);
   const [reconfiguring, setReconfiguring] = useState(false);
-  const [_registeringRobot, _setRegisteringRobot] = useState(false); // Deprecated - now auto
+  const [registeringRobot, setRegisteringRobot] = useState(false);
+  const [registeringSmsProvider, setRegisteringSmsProvider] = useState(false);
   const [verification, setVerification] = useState<VerificationResult | null>(null);
   const [isHealthy, setIsHealthy] = useState<boolean | null>(null);
   const [summary, setSummary] = useState<string>("");
@@ -257,6 +258,80 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
     }
   };
 
+  // Manual Robot registration
+  const handleRegisterRobot = async () => {
+    if (!integration?.id) {
+      toast.error("Integração não encontrada");
+      return;
+    }
+
+    setRegisteringRobot(true);
+    
+    try {
+      const response = await supabase.functions.invoke("bitrix24-webhook", {
+        body: {
+          action: "register_robot",
+          integration_id: integration.id,
+        }
+      });
+
+      if (response.data?.success) {
+        toast.success(response.data.message || "Robot registrado com sucesso!");
+        await handleVerifyAndFix(true);
+        onRefresh();
+      } else {
+        const errorMsg = response.data?.error || "Erro ao registrar robot";
+        if (errorMsg.includes("insufficient_scope") || errorMsg.includes("bizproc")) {
+          toast.error("Escopo 'bizproc' não disponível. Reinstale o app do Marketplace.");
+        } else {
+          toast.error(errorMsg);
+        }
+      }
+    } catch (error) {
+      console.error("Error registering robot:", error);
+      toast.error("Erro ao registrar robot");
+    } finally {
+      setRegisteringRobot(false);
+    }
+  };
+
+  // Manual SMS Provider registration
+  const handleRegisterSmsProvider = async () => {
+    if (!integration?.id) {
+      toast.error("Integração não encontrada");
+      return;
+    }
+
+    setRegisteringSmsProvider(true);
+    
+    try {
+      const response = await supabase.functions.invoke("bitrix24-webhook", {
+        body: {
+          action: "register_sms_provider",
+          integration_id: integration.id,
+        }
+      });
+
+      if (response.data?.success) {
+        toast.success(response.data.message || "Provedor SMS registrado com sucesso!");
+        await handleVerifyAndFix(true);
+        onRefresh();
+      } else {
+        const errorMsg = response.data?.error || "Erro ao registrar provedor SMS";
+        if (errorMsg.includes("insufficient_scope") || errorMsg.includes("messageservice")) {
+          toast.error("Escopo 'messageservice' não disponível. Reinstale o app do Marketplace.");
+        } else {
+          toast.error(errorMsg);
+        }
+      }
+    } catch (error) {
+      console.error("Error registering SMS provider:", error);
+      toast.error("Erro ao registrar provedor SMS");
+    } finally {
+      setRegisteringSmsProvider(false);
+    }
+  };
+
   // Determine status badge
   const getStatusBadge = () => {
     if (verifying) {
@@ -414,7 +489,7 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
             </div>
           )}
 
-          {/* Robot for Automations - Auto-registered status */}
+          {/* Robot for Automations - with manual registration button */}
           <div className={`rounded-lg p-3 border ${
             robotRegistered 
               ? 'bg-green-500/10 border-green-500/20' 
@@ -437,24 +512,28 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
                     {robotRegistered 
                       ? 'Use "Enviar WhatsApp (Thoth)" nas automações do CRM' 
                       : robotScopeMissing
-                        ? 'Requer atualização de permissões no Marketplace'
-                        : 'Será ativado automaticamente na próxima verificação'}
+                        ? 'Requer escopo "bizproc" no Marketplace'
+                        : 'Clique para registrar manualmente'}
                   </p>
                 </div>
               </div>
-              {robotScopeMissing && !robotRegistered ? (
-                <div className="flex gap-2">
+              <div className="flex items-center gap-2">
+                {!robotRegistered && (
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={handleReinstall}
-                    className="bg-orange-500/10 text-orange-600 border-orange-500/20 hover:bg-orange-500/20"
+                    onClick={handleRegisterRobot}
+                    disabled={registeringRobot}
+                    className="text-xs"
                   >
-                    <RotateCcw className="h-3 w-3 mr-1" />
-                    Reinstalar App
+                    {registeringRobot ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Zap className="h-3 w-3 mr-1" />
+                    )}
+                    Registrar Robot
                   </Button>
-                </div>
-              ) : (
+                )}
                 <Badge 
                   variant="outline" 
                   className={robotRegistered 
@@ -464,11 +543,11 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
                 >
                   {robotRegistered ? 'Ativo' : 'Pendente'}
                 </Badge>
-              )}
+              </div>
             </div>
           </div>
 
-          {/* SMS Provider Status */}
+          {/* SMS Provider Status - with manual registration button */}
           <div className={`rounded-lg p-3 border ${
             smsProviderRegistered 
               ? 'bg-green-500/10 border-green-500/20' 
@@ -489,26 +568,30 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
                   <p className="text-sm font-medium">Provedor SMS/WhatsApp</p>
                   <p className="text-xs text-muted-foreground">
                     {smsProviderRegistered 
-                      ? 'Envie WhatsApp ao criar SMS no CRM' 
+                      ? 'Envie WhatsApp via "Enviar SMS" no CRM' 
                       : smsProviderScopeMissing
                         ? 'Requer escopo "messageservice" no Marketplace'
-                        : 'Será ativado automaticamente na próxima verificação'}
+                        : 'Clique para registrar manualmente'}
                   </p>
                 </div>
               </div>
-              {smsProviderScopeMissing && !smsProviderRegistered ? (
-                <div className="flex gap-2">
+              <div className="flex items-center gap-2">
+                {!smsProviderRegistered && (
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={handleReinstall}
-                    className="bg-orange-500/10 text-orange-600 border-orange-500/20 hover:bg-orange-500/20"
+                    onClick={handleRegisterSmsProvider}
+                    disabled={registeringSmsProvider}
+                    className="text-xs"
                   >
-                    <RotateCcw className="h-3 w-3 mr-1" />
-                    Reinstalar App
+                    {registeringSmsProvider ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <MessageSquare className="h-3 w-3 mr-1" />
+                    )}
+                    Registrar SMS
                   </Button>
-                </div>
-              ) : (
+                )}
                 <Badge 
                   variant="outline" 
                   className={smsProviderRegistered 
@@ -518,7 +601,7 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
                 >
                   {smsProviderRegistered ? 'Ativo' : 'Pendente'}
                 </Badge>
-              )}
+              </div>
             </div>
           </div>
 
