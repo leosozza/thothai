@@ -210,27 +210,20 @@ serve(async (req) => {
 
     // MCP uses JSON-RPC over HTTP
     // Bitrix24 MCP requires BOTH application/json AND text/event-stream
-    const requestHeaders = {
+    const requestHeaders: Record<string, string> = {
       "Content-Type": "application/json",
       "Accept": "application/json, text/event-stream",
       ...authHeaders,
     };
 
-    // Bitrix24 MCP (Streamable HTTP) requires a session id to be present in subsequent requests.
-    // Some servers don't return it reliably in headers, so we generate one and reuse it.
-    const generatedSessionId = crypto.randomUUID();
-    const initHeaders: Record<string, string> = {
-      ...requestHeaders,
-      "mcp-session-id": generatedSessionId,
-    };
-
-    // First, initialize the connection
+    // First, initialize the connection WITHOUT session ID
+    // The server will issue one in the response headers
     console.log(`[MCP Discover] Sending initialize request...`);
     const initResponse = await fetchWithTimeout(
       targetUrl,
       {
         method: "POST",
-        headers: initHeaders,
+        headers: requestHeaders,
         body: JSON.stringify({
           jsonrpc: "2.0",
           id: 1,
@@ -261,19 +254,21 @@ serve(async (req) => {
     }
 
     const initParsed = await parseSSEResponse(initResponse);
-    const sessionId = initParsed.sessionId ?? generatedSessionId;
+    const sessionId = initParsed.sessionId;
     console.log(`[MCP Discover] Init result:`, JSON.stringify(initParsed.data));
-    console.log(`[MCP Discover] Session ID: ${sessionId}`);
+    console.log(`[MCP Discover] Session ID from server: ${sessionId}`);
     await logToDebug(supabase, "info", "Init successful", {
       initResult: initParsed.data,
       sessionId,
     });
 
-    // Headers for subsequent requests (must include session id)
+    // Headers for subsequent requests (include session id if server provided one)
     const sessionHeaders: Record<string, string> = {
       ...requestHeaders,
-      "mcp-session-id": sessionId,
     };
+    if (sessionId) {
+      sessionHeaders["mcp-session-id"] = sessionId;
+    }
 
     // Send initialized notification
     console.log(`[MCP Discover] Sending initialized notification...`);
