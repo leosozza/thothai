@@ -6,24 +6,31 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Thoth Ibis Icon SVG (WhatsApp-style green background with ibis bird)
-const THOTH_IBIS_ICON_SVG = `data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%2325D366'/%3E%3Ccircle cx='50' cy='45' r='30' fill='none' stroke='white' stroke-width='4'/%3E%3Cpath d='M35 75 L50 90 L50 75' fill='white'/%3E%3Cg fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M50 65 C42 62, 36 52, 38 40 C40 30, 46 26, 52 26 C58 26, 64 32, 64 42 C64 52, 58 62, 50 65'/%3E%3Cpath d='M48 26 C45 22, 38 18, 32 14'/%3E%3Ccircle cx='30' cy='12' r='5'/%3E%3Cpath d='M25 12 C22 16, 18 22, 16 28'/%3E%3Ccircle cx='29' cy='11' r='1.5' fill='white'/%3E%3C/g%3E%3C/svg%3E`;
+// RAW SVG icons - will be properly encoded with encodeURIComponent()
+// Using raw SVG strings and encoding at runtime ensures correct DATA_IMAGE format per Bitrix24 docs
+const THOTH_IBIS_ICON_RAW_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="20" fill="#25D366"/><circle cx="50" cy="45" r="30" fill="none" stroke="white" stroke-width="4"/><path d="M35 75 L50 90 L50 75" fill="white"/><g fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M50 65 C42 62, 36 52, 38 40 C40 30, 46 26, 52 26 C58 26, 64 32, 64 42 C64 52, 58 62, 50 65"/><path d="M48 26 C45 22, 38 18, 32 14"/><circle cx="30" cy="12" r="5"/><path d="M25 12 C22 16, 18 22, 16 28"/><circle cx="29" cy="11" r="1.5" fill="white"/></g></svg>`;
 
-// Disabled icon (gray version)
-const THOTH_IBIS_ICON_DISABLED_SVG = `data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%23999999'/%3E%3Ccircle cx='50' cy='45' r='30' fill='none' stroke='white' stroke-width='4'/%3E%3Cpath d='M35 75 L50 90 L50 75' fill='white'/%3E%3Cg fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M50 65 C42 62, 36 52, 38 40 C40 30, 46 26, 52 26 C58 26, 64 32, 64 42 C64 52, 58 62, 50 65'/%3E%3Cpath d='M48 26 C45 22, 38 18, 32 14'/%3E%3Ccircle cx='30' cy='12' r='5'/%3E%3Cpath d='M25 12 C22 16, 18 22, 16 28'/%3E%3Ccircle cx='29' cy='11' r='1.5' fill='white'/%3E%3C/g%3E%3C/svg%3E`;
+const THOTH_IBIS_ICON_DISABLED_RAW_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="20" fill="#999999"/><circle cx="50" cy="45" r="30" fill="none" stroke="white" stroke-width="4"/><path d="M35 75 L50 90 L50 75" fill="white"/><g fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M50 65 C42 62, 36 52, 38 40 C40 30, 46 26, 52 26 C58 26, 64 32, 64 42 C64 52, 58 62, 50 65"/><path d="M48 26 C45 22, 38 18, 32 14"/><circle cx="30" cy="12" r="5"/><path d="M25 12 C22 16, 18 22, 16 28"/><circle cx="29" cy="11" r="1.5" fill="white"/></g></svg>`;
 
-// Complete icon objects for imconnector.register API (as in bitrix24-webhook)
+// Generate DATA_IMAGE with proper percent-encoding as per Bitrix24 official docs
+// Format: data:image/svg+xml;charset=US-ASCII,{percent-encoded-svg}
+function generateIconDataUri(rawSvg: string): string {
+  return `data:image/svg+xml;charset=US-ASCII,${encodeURIComponent(rawSvg)}`;
+}
+
+// Complete icon objects for imconnector.register API
+// SIZE: "100%" as per official documentation
 const THOTH_CONNECTOR_ICON = {
-  DATA_IMAGE: THOTH_IBIS_ICON_SVG,
+  DATA_IMAGE: generateIconDataUri(THOTH_IBIS_ICON_RAW_SVG),
   COLOR: "#25D366",
-  SIZE: "90%",
+  SIZE: "100%",
   POSITION: "center"
 };
 
 const THOTH_CONNECTOR_ICON_DISABLED = {
-  DATA_IMAGE: THOTH_IBIS_ICON_DISABLED_SVG,
+  DATA_IMAGE: generateIconDataUri(THOTH_IBIS_ICON_DISABLED_RAW_SVG),
   COLOR: "#999999",
-  SIZE: "90%",
+  SIZE: "100%",
   POSITION: "center"
 };
 
@@ -289,9 +296,28 @@ serve(async (req) => {
 
     console.log("=== OAUTH MODE: Registering imconnector for Contact Center ===");
 
-    // Register the connector
+    // First unregister existing connector to force icon update
+    console.log("Step 1: Unregistering existing connector to force icon update...");
+    const unregisterUrl = `${clientEndpoint}imconnector.unregister?auth=${accessToken}`;
+    try {
+      const unregisterResponse = await fetch(unregisterUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ID: finalConnectorId }),
+      });
+      const unregisterResult = await unregisterResponse.json();
+      console.log("imconnector.unregister result:", JSON.stringify(unregisterResult));
+    } catch (e) {
+      console.log("Unregister failed (may not exist):", e);
+    }
+
+    // Register the connector fresh with proper icons
+    console.log("Step 2: Registering connector with proper icon format...");
+    console.log("ICON DATA_IMAGE length:", THOTH_CONNECTOR_ICON.DATA_IMAGE.length);
+    console.log("ICON_DISABLED DATA_IMAGE length:", THOTH_CONNECTOR_ICON_DISABLED.DATA_IMAGE.length);
+    console.log("ICON SIZE:", THOTH_CONNECTOR_ICON.SIZE);
+    
     const registerUrl = `${clientEndpoint}imconnector.register?auth=${accessToken}`;
-    console.log("Calling imconnector.register...");
     
     const registerResponse = await fetch(registerUrl, {
       method: "POST",
@@ -306,11 +332,16 @@ serve(async (req) => {
     });
 
     const registerResult = await registerResponse.json();
+    console.log("imconnector.register response status:", registerResponse.status);
     console.log("imconnector.register result:", JSON.stringify(registerResult));
 
-    // Even if registration fails (e.g., already exists), try to activate
-    if (registerResult.error && !registerResult.error.includes("already")) {
-      console.log("Registration error (non-duplicate):", registerResult.error);
+    // Log success or failure
+    if (registerResult.result) {
+      console.log("✅ Connector registered successfully with icon!");
+    } else if (registerResult.error && registerResult.error.includes("already")) {
+      console.log("⚠️ Connector already exists - icon may not update");
+    } else if (registerResult.error) {
+      console.log("❌ Registration error:", registerResult.error);
     }
 
     // === DETECT AVAILABLE LINES ===
