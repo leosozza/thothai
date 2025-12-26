@@ -6,24 +6,31 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-// Thoth Ibis WhatsApp icon - embedded as SVG data URI (no external dependency)
-// Green WhatsApp-style background with Ibis bird inside speech bubble
-const THOTH_IBIS_ICON_SVG = `data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%2325D366'/%3E%3Ccircle cx='50' cy='45' r='30' fill='none' stroke='white' stroke-width='4'/%3E%3Cpath d='M35 75 L50 90 L50 75' fill='white'/%3E%3Cg fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M50 65 C42 62, 36 52, 38 40 C40 30, 46 26, 52 26 C58 26, 64 32, 64 42 C64 52, 58 62, 50 65'/%3E%3Cpath d='M48 26 C45 22, 38 18, 32 14'/%3E%3Ccircle cx='30' cy='12' r='5'/%3E%3Cpath d='M25 12 C22 16, 18 22, 16 28'/%3E%3Ccircle cx='29' cy='11' r='1.5' fill='white'/%3E%3C/g%3E%3C/svg%3E`;
+// RAW SVG icons - will be properly encoded with encodeURIComponent()
+// Using raw SVG strings and encoding at runtime ensures correct DATA_IMAGE format per Bitrix24 docs
+const THOTH_IBIS_ICON_RAW_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="20" fill="#25D366"/><circle cx="50" cy="45" r="30" fill="none" stroke="white" stroke-width="4"/><path d="M35 75 L50 90 L50 75" fill="white"/><g fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M50 65 C42 62, 36 52, 38 40 C40 30, 46 26, 52 26 C58 26, 64 32, 64 42 C64 52, 58 62, 50 65"/><path d="M48 26 C45 22, 38 18, 32 14"/><circle cx="30" cy="12" r="5"/><path d="M25 12 C22 16, 18 22, 16 28"/><circle cx="29" cy="11" r="1.5" fill="white"/></g></svg>`;
 
-const THOTH_IBIS_ICON_DISABLED_SVG = `data:image/svg+xml;charset=UTF-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%23999999'/%3E%3Ccircle cx='50' cy='45' r='30' fill='none' stroke='white' stroke-width='4'/%3E%3Cpath d='M35 75 L50 90 L50 75' fill='white'/%3E%3Cg fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M50 65 C42 62, 36 52, 38 40 C40 30, 46 26, 52 26 C58 26, 64 32, 64 42 C64 52, 58 62, 50 65'/%3E%3Cpath d='M48 26 C45 22, 38 18, 32 14'/%3E%3Ccircle cx='30' cy='12' r='5'/%3E%3Cpath d='M25 12 C22 16, 18 22, 16 28'/%3E%3Ccircle cx='29' cy='11' r='1.5' fill='white'/%3E%3C/g%3E%3C/svg%3E`;
+const THOTH_IBIS_ICON_DISABLED_RAW_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><rect width="100" height="100" rx="20" fill="#999999"/><circle cx="50" cy="45" r="30" fill="none" stroke="white" stroke-width="4"/><path d="M35 75 L50 90 L50 75" fill="white"/><g fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M50 65 C42 62, 36 52, 38 40 C40 30, 46 26, 52 26 C58 26, 64 32, 64 42 C64 52, 58 62, 50 65"/><path d="M48 26 C45 22, 38 18, 32 14"/><circle cx="30" cy="12" r="5"/><path d="M25 12 C22 16, 18 22, 16 28"/><circle cx="29" cy="11" r="1.5" fill="white"/></g></svg>`;
 
-// Icon object for imconnector.register API
+// Generate DATA_IMAGE with proper percent-encoding as per Bitrix24 official docs
+// Format: data:image/svg+xml;charset=US-ASCII,{percent-encoded-svg}
+function generateIconDataUri(rawSvg: string): string {
+  return `data:image/svg+xml;charset=US-ASCII,${encodeURIComponent(rawSvg)}`;
+}
+
+// Complete icon objects for imconnector.register API
+// SIZE: "100%" as per official documentation
 const THOTH_CONNECTOR_ICON = {
-  DATA_IMAGE: THOTH_IBIS_ICON_SVG,
+  DATA_IMAGE: generateIconDataUri(THOTH_IBIS_ICON_RAW_SVG),
   COLOR: "#25D366",
-  SIZE: "90%",
+  SIZE: "100%",
   POSITION: "center"
 };
 
 const THOTH_CONNECTOR_ICON_DISABLED = {
-  DATA_IMAGE: THOTH_IBIS_ICON_DISABLED_SVG,
+  DATA_IMAGE: generateIconDataUri(THOTH_IBIS_ICON_DISABLED_RAW_SVG),
   COLOR: "#999999",
-  SIZE: "90%",
+  SIZE: "100%",
   POSITION: "center"
 };
 
@@ -2462,18 +2469,24 @@ async function handleReconfigureConnector(supabase: any, payload: any, supabaseU
     console.log("accessToken length:", accessToken?.length || 0);
     console.log("accessToken first 20 chars:", accessToken?.substring(0, 20) || "N/A");
     
-    // Use global THOTH_CONNECTOR_ICON constant
+    // Use global THOTH_CONNECTOR_ICON constant with ICON_DISABLED
     const registerPayload = {
       auth: accessToken,
       ID: connectorId,
       NAME: "Thoth WhatsApp",
       ICON: THOTH_CONNECTOR_ICON,
+      ICON_DISABLED: THOTH_CONNECTOR_ICON_DISABLED,
       // Point to dedicated PLACEMENT_HANDLER
       PLACEMENT_HANDLER: `${supabaseUrl}/functions/v1/bitrix24-connector-settings`
     };
     
     console.log("Register URL:", `${clientEndpoint}imconnector.register`);
-    console.log("Register payload (without auth):", JSON.stringify({ ...registerPayload, auth: "[REDACTED]" }, null, 2));
+    console.log("Register payload structure:", JSON.stringify({ 
+      ...registerPayload, 
+      auth: "[REDACTED]",
+      ICON: { ...THOTH_CONNECTOR_ICON, DATA_IMAGE: `[DATA_IMAGE length: ${THOTH_CONNECTOR_ICON.DATA_IMAGE.length}]` },
+      ICON_DISABLED: { ...THOTH_CONNECTOR_ICON_DISABLED, DATA_IMAGE: `[DATA_IMAGE length: ${THOTH_CONNECTOR_ICON_DISABLED.DATA_IMAGE.length}]` }
+    }, null, 2));
     
     try {
       const registerResponse = await fetch(`${clientEndpoint}imconnector.register`, {
@@ -2489,7 +2502,9 @@ async function handleReconfigureConnector(supabase: any, payload: any, supabaseU
       console.log("Register result (FULL):", JSON.stringify(registerResult, null, 2));
       
       if (registerResult.result) {
-        console.log("✅ Connector registered successfully!");
+        console.log("✅ Connector registered successfully with icon!");
+        console.log("ICON DATA_IMAGE length:", THOTH_CONNECTOR_ICON.DATA_IMAGE.length);
+        console.log("ICON_DISABLED DATA_IMAGE length:", THOTH_CONNECTOR_ICON_DISABLED.DATA_IMAGE.length);
         results.connector_registered = true;
         
         // Save registration timestamp
@@ -2499,6 +2514,7 @@ async function handleReconfigureConnector(supabase: any, payload: any, supabaseU
             config: {
               ...config,
               connector_registered_at: new Date().toISOString(),
+              connector_icon_applied: true,
             }
           })
           .eq("id", integration.id);
