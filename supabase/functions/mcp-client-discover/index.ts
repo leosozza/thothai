@@ -185,10 +185,10 @@ serve(async (req) => {
     await logToDebug(supabase, "info", "Starting MCP discovery", { targetUrl });
 
     // MCP uses JSON-RPC over HTTP
-    // Bitrix24 MCP requires ONLY text/event-stream in Accept header
+    // Bitrix24 MCP requires BOTH application/json AND text/event-stream
     const requestHeaders = {
       "Content-Type": "application/json",
-      "Accept": "text/event-stream", // Bitrix24 requires ONLY this
+      "Accept": "application/json, text/event-stream",
       ...authHeaders,
     };
 
