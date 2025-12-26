@@ -146,12 +146,19 @@ serve(async (req) => {
       ...authHeaders,
     };
 
+    // Streamable HTTP: ensure we always send a session id
+    const sessionId = crypto.randomUUID();
+    const sessionHeaders: Record<string, string> = {
+      ...requestHeaders,
+      "mcp-session-id": sessionId,
+    };
+
     // Initialize connection first
     const initResponse = await fetchWithTimeout(
       connection.mcp_url,
       {
         method: "POST",
-        headers: requestHeaders,
+        headers: sessionHeaders,
         body: JSON.stringify({
           jsonrpc: "2.0",
           id: 1,
@@ -179,7 +186,7 @@ serve(async (req) => {
       connection.mcp_url,
       {
         method: "POST",
-        headers: requestHeaders,
+        headers: sessionHeaders,
         body: JSON.stringify({
           jsonrpc: "2.0",
           method: "notifications/initialized",
@@ -193,7 +200,7 @@ serve(async (req) => {
       connection.mcp_url,
       {
         method: "POST",
-        headers: requestHeaders,
+        headers: sessionHeaders,
         body: JSON.stringify({
           jsonrpc: "2.0",
           id: 2,

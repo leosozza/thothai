@@ -216,13 +216,21 @@ serve(async (req) => {
       ...authHeaders,
     };
 
+    // Bitrix24 MCP (Streamable HTTP) requires a session id to be present in subsequent requests.
+    // Some servers don't return it reliably in headers, so we generate one and reuse it.
+    const generatedSessionId = crypto.randomUUID();
+    const initHeaders: Record<string, string> = {
+      ...requestHeaders,
+      "mcp-session-id": generatedSessionId,
+    };
+
     // First, initialize the connection
     console.log(`[MCP Discover] Sending initialize request...`);
     const initResponse = await fetchWithTimeout(
       targetUrl,
       {
         method: "POST",
-        headers: requestHeaders,
+        headers: initHeaders,
         body: JSON.stringify({
           jsonrpc: "2.0",
           id: 1,
@@ -253,18 +261,19 @@ serve(async (req) => {
     }
 
     const initParsed = await parseSSEResponse(initResponse);
-    const sessionId = initParsed.sessionId;
+    const sessionId = initParsed.sessionId ?? generatedSessionId;
     console.log(`[MCP Discover] Init result:`, JSON.stringify(initParsed.data));
     console.log(`[MCP Discover] Session ID: ${sessionId}`);
-    await logToDebug(supabase, "info", "Init successful", { initResult: initParsed.data, sessionId });
+    await logToDebug(supabase, "info", "Init successful", {
+      initResult: initParsed.data,
+      sessionId,
+    });
 
-    // Build headers for subsequent requests (include session ID if present)
+    // Headers for subsequent requests (must include session id)
     const sessionHeaders: Record<string, string> = {
       ...requestHeaders,
+      "mcp-session-id": sessionId,
     };
-    if (sessionId) {
-      sessionHeaders["Mcp-Session-Id"] = sessionId;
-    }
 
     // Send initialized notification
     console.log(`[MCP Discover] Sending initialized notification...`);
