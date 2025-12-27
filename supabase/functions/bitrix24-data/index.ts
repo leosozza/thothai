@@ -34,7 +34,10 @@ Deno.serve(async (req) => {
     console.log(`[bitrix24-data] Action: ${action}, member_id: ${member_id}`);
 
     // Validate member_id and get workspace_id
-    const { data: integration, error: integrationError } = await supabase
+    // Try to find by member_id first, then fallback to domain
+    let integration = null;
+    
+    const { data: integrationByMemberId } = await supabase
       .from("integrations")
       .select("id, workspace_id, is_active, config")
       .eq("type", "bitrix24")
@@ -42,8 +45,28 @@ Deno.serve(async (req) => {
       .filter("config->member_id", "eq", member_id)
       .single();
 
-    if (integrationError || !integration) {
-      console.log(`[bitrix24-data] Integration not found for member_id: ${member_id}`);
+    if (integrationByMemberId) {
+      integration = integrationByMemberId;
+      console.log(`[bitrix24-data] Found integration by member_id: ${member_id}`);
+    } else {
+      // Fallback: try to find by domain (in case frontend passed domain instead of member_id)
+      console.log(`[bitrix24-data] member_id not found, trying domain lookup: ${member_id}`);
+      const { data: integrationByDomain } = await supabase
+        .from("integrations")
+        .select("id, workspace_id, is_active, config")
+        .eq("type", "bitrix24")
+        .eq("is_active", true)
+        .filter("config->domain", "eq", member_id)
+        .single();
+
+      if (integrationByDomain) {
+        integration = integrationByDomain;
+        console.log(`[bitrix24-data] Found integration by domain: ${member_id}`);
+      }
+    }
+
+    if (!integration) {
+      console.log(`[bitrix24-data] Integration not found for member_id/domain: ${member_id}`);
       return new Response(
         JSON.stringify({ error: "Integration not found", data: null }),
         { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
