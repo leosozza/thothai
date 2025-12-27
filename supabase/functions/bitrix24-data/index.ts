@@ -42,7 +42,7 @@ Deno.serve(async (req) => {
       .select("id, workspace_id, is_active, config")
       .eq("type", "bitrix24")
       .eq("is_active", true)
-      .filter("config->member_id", "eq", member_id)
+      .filter("config->>member_id", "eq", member_id)
       .single();
 
     if (integrationByMemberId) {
@@ -56,7 +56,7 @@ Deno.serve(async (req) => {
         .select("id, workspace_id, is_active, config")
         .eq("type", "bitrix24")
         .eq("is_active", true)
-        .filter("config->domain", "eq", member_id)
+        .filter("config->>domain", "eq", member_id)
         .single();
 
       if (integrationByDomain) {
