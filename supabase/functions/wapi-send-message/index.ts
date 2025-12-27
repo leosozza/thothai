@@ -21,6 +21,11 @@ serve(async (req) => {
 
     const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey);
 
+    const requestBody = await req.json();
+    console.log("=== WAPI-SEND-MESSAGE REQUEST ===");
+    console.log("Request body keys:", Object.keys(requestBody));
+    console.log("Request body:", JSON.stringify(requestBody));
+    
     const { 
       instanceId, 
       instance_id, // Alternative naming
@@ -30,6 +35,7 @@ serve(async (req) => {
       contact_id, // Alternative naming
       phoneNumber, 
       phone_number, // Alternative naming
+      phone, // Another alternative
       message, 
       messageType,
       message_type, // Alternative naming
@@ -40,13 +46,13 @@ serve(async (req) => {
       workspace_id, // Alternative naming
       internal_call, // Flag for internal edge function calls
       source // Message source: "bot", "thoth_app", "bitrix24_operator"
-    } = await req.json();
+    } = requestBody;
 
-    // Normalize parameter names
+    // Normalize parameter names - support all naming conventions
     const finalInstanceId = instanceId || instance_id;
     const finalConversationId = conversationId || conversation_id;
     const finalContactId = contactId || contact_id;
-    const finalPhoneNumber = phoneNumber || phone_number;
+    const finalPhoneNumber = phoneNumber || phone_number || phone;
     const finalMessageType = message_type || messageType || "text";
     const finalMediaUrl = mediaUrl || media_url;
     const finalWorkspaceId = workspaceId || workspace_id;
@@ -54,7 +60,39 @@ serve(async (req) => {
     // Determine message source
     const messageSource = source || (internal_call ? "bot" : "thoth_app");
 
-    console.log("Send message request:", { instanceId: finalInstanceId, phoneNumber: finalPhoneNumber, messageType: finalMessageType, internal_call });
+    console.log("Normalized params:", { 
+      instanceId: finalInstanceId, 
+      phoneNumber: finalPhoneNumber, 
+      messageLength: message?.length || 0,
+      messageType: finalMessageType, 
+      internal_call,
+      source: messageSource
+    });
+    
+    // Validate required parameters
+    if (!finalInstanceId) {
+      console.error("Missing instance_id");
+      return new Response(JSON.stringify({ success: false, error: "instance_id is required" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    
+    if (!finalPhoneNumber) {
+      console.error("Missing phone number");
+      return new Response(JSON.stringify({ success: false, error: "phone_number is required" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+    
+    if (!message) {
+      console.error("Missing message");
+      return new Response(JSON.stringify({ success: false, error: "message is required" }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     // Get auth token from request (optional for internal calls)
     const authHeader = req.headers.get("Authorization");
@@ -133,14 +171,22 @@ serve(async (req) => {
     const wapiInstanceId = instance.instance_key;
 
     if (!wapiApiKey || !wapiInstanceId) {
-      return new Response(JSON.stringify({ error: "Configuração W-API incompleta" }), {
+      console.error("W-API config incomplete. apiKey:", !!wapiApiKey, "instanceId:", !!wapiInstanceId);
+      return new Response(JSON.stringify({ success: false, error: "Configuração W-API incompleta" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+    
+    console.log("W-API config loaded:", { 
+      wapiInstanceId, 
+      hasApiKey: !!wapiApiKey,
+      apiKeyPrefix: wapiApiKey?.substring(0, 10) + "..."
+    });
 
     // Format phone number for WhatsApp (W-API expects just the number)
     const formattedPhone = finalPhoneNumber.replace(/\D/g, "");
+    console.log("Formatted phone:", formattedPhone);
 
     let endpoint = "message/send-text";
     let body: Record<string, unknown> = {
@@ -191,33 +237,46 @@ serve(async (req) => {
       body = { phone: formattedPhone, documentUrl: finalMediaUrl, fileName: message || "document" };
     }
 
-    console.log("W-API request body:", JSON.stringify(body));
+    const fullUrl = `${WAPI_BASE_URL}/${endpoint}?instanceId=${wapiInstanceId}`;
+    console.log("W-API request:", {
+      url: fullUrl,
+      method: "POST",
+      body: JSON.stringify(body),
+    });
 
     // Send message via W-API
     console.log(`Sending ${finalMessageType} message via W-API...`);
     
-    const sendResponse = await fetch(
-      `${WAPI_BASE_URL}/${endpoint}?instanceId=${wapiInstanceId}`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${wapiApiKey}`,
-        },
-        body: JSON.stringify(body),
-      }
-    );
+    const sendResponse = await fetch(fullUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${wapiApiKey}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+    const responseText = await sendResponse.text();
+    console.log("W-API response status:", sendResponse.status);
+    console.log("W-API response body:", responseText);
 
     if (!sendResponse.ok) {
-      const errorText = await sendResponse.text();
-      console.error("W-API send error:", errorText);
-      return new Response(JSON.stringify({ error: "Erro ao enviar mensagem" }), {
+      console.error("W-API send error - Status:", sendResponse.status, "Body:", responseText);
+      return new Response(JSON.stringify({ 
+        success: false, 
+        error: `W-API error: ${sendResponse.status} - ${responseText}` 
+      }), {
         status: 500,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const sendData = await sendResponse.json();
+    let sendData;
+    try {
+      sendData = JSON.parse(responseText);
+    } catch {
+      sendData = { raw: responseText };
+    }
     console.log("Message sent:", sendData);
 
     const waMessageId = sendData.key?.id || sendData.id || sendData.messageId;
