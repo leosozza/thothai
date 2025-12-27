@@ -16,6 +16,22 @@ import { Textarea } from "@/components/ui/textarea";
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 
+// Helper to call bitrix24-data Edge Function (bypasses RLS)
+async function callBitrixData(action: string, memberId: string, data?: any) {
+  const response = await fetch(`${SUPABASE_URL}/functions/v1/bitrix24-data`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action, member_id: memberId, data })
+  });
+  
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(errorData.error || `HTTP ${response.status}`);
+  }
+  
+  return response.json();
+}
+
 type AppView = "loading" | "pending" | "dashboard" | "instances" | "training" | "personas" | "flows" | "settings" | "not-in-bitrix";
 
 interface BitrixStatus {
@@ -294,10 +310,10 @@ export default function Bitrix24App() {
       {/* Main content */}
       <main className="flex-1 p-6 overflow-auto">
         {view === "dashboard" && <DashboardView status={status} />}
-        {view === "instances" && <InstancesView status={status} workspaceId={status?.workspace_id} />}
-        {view === "flows" && <FlowsView status={status} workspaceId={status?.workspace_id} />}
-        {view === "training" && <TrainingView workspaceId={status?.workspace_id} />}
-        {view === "personas" && <PersonasView workspaceId={status?.workspace_id} />}
+        {view === "instances" && <InstancesView status={status} memberId={memberId} />}
+        {view === "flows" && <FlowsView status={status} memberId={memberId} />}
+        {view === "training" && <TrainingView memberId={memberId} />}
+        {view === "personas" && <PersonasView memberId={memberId} />}
         {view === "settings" && <SettingsView domain={domain} status={status} memberId={memberId} onReload={loadData} />}
       </main>
     </div>
@@ -383,8 +399,8 @@ function DashboardView({ status }: { status: BitrixStatus | null }) {
   );
 }
 
-// Instances View - Full CRUD
-function InstancesView({ status, workspaceId }: { status: BitrixStatus | null; workspaceId?: string }) {
+// Instances View - Full CRUD using Edge Function
+function InstancesView({ status, memberId }: { status: BitrixStatus | null; memberId: string | null }) {
   const [instances, setInstances] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
@@ -399,28 +415,23 @@ function InstancesView({ status, workspaceId }: { status: BitrixStatus | null; w
   });
 
   useEffect(() => {
-    if (workspaceId) {
+    if (memberId) {
       fetchInstances();
     } else {
       setLoading(false);
     }
-  }, [workspaceId]);
+  }, [memberId]);
 
   const fetchInstances = async () => {
-    if (!workspaceId) return;
+    if (!memberId) return;
     
     try {
-      const { data, error } = await supabase
-        .from("instances")
-        .select("*")
-        .eq("workspace_id", workspaceId)
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
-      setInstances(data || []);
-    } catch (err) {
+      const result = await callBitrixData("get_instances", memberId);
+      if (result.error) throw new Error(result.error);
+      setInstances(result.data || []);
+    } catch (err: any) {
       console.error("Error fetching instances:", err);
-      toast.error("Erro ao carregar instâncias");
+      toast.error("Erro ao carregar instâncias: " + err.message);
     } finally {
       setLoading(false);
     }
@@ -432,49 +443,22 @@ function InstancesView({ status, workspaceId }: { status: BitrixStatus | null; w
       return;
     }
 
-    if (!workspaceId) {
-      toast.error("Workspace não encontrado. Vincule seu Bitrix24 a um workspace primeiro.");
+    if (!memberId) {
+      toast.error("member_id não encontrado");
       return;
     }
 
     try {
-      // Get current user
-      const { data: { user } } = await supabase.auth.getUser();
-      const userId = user?.id;
-
-      // For Bitrix24 context, we may not have a logged user, so we get owner from workspace
-      let effectiveUserId = userId;
-      if (!effectiveUserId) {
-        const { data: workspace } = await supabase
-          .from("workspaces")
-          .select("owner_id")
-          .eq("id", workspaceId)
-          .single();
-        effectiveUserId = workspace?.owner_id;
-      }
-
-      if (!effectiveUserId) {
-        toast.error("Não foi possível identificar o usuário");
-        return;
-      }
-
-      const { data: instance, error } = await supabase
-        .from("instances")
-        .insert({
-          name: newInstance.name,
-          workspace_id: workspaceId,
-          user_id: effectiveUserId,
-          connection_type: newInstance.connection_type,
-          status: "disconnected",
-          ...(newInstance.connection_type === "oficial" && {
-            gupshup_api_key: newInstance.gupshup_api_key,
-            gupshup_app_id: newInstance.gupshup_app_id,
-          })
+      const result = await callBitrixData("create_instance", memberId, {
+        name: newInstance.name,
+        connection_type: newInstance.connection_type,
+        ...(newInstance.connection_type === "oficial" && {
+          gupshup_api_key: newInstance.gupshup_api_key,
+          gupshup_app_id: newInstance.gupshup_app_id,
         })
-        .select()
-        .single();
+      });
 
-      if (error) throw error;
+      if (result.error) throw new Error(result.error);
 
       toast.success("Instância criada! Clique em Conectar para vincular seu WhatsApp.");
       setCreateDialogOpen(false);
@@ -482,9 +466,9 @@ function InstancesView({ status, workspaceId }: { status: BitrixStatus | null; w
       fetchInstances();
       
       // Auto open connection dialog for WABA
-      if (newInstance.connection_type === "waba" && instance) {
-        setSelectedInstance(instance);
-        handleConnectInstance(instance);
+      if (newInstance.connection_type === "waba" && result.data) {
+        setSelectedInstance(result.data);
+        handleConnectInstance(result.data);
       }
     } catch (err: any) {
       toast.error("Erro ao criar instância: " + err.message);
@@ -527,14 +511,11 @@ function InstancesView({ status, workspaceId }: { status: BitrixStatus | null; w
 
   const handleDeleteInstance = async (instanceId: string) => {
     if (!confirm("Tem certeza que deseja excluir esta instância?")) return;
+    if (!memberId) return;
 
     try {
-      const { error } = await supabase
-        .from("instances")
-        .delete()
-        .eq("id", instanceId);
-
-      if (error) throw error;
+      const result = await callBitrixData("delete_instance", memberId, { id: instanceId });
+      if (result.error) throw new Error(result.error);
 
       toast.success("Instância excluída");
       fetchInstances();
@@ -549,7 +530,7 @@ function InstancesView({ status, workspaceId }: { status: BitrixStatus | null; w
     connecting: { label: "Conectando...", color: "bg-yellow-500" },
   };
 
-  if (!workspaceId) {
+  if (!memberId) {
     return (
       <div className="space-y-6">
         <div>
@@ -559,15 +540,13 @@ function InstancesView({ status, workspaceId }: { status: BitrixStatus | null; w
         <Card>
           <CardContent className="py-12 text-center">
             <AlertCircle className="h-12 w-12 text-amber-500 mx-auto mb-4" />
-            <h3 className="font-medium mb-2">Workspace não vinculado</h3>
+            <h3 className="font-medium mb-2">Sessão não identificada</h3>
             <p className="text-sm text-muted-foreground mb-4">
-              Para gerenciar instâncias, primeiro vincule seu Bitrix24 a um workspace Thoth.
+              Recarregue a página para identificar sua sessão Bitrix24.
             </p>
-            <Button asChild>
-              <a href="https://chat.thoth24.com/instances" target="_blank" rel="noopener noreferrer">
-                <ExternalLink className="h-4 w-4 mr-2" />
-                Acessar Painel Principal
-              </a>
+            <Button onClick={() => window.location.reload()}>
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Recarregar
             </Button>
           </CardContent>
         </Card>
@@ -773,37 +752,32 @@ function InstancesView({ status, workspaceId }: { status: BitrixStatus | null; w
   );
 }
 
-// Training View - Full CRUD
-function TrainingView({ workspaceId }: { workspaceId?: string }) {
+// Training View - Full CRUD using Edge Function
+function TrainingView({ memberId }: { memberId: string | null }) {
   const [documents, setDocuments] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
-  const [newDoc, setNewDoc] = useState({ title: "", content: "", source_type: "text" });
+  const [newDoc, setNewDoc] = useState({ title: "", content: "", source_type: "manual" });
 
   useEffect(() => {
-    if (workspaceId) {
+    if (memberId) {
       fetchDocuments();
     } else {
       setLoading(false);
     }
-  }, [workspaceId]);
+  }, [memberId]);
 
   const fetchDocuments = async () => {
-    if (!workspaceId) return;
+    if (!memberId) return;
     
     try {
-      const { data, error } = await supabase
-        .from("knowledge_documents")
-        .select("*")
-        .eq("workspace_id", workspaceId)
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
-      setDocuments(data || []);
-    } catch (err) {
+      const result = await callBitrixData("get_documents", memberId);
+      if (result.error) throw new Error(result.error);
+      setDocuments(result.data || []);
+    } catch (err: any) {
       console.error("Error fetching documents:", err);
-      toast.error("Erro ao carregar documentos");
+      toast.error("Erro ao carregar documentos: " + err.message);
     } finally {
       setLoading(false);
     }
@@ -815,29 +789,25 @@ function TrainingView({ workspaceId }: { workspaceId?: string }) {
       return;
     }
 
-    if (!workspaceId) {
-      toast.error("Workspace não encontrado");
+    if (!memberId) {
+      toast.error("Sessão não identificada");
       return;
     }
 
     try {
       setUploading(true);
 
-      const { error } = await supabase
-        .from("knowledge_documents")
-        .insert({
-          title: newDoc.title,
-          content: newDoc.content,
-          source_type: newDoc.source_type,
-          workspace_id: workspaceId,
-          status: "ready"
-        });
+      const result = await callBitrixData("create_document", memberId, {
+        title: newDoc.title,
+        content: newDoc.content,
+        source_type: newDoc.source_type
+      });
 
-      if (error) throw error;
+      if (result.error) throw new Error(result.error);
 
       toast.success("Documento criado com sucesso!");
       setCreateDialogOpen(false);
-      setNewDoc({ title: "", content: "", source_type: "text" });
+      setNewDoc({ title: "", content: "", source_type: "manual" });
       fetchDocuments();
     } catch (err: any) {
       toast.error("Erro ao criar documento: " + err.message);
@@ -848,14 +818,11 @@ function TrainingView({ workspaceId }: { workspaceId?: string }) {
 
   const handleDeleteDocument = async (docId: string) => {
     if (!confirm("Tem certeza que deseja excluir este documento?")) return;
+    if (!memberId) return;
 
     try {
-      const { error } = await supabase
-        .from("knowledge_documents")
-        .delete()
-        .eq("id", docId);
-
-      if (error) throw error;
+      const result = await callBitrixData("delete_document", memberId, { id: docId });
+      if (result.error) throw new Error(result.error);
 
       toast.success("Documento excluído");
       fetchDocuments();
@@ -868,10 +835,11 @@ function TrainingView({ workspaceId }: { workspaceId?: string }) {
     pending: { label: "Processando", color: "bg-yellow-500" },
     processing: { label: "Processando", color: "bg-yellow-500" },
     ready: { label: "Pronto", color: "bg-green-500" },
+    completed: { label: "Pronto", color: "bg-green-500" },
     error: { label: "Erro", color: "bg-red-500" }
   };
 
-  if (!workspaceId) {
+  if (!memberId) {
     return (
       <div className="space-y-6">
         <div>
@@ -881,15 +849,13 @@ function TrainingView({ workspaceId }: { workspaceId?: string }) {
         <Card>
           <CardContent className="py-12 text-center">
             <AlertCircle className="h-12 w-12 text-amber-500 mx-auto mb-4" />
-            <h3 className="font-medium mb-2">Workspace não vinculado</h3>
+            <h3 className="font-medium mb-2">Sessão não identificada</h3>
             <p className="text-sm text-muted-foreground mb-4">
-              Para adicionar documentos de treinamento, primeiro vincule seu Bitrix24 a um workspace Thoth.
+              Recarregue a página para identificar sua sessão Bitrix24.
             </p>
-            <Button asChild>
-              <a href="https://chat.thoth24.com/training" target="_blank" rel="noopener noreferrer">
-                <ExternalLink className="h-4 w-4 mr-2" />
-                Acessar Painel Principal
-              </a>
+            <Button onClick={() => window.location.reload()}>
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Recarregar
             </Button>
           </CardContent>
         </Card>
@@ -1043,8 +1009,8 @@ function TrainingView({ workspaceId }: { workspaceId?: string }) {
   );
 }
 
-// Personas View - Full CRUD
-function PersonasView({ workspaceId }: { workspaceId?: string }) {
+// Personas View - Full CRUD using Edge Function
+function PersonasView({ memberId }: { memberId: string | null }) {
   const [personas, setPersonas] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
@@ -1059,28 +1025,23 @@ function PersonasView({ workspaceId }: { workspaceId?: string }) {
   });
 
   useEffect(() => {
-    if (workspaceId) {
+    if (memberId) {
       fetchPersonas();
     } else {
       setLoading(false);
     }
-  }, [workspaceId]);
+  }, [memberId]);
 
   const fetchPersonas = async () => {
-    if (!workspaceId) return;
+    if (!memberId) return;
     
     try {
-      const { data, error } = await supabase
-        .from("personas")
-        .select("*")
-        .eq("workspace_id", workspaceId)
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
-      setPersonas(data || []);
-    } catch (err) {
+      const result = await callBitrixData("get_personas", memberId);
+      if (result.error) throw new Error(result.error);
+      setPersonas(result.data || []);
+    } catch (err: any) {
       console.error("Error fetching personas:", err);
-      toast.error("Erro ao carregar personas");
+      toast.error("Erro ao carregar personas: " + err.message);
     } finally {
       setLoading(false);
     }
@@ -1099,44 +1060,38 @@ function PersonasView({ workspaceId }: { workspaceId?: string }) {
       return;
     }
 
-    if (!workspaceId) {
-      toast.error("Workspace não encontrado");
+    if (!memberId) {
+      toast.error("Sessão não identificada");
       return;
     }
 
     try {
       if (editingPersona?.id) {
         // Update existing
-        const { error } = await supabase
-          .from("personas")
-          .update({
-            name: data.name,
-            description: data.description,
-            system_prompt: data.system_prompt,
-            welcome_message: data.welcome_message,
-            fallback_message: data.fallback_message,
-            temperature: data.temperature
-          })
-          .eq("id", editingPersona.id);
+        const result = await callBitrixData("update_persona", memberId, {
+          id: editingPersona.id,
+          name: data.name,
+          description: data.description,
+          system_prompt: data.system_prompt,
+          welcome_message: data.welcome_message,
+          fallback_message: data.fallback_message,
+          temperature: data.temperature
+        });
 
-        if (error) throw error;
+        if (result.error) throw new Error(result.error);
         toast.success("Persona atualizada!");
       } else {
         // Create new
-        const { error } = await supabase
-          .from("personas")
-          .insert({
-            name: data.name,
-            description: data.description,
-            system_prompt: data.system_prompt,
-            welcome_message: data.welcome_message,
-            fallback_message: data.fallback_message,
-            temperature: data.temperature,
-            workspace_id: workspaceId,
-            is_active: true
-          });
+        const result = await callBitrixData("create_persona", memberId, {
+          name: data.name,
+          description: data.description,
+          system_prompt: data.system_prompt,
+          welcome_message: data.welcome_message,
+          fallback_message: data.fallback_message,
+          temperature: data.temperature
+        });
 
-        if (error) throw error;
+        if (result.error) throw new Error(result.error);
         toast.success("Persona criada!");
       }
 
@@ -1150,13 +1105,15 @@ function PersonasView({ workspaceId }: { workspaceId?: string }) {
   };
 
   const handleToggleActive = async (personaId: string, isActive: boolean) => {
+    if (!memberId) return;
+    
     try {
-      const { error } = await supabase
-        .from("personas")
-        .update({ is_active: !isActive })
-        .eq("id", personaId);
+      const result = await callBitrixData("update_persona", memberId, {
+        id: personaId,
+        is_active: !isActive
+      });
 
-      if (error) throw error;
+      if (result.error) throw new Error(result.error);
       toast.success(isActive ? "Persona desativada" : "Persona ativada");
       fetchPersonas();
     } catch (err: any) {
@@ -1165,20 +1122,12 @@ function PersonasView({ workspaceId }: { workspaceId?: string }) {
   };
 
   const handleSetDefault = async (personaId: string) => {
+    if (!memberId) return;
+    
     try {
-      // Remove default from all
-      await supabase
-        .from("personas")
-        .update({ is_default: false })
-        .eq("workspace_id", workspaceId);
+      const result = await callBitrixData("set_default_persona", memberId, { id: personaId });
 
-      // Set this one as default
-      const { error } = await supabase
-        .from("personas")
-        .update({ is_default: true })
-        .eq("id", personaId);
-
-      if (error) throw error;
+      if (result.error) throw new Error(result.error);
       toast.success("Persona definida como padrão");
       fetchPersonas();
     } catch (err: any) {
@@ -1188,14 +1137,12 @@ function PersonasView({ workspaceId }: { workspaceId?: string }) {
 
   const handleDeletePersona = async (personaId: string) => {
     if (!confirm("Tem certeza que deseja excluir esta persona?")) return;
+    if (!memberId) return;
 
     try {
-      const { error } = await supabase
-        .from("personas")
-        .delete()
-        .eq("id", personaId);
+      const result = await callBitrixData("delete_persona", memberId, { id: personaId });
 
-      if (error) throw error;
+      if (result.error) throw new Error(result.error);
       toast.success("Persona excluída");
       fetchPersonas();
     } catch (err: any) {
@@ -1211,7 +1158,7 @@ function PersonasView({ workspaceId }: { workspaceId?: string }) {
     setCreateDialogOpen(true);
   };
 
-  if (!workspaceId) {
+  if (!memberId) {
     return (
       <div className="space-y-6">
         <div>
@@ -1221,15 +1168,13 @@ function PersonasView({ workspaceId }: { workspaceId?: string }) {
         <Card>
           <CardContent className="py-12 text-center">
             <AlertCircle className="h-12 w-12 text-amber-500 mx-auto mb-4" />
-            <h3 className="font-medium mb-2">Workspace não vinculado</h3>
+            <h3 className="font-medium mb-2">Sessão não identificada</h3>
             <p className="text-sm text-muted-foreground mb-4">
-              Para gerenciar personas, primeiro vincule seu Bitrix24 a um workspace Thoth.
+              Recarregue a página para identificar sua sessão Bitrix24.
             </p>
-            <Button asChild>
-              <a href="https://chat.thoth24.com/personas" target="_blank" rel="noopener noreferrer">
-                <ExternalLink className="h-4 w-4 mr-2" />
-                Acessar Painel Principal
-              </a>
+            <Button onClick={() => window.location.reload()}>
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Recarregar
             </Button>
           </CardContent>
         </Card>
@@ -1430,29 +1375,31 @@ function PersonasView({ workspaceId }: { workspaceId?: string }) {
   );
 }
 
-// Flows View - Manage automation flows
-function FlowsView({ status, workspaceId }: { status: BitrixStatus | null; workspaceId?: string }) {
+// Flows View - Manage automation flows using Edge Function
+function FlowsView({ status, memberId }: { status: BitrixStatus | null; memberId: string | null }) {
   const [flows, setFlows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [newFlow, setNewFlow] = useState({ name: "", description: "", trigger_type: "keyword", trigger_value: "", intent_triggers: "" });
 
   useEffect(() => {
-    fetchFlows();
-  }, []);
+    if (memberId) {
+      fetchFlows();
+    } else {
+      setLoading(false);
+    }
+  }, [memberId]);
 
   const fetchFlows = async () => {
+    if (!memberId) return;
+    
     try {
-      const { data, error } = await supabase
-        .from("flows")
-        .select("*")
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
-      setFlows(data || []);
-    } catch (err) {
+      const result = await callBitrixData("get_flows", memberId);
+      if (result.error) throw new Error(result.error);
+      setFlows(result.data || []);
+    } catch (err: any) {
       console.error("Error fetching flows:", err);
-      toast.error("Erro ao carregar fluxos");
+      toast.error("Erro ao carregar fluxos: " + err.message);
     } finally {
       setLoading(false);
     }
@@ -1464,43 +1411,20 @@ function FlowsView({ status, workspaceId }: { status: BitrixStatus | null; works
       return;
     }
 
-    // Use workspaceId from props if available, otherwise try to get from workspace_members
-    let effectiveWorkspaceId = workspaceId;
-    
-    if (!effectiveWorkspaceId) {
-      const { data: workspaces } = await supabase
-        .from("workspace_members")
-        .select("workspace_id")
-        .limit(1)
-        .single();
-      effectiveWorkspaceId = workspaces?.workspace_id;
-    }
-
-    if (!effectiveWorkspaceId) {
-      toast.error("Workspace não encontrado");
+    if (!memberId) {
+      toast.error("Sessão não identificada");
       return;
     }
 
     try {
-      const intentTriggers = newFlow.intent_triggers
-        ? newFlow.intent_triggers.split(",").map(t => t.trim()).filter(Boolean)
-        : [];
+      const result = await callBitrixData("create_flow", memberId, {
+        name: newFlow.name,
+        description: newFlow.description,
+        trigger_type: newFlow.trigger_type,
+        trigger_value: newFlow.trigger_value || null
+      });
 
-      const { error } = await supabase
-        .from("flows")
-        .insert({
-          name: newFlow.name,
-          description: newFlow.description,
-          trigger_type: newFlow.trigger_type,
-          trigger_value: newFlow.trigger_value || null,
-          intent_triggers: intentTriggers,
-          workspace_id: effectiveWorkspaceId,
-          nodes: [],
-          edges: [],
-          is_active: false
-        });
-
-      if (error) throw error;
+      if (result.error) throw new Error(result.error);
 
       toast.success("Fluxo criado com sucesso!");
       setCreateDialogOpen(false);
@@ -1512,13 +1436,15 @@ function FlowsView({ status, workspaceId }: { status: BitrixStatus | null; works
   };
 
   const handleToggleFlow = async (flowId: string, isActive: boolean) => {
+    if (!memberId) return;
+    
     try {
-      const { error } = await supabase
-        .from("flows")
-        .update({ is_active: !isActive })
-        .eq("id", flowId);
+      const result = await callBitrixData("update_flow", memberId, {
+        id: flowId,
+        is_active: !isActive
+      });
 
-      if (error) throw error;
+      if (result.error) throw new Error(result.error);
 
       toast.success(isActive ? "Fluxo desativado" : "Fluxo ativado");
       fetchFlows();
@@ -1529,14 +1455,12 @@ function FlowsView({ status, workspaceId }: { status: BitrixStatus | null; works
 
   const handleDeleteFlow = async (flowId: string) => {
     if (!confirm("Tem certeza que deseja excluir este fluxo?")) return;
+    if (!memberId) return;
 
     try {
-      const { error } = await supabase
-        .from("flows")
-        .delete()
-        .eq("id", flowId);
+      const result = await callBitrixData("delete_flow", memberId, { id: flowId });
 
-      if (error) throw error;
+      if (result.error) throw new Error(result.error);
 
       toast.success("Fluxo excluído");
       fetchFlows();
