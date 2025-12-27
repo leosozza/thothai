@@ -304,10 +304,16 @@ serve(async (req) => {
       },
       body: JSON.stringify({
         instance_id: targetInstanceId,
+        // provide multiple naming conventions for different providers
+        phone_number: cleanPhone,
+        phoneNumber: cleanPhone,
         phone: cleanPhone,
-        message: message,
+        message,
         contact_id: contact?.id,
         conversation_id: conversationId,
+        workspace_id: integration.workspace_id,
+        internal_call: true,
+        source: "bitrix24_robot",
       }),
     });
 
