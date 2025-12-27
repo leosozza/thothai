@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { encode as base64Encode, decode as base64Decode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -30,6 +31,10 @@ interface ElevenLabsWebhookPayload {
     };
     transfer_type?: "conference" | "sip_refer" | "warm";
     transfer_reason?: string;
+    // Audio data
+    recording_url?: string;
+    audio_base64?: string;
+    audio_format?: string;
   };
   call_details?: {
     phone_number?: string;
@@ -248,6 +253,95 @@ serve(async (req) => {
         });
       }
 
+      case "post_call_audio": {
+        console.log("Processing post_call_audio event for conversation:", conversation_id);
+
+        // Find the call
+        const { data: call } = await supabase
+          .from("calls")
+          .select("id, workspace_id, phone_number, bitrix_activity_id")
+          .eq("elevenlabs_conversation_id", conversation_id)
+          .single();
+
+        if (!call) {
+          console.error("Call not found for conversation:", conversation_id);
+          return new Response(JSON.stringify({ error: "Call not found" }), {
+            status: 404,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+
+        let recordingUrl: string | null = null;
+
+        // If ElevenLabs provides a recording URL directly, use it
+        if (data?.recording_url) {
+          recordingUrl = data.recording_url;
+          console.log("Using provided recording URL:", recordingUrl);
+        }
+        // If base64 audio is provided, upload to storage
+        else if (data?.audio_base64) {
+          try {
+            console.log("Uploading audio to storage...");
+            
+            // Decode base64 audio
+            const audioBytes = base64Decode(data.audio_base64);
+            const audioFormat = data.audio_format || "mp3";
+            const fileName = `${call.id}.${audioFormat}`;
+            
+            // Upload to Supabase Storage
+            const { data: uploadData, error: uploadError } = await supabase.storage
+              .from("call-recordings")
+              .upload(fileName, audioBytes, {
+                contentType: `audio/${audioFormat}`,
+                upsert: true,
+              });
+
+            if (uploadError) {
+              console.error("Error uploading audio:", uploadError);
+              throw uploadError;
+            }
+
+            // Get public URL
+            const { data: publicUrlData } = supabase.storage
+              .from("call-recordings")
+              .getPublicUrl(fileName);
+
+            recordingUrl = publicUrlData.publicUrl;
+            console.log("Audio uploaded successfully:", recordingUrl);
+          } catch (uploadErr) {
+            console.error("Failed to upload audio:", uploadErr);
+          }
+        }
+
+        // Update call with recording URL
+        if (recordingUrl) {
+          const { error: updateError } = await supabase
+            .from("calls")
+            .update({ recording_url: recordingUrl })
+            .eq("id", call.id);
+
+          if (updateError) {
+            console.error("Error updating call with recording URL:", updateError);
+          }
+
+          // Create event for recording
+          await supabase.from("call_events").insert({
+            call_id: call.id,
+            event_type: "recording_available",
+            role: "system",
+            content: "Gravação da chamada disponível",
+            metadata: { recording_url: recordingUrl },
+          });
+
+          // Send recording to Bitrix24
+          await attachRecordingToBitrix(supabase, call, recordingUrl);
+        }
+
+        return new Response(JSON.stringify({ success: true, recording_url: recordingUrl }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
       case "human_takeover":
       case "transfer": {
         // Find the call with workspace info
@@ -345,54 +439,153 @@ async function createBitrixActivity(
 
     const { domain, access_token } = integration.config;
 
-    // Create activity in Bitrix24
-    const activityData = {
-      fields: {
-        OWNER_TYPE_ID: 3, // Contact
-        TYPE_ID: 2, // Call
-        SUBJECT: `Chamada IA - ${call.phone_number || "Desconhecido"}`,
-        DESCRIPTION: `
-<b>Resumo:</b> ${callData?.summary || "Sem resumo disponível"}
-
-<b>Duração:</b> ${callData?.call_duration_secs ? Math.floor(callData.call_duration_secs / 60) + "min " + (callData.call_duration_secs % 60) + "s" : "N/A"}
-
-<b>Sentimento:</b> ${callData?.sentiment || "Neutro"}
-
-<b>Transcrição:</b>
-${callData?.transcript || "Sem transcrição disponível"}
-        `.trim(),
-        DIRECTION: call.direction === "inbound" ? 1 : 2,
-        COMPLETED: "Y",
-        START_TIME: call.started_at,
-        END_TIME: call.ended_at || new Date().toISOString(),
-        RESULT: callData?.call_successful ? "Sucesso" : "Falha",
-      },
+    // Register external call in Bitrix24 telephony
+    const registerData = {
+      PHONE_NUMBER: call.phone_number || "Desconhecido",
+      TYPE: call.direction === "inbound" ? 2 : 1, // 1 = outgoing, 2 = incoming
+      LINE_NUMBER: "ThothAI",
+      SHOW: 0, // Don't show call card
+      CRM_CREATE: 1, // Create contact/lead if not exists
     };
 
-    const response = await fetch(
-      `https://${domain}/rest/crm.activity.add?auth=${access_token}`,
+    console.log("Registering call in Bitrix24 telephony:", registerData);
+
+    const registerResponse = await fetch(
+      `https://${domain}/rest/telephony.externalcall.register?auth=${access_token}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(activityData),
+        body: JSON.stringify(registerData),
       }
     );
 
-    const result = await response.json();
+    const registerResult = await registerResponse.json();
+    console.log("Bitrix24 register result:", registerResult);
 
-    if (result.result) {
+    if (registerResult.result?.CALL_ID) {
+      const bitrixCallId = registerResult.result.CALL_ID;
+
+      // Finish the call with summary
+      const finishData = {
+        CALL_ID: bitrixCallId,
+        USER_ID: 1, // Default user
+        DURATION: callData?.call_duration_secs || 0,
+        STATUS_CODE: callData?.call_successful ? 200 : 304, // 200 = success, 304 = missed
+        ADD_TO_CHAT: 0,
+      };
+
+      console.log("Finishing call in Bitrix24:", finishData);
+
+      const finishResponse = await fetch(
+        `https://${domain}/rest/telephony.externalcall.finish?auth=${access_token}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(finishData),
+        }
+      );
+
+      const finishResult = await finishResponse.json();
+      console.log("Bitrix24 finish result:", finishResult);
+
+      // Attach transcription if available
+      if (callData?.transcript) {
+        const transcriptionData = {
+          CALL_ID: bitrixCallId,
+          MESSAGES: [
+            {
+              SIDE: "Client",
+              START_TIME: 0,
+              STOP_TIME: callData?.call_duration_secs || 0,
+              MESSAGE: `[Resumo IA]\n${callData?.summary || "Sem resumo"}\n\n[Sentimento: ${callData?.sentiment || "Neutro"}]\n\n[Transcrição]\n${callData.transcript}`,
+            },
+          ],
+        };
+
+        await fetch(
+          `https://${domain}/rest/telephony.externalCall.attachTranscription?auth=${access_token}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(transcriptionData),
+          }
+        );
+        console.log("Transcription attached to Bitrix24 call");
+      }
+
       // Update call with Bitrix activity ID
       await supabase
         .from("calls")
-        .update({ bitrix_activity_id: result.result.toString() })
+        .update({ bitrix_activity_id: bitrixCallId })
         .eq("id", callId);
 
-      console.log("Bitrix24 activity created:", result.result);
+      console.log("Bitrix24 call activity created:", bitrixCallId);
     } else {
-      console.error("Error creating Bitrix24 activity:", result);
+      console.error("Error registering Bitrix24 call:", registerResult);
     }
   } catch (error) {
     console.error("Error creating Bitrix24 activity:", error);
+  }
+}
+
+// Attach recording to Bitrix24 call
+async function attachRecordingToBitrix(
+  supabase: any,
+  call: any,
+  recordingUrl: string
+) {
+  try {
+    if (!call.workspace_id) return;
+
+    // Check if Bitrix24 integration is configured
+    const { data: integration } = await supabase
+      .from("integrations")
+      .select("id, config")
+      .eq("workspace_id", call.workspace_id)
+      .eq("type", "bitrix24")
+      .eq("is_active", true)
+      .single();
+
+    if (!integration?.config?.access_token || !integration?.config?.domain) {
+      console.log("No active Bitrix24 integration for recording attachment");
+      return;
+    }
+
+    const { domain, access_token } = integration.config;
+    const bitrixCallId = call.bitrix_activity_id;
+
+    if (!bitrixCallId) {
+      console.log("No Bitrix24 call ID found, skipping recording attachment");
+      return;
+    }
+
+    // Attach recording to the call
+    const attachData = {
+      CALL_ID: bitrixCallId,
+      FILENAME: `call_${call.id}.mp3`,
+      RECORD_URL: recordingUrl,
+    };
+
+    console.log("Attaching recording to Bitrix24:", attachData);
+
+    const attachResponse = await fetch(
+      `https://${domain}/rest/telephony.externalCall.attachRecord?auth=${access_token}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(attachData),
+      }
+    );
+
+    const attachResult = await attachResponse.json();
+    
+    if (attachResult.result) {
+      console.log("Recording attached to Bitrix24 successfully");
+    } else {
+      console.error("Error attaching recording to Bitrix24:", attachResult);
+    }
+  } catch (error) {
+    console.error("Error attaching recording to Bitrix24:", error);
   }
 }
 

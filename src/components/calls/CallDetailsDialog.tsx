@@ -2,7 +2,6 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Separator } from "@/components/ui/separator";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import {
@@ -13,15 +12,16 @@ import {
   UserCheck,
   PhoneOff,
   ArrowRightLeft,
-  Clock,
   User,
   MessageSquare,
   Loader2,
   X,
   FileText,
-  BarChart,
+  Volume2,
+  Download,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useRef, useState } from "react";
 
 interface Call {
   id: string;
@@ -37,6 +37,7 @@ interface Call {
   sentiment: string | null;
   human_takeover: boolean;
   human_takeover_at: string | null;
+  recording_url?: string | null;
   persona?: {
     id: string;
     name: string;
@@ -74,6 +75,8 @@ export function CallDetailsDialog({
   onTransfer,
 }: CallDetailsDialogProps) {
   const isActive = call.status === "active";
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
 
   const formatDuration = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
@@ -84,6 +87,26 @@ export function CallDetailsDialog({
   const transcriptEvents = events.filter(
     (e) => e.event_type === "transcript" && e.content
   );
+
+  const handlePlayPause = () => {
+    if (audioRef.current) {
+      if (isPlaying) {
+        audioRef.current.pause();
+      } else {
+        audioRef.current.play();
+      }
+      setIsPlaying(!isPlaying);
+    }
+  };
+
+  const handleDownload = () => {
+    if (call.recording_url) {
+      const link = document.createElement("a");
+      link.href = call.recording_url;
+      link.download = `chamada_${call.id}.mp3`;
+      link.click();
+    }
+  };
 
   return (
     <Card className="glass-card overflow-hidden">
@@ -213,6 +236,35 @@ export function CallDetailsDialog({
           </div>
         )}
       </div>
+
+      {/* Recording Player */}
+      {call.recording_url && (
+        <div className="p-4 border-b border-border">
+          <div className="flex items-center gap-2 mb-3">
+            <Volume2 className="h-4 w-4 text-muted-foreground" />
+            <h4 className="font-medium text-sm">Gravação</h4>
+          </div>
+          <div className="flex items-center gap-3">
+            <audio
+              ref={audioRef}
+              src={call.recording_url}
+              onEnded={() => setIsPlaying(false)}
+              onPause={() => setIsPlaying(false)}
+              onPlay={() => setIsPlaying(true)}
+              className="flex-1 h-10"
+              controls
+            />
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={handleDownload}
+              title="Baixar gravação"
+            >
+              <Download className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Summary */}
       {call.summary && (
