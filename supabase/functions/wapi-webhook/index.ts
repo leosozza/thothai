@@ -780,9 +780,28 @@ serve(async (req) => {
           }
         }
 
+        // CRITICAL: Re-fetch conversation to get latest state (prevents race condition)
+        const { data: latestConversation } = await supabase
+          .from("conversations")
+          .select("attendance_mode, assigned_to, processing_blocked")
+          .eq("id", conversation.id)
+          .single();
+        
         // Check attendance mode before processing with AI
-        const attendanceMode = conversation.attendance_mode || 'ai';
-        const assignedTo = conversation.assigned_to;
+        const attendanceMode = latestConversation?.attendance_mode || conversation.attendance_mode || 'ai';
+        const assignedTo = latestConversation?.assigned_to || conversation.assigned_to;
+        const processingBlocked = latestConversation?.processing_blocked === true;
+        
+        // ANTI-LOOP: Skip if conversation is blocked or in human mode
+        if (processingBlocked) {
+          console.log("ANTI-LOOP: Skipping AI - processing_blocked is true (human took over)");
+          break;
+        }
+        
+        if (attendanceMode === 'human') {
+          console.log("ANTI-LOOP: Skipping AI - attendance_mode is human");
+          break;
+        }
         
         // Trigger AI processing if message has content OR has an image
         const hasContent = msgContent || storedImageUrl;

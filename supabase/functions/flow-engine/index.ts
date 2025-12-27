@@ -137,9 +137,20 @@ serve(async (req) => {
     // Check conversation attendance mode first
     const { data: conversation } = await supabase
       .from("conversations")
-      .select("attendance_mode, bot_state")
+      .select("attendance_mode, bot_state, processing_blocked")
       .eq("id", conversation_id)
       .single();
+
+    // ANTI-LOOP: Skip if processing is blocked (human took over)
+    if (conversation?.processing_blocked === true) {
+      console.log("ANTI-LOOP: Conversation processing_blocked is true, skipping flow engine");
+      return new Response(JSON.stringify({ 
+        skipped: true, 
+        reason: "Processing blocked - human takeover" 
+      }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
 
     if (conversation?.attendance_mode === "human") {
       console.log("Conversation in human mode, skipping flow engine");

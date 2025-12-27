@@ -623,6 +623,7 @@ export type Database = {
           instance_id: string
           last_bot_message_hash: string | null
           last_message_at: string | null
+          processing_blocked: boolean | null
           processing_lock_at: string | null
           status: string
           unread_count: number
@@ -640,6 +641,7 @@ export type Database = {
           instance_id: string
           last_bot_message_hash?: string | null
           last_message_at?: string | null
+          processing_blocked?: boolean | null
           processing_lock_at?: string | null
           status?: string
           unread_count?: number
@@ -657,6 +659,7 @@ export type Database = {
           instance_id?: string
           last_bot_message_hash?: string | null
           last_message_at?: string | null
+          processing_blocked?: boolean | null
           processing_lock_at?: string | null
           status?: string
           unread_count?: number

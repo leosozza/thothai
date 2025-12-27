@@ -504,11 +504,21 @@ export default function Conversations() {
     setTransferring(true);
     
     try {
+      // First, immediately block AI processing to prevent race conditions
+      await supabase
+        .from("conversations")
+        .update({
+          processing_blocked: true,
+        })
+        .eq("id", selectedConversation.id);
+
+      // Then update the full attendance mode
       const { error } = await supabase
         .from("conversations")
         .update({
           attendance_mode: "human",
           status: "in_progress",
+          processing_blocked: true,
         })
         .eq("id", selectedConversation.id);
       
@@ -548,7 +558,9 @@ export default function Conversations() {
         .update({
           attendance_mode: "ai",
           assigned_to: null,
+          assigned_operator_id: null,
           status: "open",
+          processing_blocked: false, // Unblock AI processing
         })
         .eq("id", selectedConversation.id);
       
