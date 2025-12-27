@@ -182,12 +182,19 @@ serve(async (req) => {
         body: {
           instance_id: instanceId,
           phone_number: formattedPhone,
+          phoneNumber: formattedPhone,
+          phone: formattedPhone,
           message: messageText,
+          workspace_id: workspaceId,
+          internal_call: true,
+          source: "bitrix24_sms",
         }
       });
-      
-      if (response.data?.success) {
-        sendResult = { success: true, message_id: response.data.message_id || messageId };
+
+      if (response.error) {
+        sendResult = { success: false, error: response.error.message };
+      } else if (response.data?.success) {
+        sendResult = { success: true, message_id: response.data.message_id || response.data.messageId || messageId };
       } else {
         sendResult = { success: false, error: response.data?.error || "Failed to send via Evolution" };
       }
@@ -197,12 +204,19 @@ serve(async (req) => {
         body: {
           instance_id: instanceId,
           phone_number: formattedPhone,
+          phoneNumber: formattedPhone,
+          phone: formattedPhone,
           message: messageText,
+          workspace_id: workspaceId,
+          internal_call: true,
+          source: "bitrix24_sms",
         }
       });
-      
-      if (response.data?.success) {
-        sendResult = { success: true, message_id: response.data.message_id || messageId };
+
+      if (response.error) {
+        sendResult = { success: false, error: response.error.message };
+      } else if (response.data?.success) {
+        sendResult = { success: true, message_id: response.data.message_id || response.data.messageId || messageId };
       } else {
         sendResult = { success: false, error: response.data?.error || "Failed to send via Gupshup" };
       }
@@ -212,12 +226,19 @@ serve(async (req) => {
         body: {
           instance_id: instanceId,
           phone_number: formattedPhone,
+          phoneNumber: formattedPhone,
+          phone: formattedPhone,
           message: messageText,
+          workspace_id: workspaceId,
+          internal_call: true,
+          source: "bitrix24_sms",
         }
       });
-      
-      if (response.data?.success) {
-        sendResult = { success: true, message_id: response.data.message_id || messageId };
+
+      if (response.error) {
+        sendResult = { success: false, error: response.error.message };
+      } else if (response.data?.success) {
+        sendResult = { success: true, message_id: response.data.message_id || response.data.messageId || messageId };
       } else {
         sendResult = { success: false, error: response.data?.error || "Failed to send via WAPI" };
       }
