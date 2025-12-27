@@ -348,7 +348,7 @@ Deno.serve(async (req) => {
 
       // ============ BOT PUBLISHING ============
       case "publish_persona_bot": {
-        console.log(`[bitrix24-data] Publishing persona ${data.persona_id} as bot`);
+        console.log(`[bitrix24-data] Publishing persona ${data.persona_id} as bot, force=${data.force}`);
         
         // Call bitrix24-bot-register to register the persona as a bot
         const response = await fetch(`${supabaseUrl}/functions/v1/bitrix24-bot-register`, {
@@ -360,7 +360,8 @@ Deno.serve(async (req) => {
           body: JSON.stringify({
             action: "register_persona",
             workspace_id: workspaceId,
-            persona_id: data.persona_id
+            persona_id: data.persona_id,
+            force: data.force === true
           })
         });
 

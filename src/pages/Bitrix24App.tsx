@@ -1159,16 +1159,16 @@ function PersonasView({ memberId }: { memberId: string | null }) {
     setCreateDialogOpen(true);
   };
 
-  const handlePublishBot = async (personaId: string) => {
+  const handlePublishBot = async (personaId: string, force: boolean = false) => {
     if (!memberId) return;
     
     try {
       setPublishingBot(personaId);
-      const result = await callBitrixData("publish_persona_bot", memberId, { persona_id: personaId });
+      const result = await callBitrixData("publish_persona_bot", memberId, { persona_id: personaId, force });
       
       if (result.error) throw new Error(result.error);
       
-      toast.success("Bot publicado no Bitrix24!");
+      toast.success(force ? "Bot republicado no Bitrix24!" : "Bot publicado no Bitrix24!");
       fetchPersonas();
     } catch (err: any) {
       console.error("Error publishing bot:", err);
@@ -1397,20 +1397,36 @@ function PersonasView({ memberId }: { memberId: string | null }) {
                       </Button>
                     )}
                     {persona.bitrix_bot_id ? (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleUnpublishBot(persona.id)}
-                        disabled={publishingBot === persona.id}
-                        className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                      >
-                        {publishingBot === persona.id ? (
-                          <Loader2 className="h-4 w-4 animate-spin mr-1" />
-                        ) : (
-                          <XCircle className="h-4 w-4 mr-1" />
-                        )}
-                        Remover Bot
-                      </Button>
+                      <>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handlePublishBot(persona.id, true)}
+                          disabled={publishingBot === persona.id}
+                          className="text-amber-600 hover:text-amber-700 hover:bg-amber-50"
+                        >
+                          {publishingBot === persona.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                          ) : (
+                            <RotateCcw className="h-4 w-4 mr-1" />
+                          )}
+                          Republicar
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleUnpublishBot(persona.id)}
+                          disabled={publishingBot === persona.id}
+                          className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                        >
+                          {publishingBot === persona.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                          ) : (
+                            <XCircle className="h-4 w-4 mr-1" />
+                          )}
+                          Remover
+                        </Button>
+                      </>
                     ) : (
                       <Button
                         variant="outline"

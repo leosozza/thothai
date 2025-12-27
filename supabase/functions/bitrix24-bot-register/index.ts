@@ -166,16 +166,72 @@ serve(async (req) => {
           );
         }
 
-        // Check if persona already has a bot
-        if (persona.bitrix_bot_id) {
-          return new Response(
-            JSON.stringify({ 
-              success: true, 
-              bot_id: persona.bitrix_bot_id,
-              message: "Persona já está publicada como bot" 
-            }),
-            { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-          );
+        const force = payload.force === true;
+        
+        // Check if persona already has a bot - but verify it actually exists in Bitrix24
+        if (persona.bitrix_bot_id && !force) {
+          // Verify the bot exists in Bitrix24 by calling imbot.bot.list
+          console.log("Persona has bitrix_bot_id, verifying if bot exists in Bitrix24...");
+          
+          try {
+            const listResponse = await fetch(`${clientEndpoint}imbot.bot.list`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ auth: accessToken })
+            });
+            
+            const listResult = await listResponse.json();
+            console.log("imbot.bot.list result:", JSON.stringify(listResult, null, 2));
+            
+            if (listResult.result) {
+              const botExists = listResult.result.some((bot: any) => 
+                bot.ID === persona.bitrix_bot_id || 
+                String(bot.ID) === String(persona.bitrix_bot_id)
+              );
+              
+              if (botExists) {
+                console.log("Bot exists in Bitrix24, returning success");
+                return new Response(
+                  JSON.stringify({ 
+                    success: true, 
+                    bot_id: persona.bitrix_bot_id,
+                    message: "Persona já está publicada como bot" 
+                  }),
+                  { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+                );
+              } else {
+                console.log("Bot NOT found in Bitrix24, will re-register");
+                // Bot doesn't exist in Bitrix24, clear the stale ID
+                await supabase
+                  .from("personas")
+                  .update({
+                    bitrix_bot_id: null,
+                    bitrix_bot_enabled: false,
+                    updated_at: new Date().toISOString()
+                  })
+                  .eq("id", persona_id);
+              }
+            }
+          } catch (verifyError) {
+            console.error("Error verifying bot existence:", verifyError);
+            // Continue with registration if verification fails
+          }
+        } else if (force && persona.bitrix_bot_id) {
+          // Force republish: unregister first
+          console.log("Force republish: unregistering existing bot first...");
+          try {
+            await fetch(`${clientEndpoint}imbot.unregister`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                auth: accessToken,
+                BOT_ID: persona.bitrix_bot_id
+              })
+            });
+            console.log("Old bot unregistered for force republish");
+          } catch (unregErr) {
+            console.log("Unregister error (continuing anyway):", unregErr);
+          }
         }
 
         const botCode = generateBotCode(persona.name, persona.id);
@@ -185,7 +241,7 @@ serve(async (req) => {
         const botPayload = {
           auth: accessToken,
           CODE: botCode,
-          TYPE: "B", // B = chatbot (immediate responses)
+          TYPE: "O", // O = Open Lines chatbot (appears in Contact Center dropdown)
           OPENLINE: "Y", // Support Open Lines
           EVENT_MESSAGE_ADD: eventsUrl,
           EVENT_WELCOME_MESSAGE: eventsUrl,
