@@ -69,9 +69,7 @@ export default function Instances() {
   const [gupshupApiKey, setGupshupApiKey] = useState("");
   const [gupshupAppId, setGupshupAppId] = useState("");
   const [gupshupPhoneNumber, setGupshupPhoneNumber] = useState("");
-  const [apiBrasilSecretKey, setApiBrasilSecretKey] = useState("");
   const [apiBrasilDeviceToken, setApiBrasilDeviceToken] = useState("");
-  const [apiBrasilPublicToken, setApiBrasilPublicToken] = useState("");
   const [apiBrasilBearerToken, setApiBrasilBearerToken] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [qrDialogOpen, setQrDialogOpen] = useState(false);
@@ -143,9 +141,7 @@ export default function Instances() {
     setGupshupApiKey("");
     setGupshupAppId("");
     setGupshupPhoneNumber("");
-    setApiBrasilSecretKey("");
     setApiBrasilDeviceToken("");
-    setApiBrasilPublicToken("");
     setApiBrasilBearerToken("");
   };
 
@@ -170,8 +166,8 @@ export default function Instances() {
     }
 
     if (connectionType === "apibrasil") {
-      if (!apiBrasilSecretKey.trim() || !apiBrasilDeviceToken.trim() || !apiBrasilPublicToken.trim() || !apiBrasilBearerToken.trim()) {
-        toast.error("Preencha todas as credenciais da APIBrasil");
+      if (!apiBrasilDeviceToken.trim() || !apiBrasilBearerToken.trim()) {
+        toast.error("Preencha o Device Token e o Bearer Token da APIBrasil");
         return;
       }
     }
@@ -193,9 +189,7 @@ export default function Instances() {
         connection_type: connectionType === "evolution" || connectionType === "apibrasil" ? "waba" : connectionType,
         provider_type: providerType,
         evolution_instance_name: connectionType === "evolution" ? evolutionInstanceName.trim() : null,
-        apibrasil_secret_key: connectionType === "apibrasil" ? apiBrasilSecretKey.trim() : null,
         apibrasil_device_token: connectionType === "apibrasil" ? apiBrasilDeviceToken.trim() : null,
-        apibrasil_public_token: connectionType === "apibrasil" ? apiBrasilPublicToken.trim() : null,
         apibrasil_bearer_token: connectionType === "apibrasil" ? apiBrasilBearerToken.trim() : null,
       }).select().single();
 
@@ -250,9 +244,7 @@ export default function Instances() {
             instanceId: newInstance.id,
             workspaceId: workspace?.id,
             action: "setup",
-            secretKey: apiBrasilSecretKey.trim(),
             deviceToken: apiBrasilDeviceToken.trim(),
-            publicToken: apiBrasilPublicToken.trim(),
             bearerToken: apiBrasilBearerToken.trim(),
           },
         });
@@ -578,6 +570,18 @@ const getConnectionTypeBadge = (connectionType?: string, providerType?: string) 
                         </p>
                       </Label>
                     </div>
+                    <div className="flex items-start space-x-3 p-3 border rounded-lg hover:bg-muted/50 transition-colors">
+                      <RadioGroupItem value="apibrasil" id="apibrasil" className="mt-1" />
+                      <Label htmlFor="apibrasil" className="flex-1 cursor-pointer">
+                        <div className="flex items-center gap-2 font-medium">
+                          <Smartphone className="h-4 w-4 text-orange-500" />
+                          APIBrasil (QR Code)
+                        </div>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          Conecte via APIBrasil usando Evolution API.
+                        </p>
+                      </Label>
+                    </div>
                   </RadioGroup>
                 </div>
 
@@ -675,6 +679,50 @@ const getConnectionTypeBadge = (connectionType?: string, providerType?: string) 
                       <p className="text-xs text-muted-foreground">
                         Formato internacional sem + ou espaços
                       </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* APIBrasil Fields */}
+                {connectionType === "apibrasil" && (
+                  <div className="space-y-4 p-4 bg-muted/30 rounded-lg border">
+                    <div className="flex items-center gap-2 text-sm font-medium text-orange-600">
+                      <Smartphone className="h-4 w-4" />
+                      Configuração APIBrasil
+                    </div>
+                    
+                    <div className="p-3 bg-orange-50 dark:bg-orange-950/30 border border-orange-200 dark:border-orange-800 rounded-lg">
+                      <p className="text-sm text-orange-800 dark:text-orange-200 font-medium mb-2">
+                        📋 Como obter suas credenciais:
+                      </p>
+                      <ol className="text-xs text-orange-700 dark:text-orange-300 space-y-1 list-decimal list-inside">
+                        <li>Acesse seu painel em apibrasil.io</li>
+                        <li>Copie o <strong>Device Token</strong> do seu dispositivo</li>
+                        <li>Copie o <strong>Bearer Token</strong> (Authorization)</li>
+                      </ol>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="apibrasil-device-token">Device Token *</Label>
+                      <Input
+                        id="apibrasil-device-token"
+                        type="password"
+                        placeholder="73b76b21-1790-4936-ad9d..."
+                        value={apiBrasilDeviceToken}
+                        onChange={(e) => setApiBrasilDeviceToken(e.target.value)}
+                        disabled={creating}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="apibrasil-bearer-token">Bearer Token *</Label>
+                      <Input
+                        id="apibrasil-bearer-token"
+                        type="password"
+                        placeholder="eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9..."
+                        value={apiBrasilBearerToken}
+                        onChange={(e) => setApiBrasilBearerToken(e.target.value)}
+                        disabled={creating}
+                      />
                     </div>
                   </div>
                 )}
