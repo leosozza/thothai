@@ -152,3 +152,6 @@ verify_jwt = false
 
 [functions.bitrix24-sms-handler]
 verify_jwt = false
+
+[functions.bitrix24-data]
+verify_jwt = false
