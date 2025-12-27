@@ -54,6 +54,7 @@ async function parseSSEResponse(response: Response): Promise<ParsedSSEResult> {
   const contentType = response.headers.get("content-type") || "";
   const text = await response.text();
 
+  // Try to extract session ID from various headers
   const sessionId =
     response.headers.get("Mcp-Session-Id") ||
     response.headers.get("mcp-session-id") ||
@@ -62,9 +63,7 @@ async function parseSSEResponse(response: Response): Promise<ParsedSSEResult> {
 
   console.log(`[MCP Discover] Content-Type: ${contentType}`);
   console.log(`[MCP Discover] Session-ID from headers: ${sessionId}`);
-  console.log(
-    `[MCP Discover] Raw response (first 1000 chars): ${text.substring(0, 1000)}`
-  );
+  console.log(`[MCP Discover] Raw response (first 1000 chars): ${text.substring(0, 1000)}`);
 
   if (contentType.includes("application/json")) {
     try {
@@ -111,9 +110,7 @@ async function parseSSEResponse(response: Response): Promise<ParsedSSEResult> {
           }
         }
       } catch (_e) {
-        console.warn(
-          `[MCP Discover] Failed to parse SSE data line: ${jsonStr.substring(0, 100)}`
-        );
+        console.warn(`[MCP Discover] Failed to parse SSE data line: ${jsonStr.substring(0, 100)}`);
       }
     }
   }
@@ -132,20 +129,26 @@ async function parseSSEResponse(response: Response): Promise<ParsedSSEResult> {
 
 function buildSessionHeaders(
   baseHeaders: Record<string, string>,
-  sessionId?: string
+  sessionId: string
 ): Record<string, string> {
-  const headers: Record<string, string> = { ...baseHeaders };
-  if (sessionId) {
-    headers["Mcp-Session-Id"] = sessionId;
-    headers["mcp-session-id"] = sessionId;
-  }
-  return headers;
+  return {
+    ...baseHeaders,
+    "Mcp-Session-Id": sessionId,
+    "mcp-session-id": sessionId,
+  };
 }
 
 async function initializeMcpSession(
   targetUrl: string,
   requestHeaders: Record<string, string>
-): Promise<{ initData: unknown; sessionId?: string; sessionHeaders: Record<string, string> }> {
+): Promise<{ initData: unknown; sessionId: string; sessionHeaders: Record<string, string> }> {
+  // ALWAYS generate a client session ID upfront
+  // This ensures compatibility with servers that require session ID on first request
+  const clientSessionId = crypto.randomUUID().replaceAll("-", "");
+  console.log(`[MCP Discover] Using client-generated session ID: ${clientSessionId}`);
+
+  const sessionHeaders = buildSessionHeaders(requestHeaders, clientSessionId);
+
   const initBody = {
     jsonrpc: "2.0",
     id: 1,
@@ -157,62 +160,34 @@ async function initializeMcpSession(
     },
   };
 
-  const doInit = (headers: Record<string, string>) =>
-    fetchWithTimeout(
-      targetUrl,
-      {
-        method: "POST",
-        headers,
-        body: JSON.stringify(initBody),
-      },
-      30000
-    );
+  console.log(`[MCP Discover] Sending initialize with session ID...`);
 
-  // Attempt 1: initialize without session ID
-  let initResponse = await doInit(requestHeaders);
-  if (initResponse.ok) {
-    const parsed = await parseSSEResponse(initResponse);
-    const sessionId = parsed.sessionId;
-    return {
-      initData: parsed.data,
-      sessionId,
-      sessionHeaders: buildSessionHeaders(requestHeaders, sessionId),
-    };
+  const initResponse = await fetchWithTimeout(
+    targetUrl,
+    {
+      method: "POST",
+      headers: sessionHeaders,
+      body: JSON.stringify(initBody),
+    },
+    30000
+  );
+
+  if (!initResponse.ok) {
+    const errorText = await initResponse.text();
+    console.error(`[MCP Discover] Init failed: ${initResponse.status} - ${errorText}`);
+    throw new Error(`Falha ao conectar ao MCP: ${initResponse.status} - ${errorText}`);
   }
 
-  const errorText = await initResponse.text();
-  console.error(`[MCP Discover] Init failed: ${initResponse.status} - ${errorText}`);
+  const parsed = await parseSSEResponse(initResponse);
+  // Prefer server-provided session ID if available, otherwise use client-generated
+  const finalSessionId = parsed.sessionId || clientSessionId;
+  console.log(`[MCP Discover] Final session ID: ${finalSessionId}`);
 
-  // Some servers require a client-provided session id even for initialize.
-  if (initResponse.status === 400 && /session id/i.test(errorText)) {
-    const clientSessionId = crypto.randomUUID().replaceAll("-", "");
-    console.log(
-      `[MCP Discover] Retrying initialize with client session id: ${clientSessionId}`
-    );
-
-    const retryHeaders = buildSessionHeaders(requestHeaders, clientSessionId);
-    initResponse = await doInit(retryHeaders);
-
-    if (!initResponse.ok) {
-      const retryErrorText = await initResponse.text();
-      console.error(
-        `[MCP Discover] Init retry failed: ${initResponse.status} - ${retryErrorText}`
-      );
-      throw new Error(
-        `Falha ao conectar ao MCP: ${initResponse.status} - ${retryErrorText}`
-      );
-    }
-
-    const parsed = await parseSSEResponse(initResponse);
-    const sessionId = parsed.sessionId || clientSessionId;
-    return {
-      initData: parsed.data,
-      sessionId,
-      sessionHeaders: buildSessionHeaders(requestHeaders, sessionId),
-    };
-  }
-
-  throw new Error(`Falha ao conectar ao MCP: ${initResponse.status} - ${errorText}`);
+  return {
+    initData: parsed.data,
+    sessionId: finalSessionId,
+    sessionHeaders: buildSessionHeaders(requestHeaders, finalSessionId),
+  };
 }
 
 // deno-lint-ignore no-explicit-any
@@ -287,15 +262,15 @@ serve(async (req) => {
       ...authHeaders,
     };
 
-    console.log(`[MCP Discover] Sending initialize request...`);
     const { initData, sessionId, sessionHeaders } = await initializeMcpSession(
       targetUrl,
       requestHeaders
     );
 
-    console.log(`[MCP Discover] Session ID: ${sessionId || "(none)"}`);
-    await logToDebug(supabase, "info", "Init successful", { initData, sessionId });
+    console.log(`[MCP Discover] Session established: ${sessionId}`);
+    await logToDebug(supabase, "info", "Init successful", { sessionId });
 
+    // Send initialized notification
     console.log(`[MCP Discover] Sending initialized notification...`);
     await fetchWithTimeout(
       targetUrl,
@@ -310,6 +285,7 @@ serve(async (req) => {
       10000
     );
 
+    // Request tools list
     console.log(`[MCP Discover] Requesting tools list...`);
     const toolsResponse = await fetchWithTimeout(
       targetUrl,
@@ -347,6 +323,7 @@ serve(async (req) => {
     }
 
     const tools: MCPTool[] = toolsResult.result?.tools || [];
+    console.log(`[MCP Discover] Found ${tools.length} tools`);
 
     if (mcp_connection_id) {
       await supabase

@@ -110,20 +110,25 @@ async function parseSSEResponse(response: Response): Promise<ParsedSSEResult> {
 
 function buildSessionHeaders(
   baseHeaders: Record<string, string>,
-  sessionId?: string
+  sessionId: string
 ): Record<string, string> {
-  const headers: Record<string, string> = { ...baseHeaders };
-  if (sessionId) {
-    headers["Mcp-Session-Id"] = sessionId;
-    headers["mcp-session-id"] = sessionId;
-  }
-  return headers;
+  return {
+    ...baseHeaders,
+    "Mcp-Session-Id": sessionId,
+    "mcp-session-id": sessionId,
+  };
 }
 
 async function initializeMcpSession(
   targetUrl: string,
   requestHeaders: Record<string, string>
-): Promise<{ sessionId?: string; sessionHeaders: Record<string, string> }> {
+): Promise<{ sessionId: string; sessionHeaders: Record<string, string> }> {
+  // ALWAYS generate a client session ID upfront
+  const clientSessionId = crypto.randomUUID().replaceAll("-", "");
+  console.log(`[MCP Call] Using client-generated session ID: ${clientSessionId}`);
+
+  const sessionHeaders = buildSessionHeaders(requestHeaders, clientSessionId);
+
   const initBody = {
     jsonrpc: "2.0",
     id: 1,
@@ -135,46 +140,33 @@ async function initializeMcpSession(
     },
   };
 
-  const doInit = (headers: Record<string, string>) =>
-    fetchWithTimeout(
-      targetUrl,
-      {
-        method: "POST",
-        headers,
-        body: JSON.stringify(initBody),
-      },
-      30000
-    );
+  console.log(`[MCP Call] Sending initialize with session ID...`);
 
-  let initResponse = await doInit(requestHeaders);
-  if (initResponse.ok) {
-    const parsed = await parseSSEResponse(initResponse);
-    const sessionId = parsed.sessionId;
-    return { sessionId, sessionHeaders: buildSessionHeaders(requestHeaders, sessionId) };
+  const initResponse = await fetchWithTimeout(
+    targetUrl,
+    {
+      method: "POST",
+      headers: sessionHeaders,
+      body: JSON.stringify(initBody),
+    },
+    30000
+  );
+
+  if (!initResponse.ok) {
+    const errorText = await initResponse.text();
+    console.error(`[MCP Call] Init failed: ${initResponse.status} - ${errorText}`);
+    throw new Error(`Falha na inicialização: ${initResponse.status} - ${errorText}`);
   }
 
-  const errorText = await initResponse.text();
-  console.error(`[MCP Call] Init failed: ${initResponse.status} - ${errorText}`);
+  const parsed = await parseSSEResponse(initResponse);
+  // Prefer server-provided session ID if available
+  const finalSessionId = parsed.sessionId || clientSessionId;
+  console.log(`[MCP Call] Final session ID: ${finalSessionId}`);
 
-  if (initResponse.status === 400 && /session id/i.test(errorText)) {
-    const clientSessionId = crypto.randomUUID().replaceAll("-", "");
-    console.log(`[MCP Call] Retrying initialize with client session id: ${clientSessionId}`);
-
-    const retryHeaders = buildSessionHeaders(requestHeaders, clientSessionId);
-    initResponse = await doInit(retryHeaders);
-
-    if (!initResponse.ok) {
-      const retryErrorText = await initResponse.text();
-      console.error(`[MCP Call] Init retry failed: ${initResponse.status} - ${retryErrorText}`);
-      throw new Error(`Falha na inicialização: ${initResponse.status} - ${retryErrorText}`);
-    }
-
-    const parsed = await parseSSEResponse(initResponse);
-    const sessionId = parsed.sessionId || clientSessionId;
-    return { sessionId, sessionHeaders: buildSessionHeaders(requestHeaders, sessionId) };
-  }
-
-  throw new Error(`Falha na inicialização: ${initResponse.status} - ${errorText}`);
+  return {
+    sessionId: finalSessionId,
+    sessionHeaders: buildSessionHeaders(requestHeaders, finalSessionId),
+  };
 }
 
 serve(async (req) => {
@@ -228,8 +220,9 @@ serve(async (req) => {
       connection.mcp_url,
       requestHeaders
     );
-    console.log(`[MCP Call] Session ID: ${sessionId || "(none)"}`);
+    console.log(`[MCP Call] Session established: ${sessionId}`);
 
+    // Send initialized notification
     await fetchWithTimeout(
       connection.mcp_url,
       {
@@ -243,6 +236,7 @@ serve(async (req) => {
       10000
     );
 
+    // Call the tool
     const callResponse = await fetchWithTimeout(
       connection.mcp_url,
       {

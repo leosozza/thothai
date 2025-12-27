@@ -2140,6 +2140,33 @@ async function handleRegisterSmsProvider(supabase: any, payload: any, supabaseUr
         );
       }
 
+      // Handle insufficient_scope error specifically
+      if (registerResult.error === "insufficient_scope" || 
+          registerResult.error_description?.includes("insufficient_scope") ||
+          registerResult.error_description?.includes("messageservice")) {
+        // Update config to mark scope as missing
+        await supabase
+          .from("integrations")
+          .update({
+            config: {
+              ...config,
+              sms_provider_scope_missing: true,
+              sms_provider_scope_error: registerResult.error_description || registerResult.error,
+            },
+            updated_at: new Date().toISOString()
+          })
+          .eq("id", integration.id);
+
+        return new Response(
+          JSON.stringify({ 
+            success: false,
+            error: "insufficient_scope: O escopo 'messageservice' não está disponível. Reinstale o aplicativo no Marketplace Bitrix24 para obter as permissões atualizadas.",
+            scope_missing: "messageservice"
+          }),
+          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
       return new Response(
         JSON.stringify({ error: registerResult.error_description || registerResult.error }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -2175,6 +2202,166 @@ async function handleRegisterSmsProvider(supabase: any, payload: any, supabaseUr
     console.error("Error registering SMS provider:", error);
     return new Response(
       JSON.stringify({ error: error instanceof Error ? error.message : "Erro ao registrar provedor de SMS" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+}
+
+// Handle test_sms_provider action - Test the SMS provider by listing registered providers
+async function handleTestSmsProvider(supabase: any, payload: any, supabaseUrl: string) {
+  console.log("=== TEST SMS PROVIDER ===");
+  const { integration_id } = payload;
+
+  if (!integration_id) {
+    return new Response(
+      JSON.stringify({ error: "Integration ID é obrigatório" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const { data: integration, error: integrationError } = await supabase
+    .from("integrations")
+    .select("*")
+    .eq("id", integration_id)
+    .single();
+
+  if (integrationError || !integration) {
+    return new Response(
+      JSON.stringify({ error: "Integração não encontrada" }),
+      { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const accessToken = await refreshBitrixToken(integration, supabase);
+  if (!accessToken) {
+    return new Response(
+      JSON.stringify({ error: "Token de acesso não disponível" }),
+      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const config = integration.config;
+  const clientEndpoint = config.domain ? `https://${config.domain}/rest/` : config.client_endpoint;
+
+  try {
+    // List all SMS providers
+    console.log("Listing SMS providers...");
+    const listResponse = await fetch(`${clientEndpoint}messageservice.sender.list`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ auth: accessToken })
+    });
+
+    const listResult = await listResponse.json();
+    console.log("messageservice.sender.list result:", JSON.stringify(listResult));
+
+    if (listResult.error) {
+      return new Response(
+        JSON.stringify({ 
+          success: false, 
+          error: listResult.error_description || listResult.error,
+          message: "Erro ao listar provedores SMS"
+        }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Check if our provider exists
+    const providers = listResult.result || [];
+    const thothProvider = providers.find((p: any) => 
+      p.CODE === "thoth_whatsapp_sms" || 
+      p.ID === "thoth_whatsapp_sms" || 
+      (p.NAME && p.NAME.toLowerCase().includes("thoth"))
+    );
+
+    if (thothProvider) {
+      return new Response(
+        JSON.stringify({ 
+          success: true, 
+          message: "✅ Provedor SMS Thoth WhatsApp está registrado e funcionando!",
+          provider: thothProvider,
+          all_providers: providers.length,
+          how_to_use: "No CRM, vá em Automações → Adicionar → Enviar SMS → Selecione 'Thoth WhatsApp'"
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    } else {
+      return new Response(
+        JSON.stringify({ 
+          success: false, 
+          message: "⚠️ Provedor SMS Thoth WhatsApp não encontrado. Clique em 'Registrar SMS' primeiro.",
+          all_providers: providers.length,
+          available_providers: providers.map((p: any) => p.NAME || p.CODE)
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+  } catch (error) {
+    console.error("Error testing SMS provider:", error);
+    return new Response(
+      JSON.stringify({ error: error instanceof Error ? error.message : "Erro ao testar provedor SMS" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+}
+
+// Handle list_sms_providers action - List all registered SMS providers
+async function handleListSmsProviders(supabase: any, payload: any) {
+  console.log("=== LIST SMS PROVIDERS ===");
+  const { integration_id } = payload;
+
+  if (!integration_id) {
+    return new Response(
+      JSON.stringify({ error: "Integration ID é obrigatório" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const { data: integration, error: integrationError } = await supabase
+    .from("integrations")
+    .select("*")
+    .eq("id", integration_id)
+    .single();
+
+  if (integrationError || !integration) {
+    return new Response(
+      JSON.stringify({ error: "Integração não encontrada" }),
+      { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const accessToken = await refreshBitrixToken(integration, supabase);
+  if (!accessToken) {
+    return new Response(
+      JSON.stringify({ error: "Token de acesso não disponível" }),
+      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const config = integration.config;
+  const clientEndpoint = config.domain ? `https://${config.domain}/rest/` : config.client_endpoint;
+
+  try {
+    const listResponse = await fetch(`${clientEndpoint}messageservice.sender.list`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ auth: accessToken })
+    });
+
+    const listResult = await listResponse.json();
+
+    return new Response(
+      JSON.stringify({ 
+        success: true, 
+        providers: listResult.result || [],
+        error: listResult.error
+      }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  } catch (error) {
+    console.error("Error listing SMS providers:", error);
+    return new Response(
+      JSON.stringify({ error: error instanceof Error ? error.message : "Erro ao listar provedores" }),
       { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   }
@@ -2344,6 +2531,33 @@ async function handleRegisterRobot(supabase: any, payload: any, supabaseUrl: str
             robot_code: robotCode
           }),
           { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+
+      // Handle insufficient_scope error specifically
+      if (registerResult.error === "insufficient_scope" || 
+          registerResult.error_description?.includes("insufficient_scope") ||
+          registerResult.error_description?.includes("bizproc")) {
+        // Update config to mark scope as missing
+        await supabase
+          .from("integrations")
+          .update({
+            config: {
+              ...config,
+              robot_scope_missing: true,
+              robot_scope_error: registerResult.error_description || registerResult.error,
+            },
+            updated_at: new Date().toISOString()
+          })
+          .eq("id", integration.id);
+
+        return new Response(
+          JSON.stringify({ 
+            success: false,
+            error: "insufficient_scope: O escopo 'bizproc' não está disponível. Reinstale o aplicativo no Marketplace Bitrix24 para obter as permissões atualizadas.",
+            scope_missing: "bizproc"
+          }),
+          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
         );
       }
 
@@ -5212,6 +5426,14 @@ serve(async (req) => {
 
     if (action === "register_sms_provider" || payload.action === "register_sms_provider") {
       return await handleRegisterSmsProvider(supabase, payload, supabaseUrl);
+    }
+
+    if (action === "test_sms_provider" || payload.action === "test_sms_provider") {
+      return await handleTestSmsProvider(supabase, payload, supabaseUrl);
+    }
+
+    if (action === "list_sms_providers" || payload.action === "list_sms_providers") {
+      return await handleListSmsProviders(supabase, payload);
     }
 
     if (action === "send_sms" || payload.action === "send_sms") {
