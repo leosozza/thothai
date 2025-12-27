@@ -487,6 +487,7 @@ export type Database = {
           metadata: Json | null
           persona_id: string | null
           phone_number: string | null
+          recording_url: string | null
           sentiment: string | null
           started_at: string
           status: string
@@ -511,6 +512,7 @@ export type Database = {
           metadata?: Json | null
           persona_id?: string | null
           phone_number?: string | null
+          recording_url?: string | null
           sentiment?: string | null
           started_at?: string
           status?: string
@@ -535,6 +537,7 @@ export type Database = {
           metadata?: Json | null
           persona_id?: string | null
           phone_number?: string | null
+          recording_url?: string | null
           sentiment?: string | null
           started_at?: string
           status?: string

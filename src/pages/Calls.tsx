@@ -55,6 +55,7 @@ interface Call {
   human_takeover_at: string | null;
   human_takeover_by: string | null;
   bitrix_activity_id: string | null;
+  recording_url: string | null;
   metadata: any;
   persona?: {
     id: string;
