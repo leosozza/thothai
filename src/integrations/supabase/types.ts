@@ -842,6 +842,10 @@ export type Database = {
       }
       instances: {
         Row: {
+          apibrasil_bearer_token: string | null
+          apibrasil_device_token: string | null
+          apibrasil_public_token: string | null
+          apibrasil_secret_key: string | null
           connection_type: string | null
           created_at: string
           evolution_instance_name: string | null
@@ -860,6 +864,10 @@ export type Database = {
           workspace_id: string | null
         }
         Insert: {
+          apibrasil_bearer_token?: string | null
+          apibrasil_device_token?: string | null
+          apibrasil_public_token?: string | null
+          apibrasil_secret_key?: string | null
           connection_type?: string | null
           created_at?: string
           evolution_instance_name?: string | null
@@ -878,6 +886,10 @@ export type Database = {
           workspace_id?: string | null
         }
         Update: {
+          apibrasil_bearer_token?: string | null
+          apibrasil_device_token?: string | null
+          apibrasil_public_token?: string | null
+          apibrasil_secret_key?: string | null
           connection_type?: string | null
           created_at?: string
           evolution_instance_name?: string | null
