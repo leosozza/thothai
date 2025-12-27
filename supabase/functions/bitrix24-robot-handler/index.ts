@@ -41,22 +41,80 @@ serve(async (req) => {
     }
 
     console.log("Robot handler received:", JSON.stringify(data));
+    console.log("Data keys:", Object.keys(data));
 
     // Extract properties from Bitrix24 robot call
-    const properties = data.properties ? 
-      (typeof data.properties === 'string' ? JSON.parse(data.properties) : data.properties) : 
-      data;
+    // Bitrix24 sends properties as properties[KEY] format in URL-encoded data
+    // Try multiple extraction methods
+    
+    let phoneNumber = "";
+    let message = "";
+    let instanceId = "";
+    
+    // Method 1: Check if properties is an object
+    if (data.properties && typeof data.properties === 'object') {
+      phoneNumber = data.properties.PhoneNumber || data.properties.phone_number || "";
+      message = data.properties.Message || data.properties.message || "";
+      instanceId = data.properties.InstanceId || data.properties.instance_id || "";
+    }
+    
+    // Method 2: Check bracket notation (how Bitrix24 actually sends it)
+    if (!phoneNumber) {
+      phoneNumber = 
+        data["properties[PhoneNumber]"] || 
+        data["properties[phone_number]"] || 
+        data["properties[PHONE_NUMBER]"] ||
+        data["PROPERTIES[PhoneNumber]"] ||
+        "";
+    }
+    
+    if (!message) {
+      message = 
+        data["properties[Message]"] || 
+        data["properties[message]"] || 
+        data["properties[MESSAGE]"] ||
+        data["PROPERTIES[Message]"] ||
+        "";
+    }
+    
+    if (!instanceId) {
+      instanceId = 
+        data["properties[InstanceId]"] || 
+        data["properties[instance_id]"] || 
+        data["properties[INSTANCE_ID]"] ||
+        data["PROPERTIES[InstanceId]"] ||
+        "";
+    }
 
-    const phoneNumber = properties.PhoneNumber || properties.phone_number || properties.PHONE_NUMBER || "";
-    const message = properties.Message || properties.message || properties.MESSAGE || "";
-    const instanceId = properties.InstanceId || properties.instance_id || properties.INSTANCE_ID || "";
-    const documentId = data.document_id || data.DOCUMENT_ID || "";
+    // Extract document and auth info
+    const documentId = 
+      data["document_id[2]"] || 
+      data.document_id || 
+      data.DOCUMENT_ID || 
+      "";
     const eventToken = data.event_token || data.EVENT_TOKEN || "";
-    const auth = data.auth || {};
-    const memberId = auth.member_id || data.member_id || "";
-    const domain = auth.domain || data.domain || "";
+    
+    // Auth can come as auth[key] format
+    const memberId = 
+      data["auth[member_id]"] || 
+      data.member_id || 
+      data.MEMBER_ID ||
+      "";
+    const domain = 
+      data["auth[domain]"] || 
+      data.domain || 
+      data.DOMAIN ||
+      "";
 
-    console.log("Parsed parameters:", { phoneNumber, message: message.substring(0, 50), instanceId, documentId, memberId });
+    console.log("Parsed parameters:", { 
+      phoneNumber: phoneNumber || "(empty)", 
+      messageLength: message?.length || 0, 
+      messagePreview: message?.substring(0, 50) || "(empty)",
+      instanceId: instanceId || "(empty)", 
+      documentId, 
+      memberId,
+      domain
+    });
 
     if (!phoneNumber) {
       console.error("Phone number is required");
