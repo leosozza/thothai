@@ -20,6 +20,9 @@ import {
   Bot,
   Zap,
   MessageSquare,
+  Eye,
+  HelpCircle,
+  Send,
 } from "lucide-react";
 
 interface Integration {
@@ -74,6 +77,11 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
   const [registeringSmsProvider, setRegisteringSmsProvider] = useState(false);
   const [testingSmsProvider, setTestingSmsProvider] = useState(false);
   const [reactivatingConnector, setReactivatingConnector] = useState(false);
+  const [listingRobots, setListingRobots] = useState(false);
+  const [testingRobot, setTestingRobot] = useState(false);
+  const [showRobotGuide, setShowRobotGuide] = useState(false);
+  const [robotsList, setRobotsList] = useState<any[] | null>(null);
+  const [thothRobot, setThothRobot] = useState<any | null>(null);
   const [verification, setVerification] = useState<VerificationResult | null>(null);
   const [isHealthy, setIsHealthy] = useState<boolean | null>(null);
   const [summary, setSummary] = useState<string>("");
@@ -400,6 +408,69 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
     }
   };
 
+  // List registered robots
+  const handleListRobots = async () => {
+    if (!integration?.id) return;
+
+    setListingRobots(true);
+    
+    try {
+      const response = await supabase.functions.invoke("bitrix24-webhook", {
+        body: {
+          action: "list_robots",
+          integration_id: integration.id,
+        }
+      });
+
+      if (response.data?.success) {
+        setRobotsList(response.data.robots || []);
+        setThothRobot(response.data.thoth_robot);
+        toast.success(response.data.message);
+      } else {
+        toast.error(response.data?.error || "Erro ao listar robots");
+      }
+    } catch (error) {
+      console.error("Error listing robots:", error);
+      toast.error("Erro ao listar robots");
+    } finally {
+      setListingRobots(false);
+    }
+  };
+
+  // Test robot by sending a test message
+  const handleTestRobot = async () => {
+    if (!integration?.id) return;
+
+    const phoneNumber = window.prompt(
+      "Digite o número de telefone para o teste (com código do país, ex: 5511999999999):"
+    );
+    
+    if (!phoneNumber) return;
+
+    setTestingRobot(true);
+    
+    try {
+      const response = await supabase.functions.invoke("bitrix24-webhook", {
+        body: {
+          action: "test_robot",
+          integration_id: integration.id,
+          phone_number: phoneNumber,
+        }
+      });
+
+      if (response.data?.success) {
+        toast.success(response.data.message);
+      } else {
+        toast.error(response.data?.error || "Erro ao enviar mensagem de teste");
+      }
+    } catch (error) {
+      console.error("Error testing robot:", error);
+      toast.error("Erro ao enviar mensagem de teste");
+    } finally {
+      setTestingRobot(false);
+    }
+  };
+
   // Determine status badge
   const getStatusBadge = () => {
     if (verifying) {
@@ -612,6 +683,47 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
                 </div>
               </div>
               <div className="flex items-center gap-2">
+                {robotRegistered && (
+                  <>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setShowRobotGuide(!showRobotGuide)}
+                      className="text-xs"
+                      title="Como usar o Robot"
+                    >
+                      <HelpCircle className="h-3 w-3" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleListRobots}
+                      disabled={listingRobots}
+                      className="text-xs"
+                      title="Ver Robots Registrados"
+                    >
+                      {listingRobots ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Eye className="h-3 w-3" />
+                      )}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleTestRobot}
+                      disabled={testingRobot}
+                      className="text-xs"
+                      title="Testar Robot"
+                    >
+                      {testingRobot ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Send className="h-3 w-3" />
+                      )}
+                    </Button>
+                  </>
+                )}
                 {!robotRegistered && (
                   <Button
                     variant="outline"
@@ -639,6 +751,43 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
                 </Badge>
               </div>
             </div>
+
+            {/* Robot Usage Guide - Collapsible */}
+            {showRobotGuide && robotRegistered && (
+              <div className="mt-3 pt-3 border-t border-green-500/20 space-y-2">
+                <p className="text-sm font-medium text-green-600">📖 Como usar o Robot nas Automações:</p>
+                <ol className="text-xs text-muted-foreground space-y-1 list-decimal list-inside">
+                  <li>No Bitrix24, vá em <strong>CRM → Negócios</strong> (ou Leads)</li>
+                  <li>Clique em <strong>Automações</strong> no menu superior</li>
+                  <li>Selecione uma fase do funil e clique em <strong>+ Adicionar</strong></li>
+                  <li>Em "Outros", procure por <strong>"Enviar WhatsApp (Thoth)"</strong></li>
+                  <li>Configure os campos:
+                    <ul className="list-disc list-inside ml-4 mt-1">
+                      <li><code className="bg-muted px-1 rounded">Telefone</code>: Use {"{{PHONE}}"} ou campo do contato</li>
+                      <li><code className="bg-muted px-1 rounded">Mensagem</code>: Texto com variáveis do CRM</li>
+                    </ul>
+                  </li>
+                  <li>Salve a automação</li>
+                </ol>
+              </div>
+            )}
+
+            {/* Robots List - Show when loaded */}
+            {robotsList && robotsList.length > 0 && (
+              <div className="mt-3 pt-3 border-t border-green-500/20">
+                <p className="text-xs font-medium text-muted-foreground mb-2">
+                  Robots registrados ({robotsList.length}):
+                </p>
+                <div className="space-y-1">
+                  {robotsList.map((robot: any, i: number) => (
+                    <div key={i} className="flex items-center justify-between text-xs bg-muted/50 px-2 py-1 rounded">
+                      <span className="font-medium">{robot.NAME}</span>
+                      <span className="text-muted-foreground">{robot.CODE}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* SMS Provider Status - with manual registration button */}

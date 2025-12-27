@@ -2761,6 +2761,226 @@ async function handleRegisterRobot(supabase: any, payload: any, supabaseUrl: str
   }
 }
 
+// Handle list_robots action - List all registered automation robots
+async function handleListRobots(supabase: any, payload: any) {
+  console.log("=== LIST AUTOMATION ROBOTS ===");
+  const { integration_id } = payload;
+
+  if (!integration_id) {
+    return new Response(
+      JSON.stringify({ error: "Integration ID é obrigatório" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const { data: integration, error: integrationError } = await supabase
+    .from("integrations")
+    .select("*")
+    .eq("id", integration_id)
+    .single();
+
+  if (integrationError || !integration) {
+    return new Response(
+      JSON.stringify({ error: "Integração não encontrada" }),
+      { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const accessToken = await refreshBitrixToken(integration, supabase);
+  if (!accessToken) {
+    return new Response(
+      JSON.stringify({ error: "Token de acesso não disponível" }),
+      { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const config = integration.config;
+  const clientEndpoint = config.domain ? `https://${config.domain}/rest/` : config.client_endpoint;
+
+  try {
+    console.log("Listing robots via bizproc.robot.list...");
+    const listResponse = await fetch(`${clientEndpoint}bizproc.robot.list`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ auth: accessToken })
+    });
+
+    const listResult = await listResponse.json();
+    console.log("bizproc.robot.list result:", JSON.stringify(listResult));
+
+    if (listResult.error) {
+      if (listResult.error === "insufficient_scope" || 
+          listResult.error_description?.includes("bizproc")) {
+        return new Response(
+          JSON.stringify({ 
+            success: false, 
+            error: "Escopo 'bizproc' não disponível. Reinstale o app no Marketplace.",
+            scope_missing: true
+          }),
+          { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+        );
+      }
+      
+      return new Response(
+        JSON.stringify({ 
+          success: false, 
+          error: listResult.error_description || listResult.error 
+        }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const robots = listResult.result || [];
+    const thothRobot = robots.find((r: any) => 
+      r.CODE === "thoth_whatsapp_robot" || 
+      r.CODE === "thoth_send_whatsapp" ||
+      (r.NAME && r.NAME.toLowerCase().includes("thoth"))
+    );
+
+    return new Response(
+      JSON.stringify({ 
+        success: true,
+        robots: robots,
+        thoth_robot: thothRobot || null,
+        total: robots.length,
+        message: thothRobot 
+          ? `✅ Robot "${thothRobot.NAME}" encontrado! Use em CRM → Automações → "Enviar WhatsApp (Thoth)"`
+          : "⚠️ Robot Thoth não encontrado. Clique em 'Registrar Robot' primeiro."
+      }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  } catch (error) {
+    console.error("Error listing robots:", error);
+    return new Response(
+      JSON.stringify({ error: error instanceof Error ? error.message : "Erro ao listar robots" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+}
+
+// Handle test_robot action - Test robot by sending a test WhatsApp message
+async function handleTestRobot(supabase: any, payload: any, supabaseUrl: string) {
+  console.log("=== TEST ROBOT (Send Test Message) ===");
+  const { integration_id, phone_number, message } = payload;
+
+  if (!integration_id) {
+    return new Response(
+      JSON.stringify({ error: "Integration ID é obrigatório" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  if (!phone_number) {
+    return new Response(
+      JSON.stringify({ error: "Número de telefone é obrigatório" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const { data: integration, error: integrationError } = await supabase
+    .from("integrations")
+    .select("*")
+    .eq("id", integration_id)
+    .single();
+
+  if (integrationError || !integration) {
+    return new Response(
+      JSON.stringify({ error: "Integração não encontrada" }),
+      { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const config = integration.config;
+  const instanceId = config.instance_id;
+
+  if (!instanceId) {
+    return new Response(
+      JSON.stringify({ error: "Nenhuma instância WhatsApp vinculada a esta integração" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const { data: instance, error: instanceError } = await supabase
+    .from("instances")
+    .select("*")
+    .eq("id", instanceId)
+    .single();
+
+  if (instanceError || !instance) {
+    return new Response(
+      JSON.stringify({ error: "Instância WhatsApp não encontrada" }),
+      { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  if (instance.status !== "connected") {
+    return new Response(
+      JSON.stringify({ error: "Instância WhatsApp não está conectada" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const providerType = instance.provider_type || "wapi";
+  const sendFunction = providerType === "evolution" 
+    ? "evolution-send-message" 
+    : providerType === "gupshup"
+      ? "gupshup-send-message"
+      : "wapi-send-message";
+
+  const testMessage = message || `🤖 Teste do Robot Bitrix24\n\nMensagem de teste enviada com sucesso!\n\n✅ Integração: Ativa\n📱 Hora: ${new Date().toLocaleString("pt-BR")}`;
+
+  try {
+    console.log("Sending test message via", sendFunction);
+    console.log("To:", phone_number);
+
+    const sendResponse = await fetch(`${supabaseUrl}/functions/v1/${sendFunction}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`
+      },
+      body: JSON.stringify({
+        instance_id: instanceId,
+        phone_number: phone_number.replace(/\D/g, ""),
+        message: testMessage
+      })
+    });
+
+    const sendResult = await sendResponse.json();
+    console.log("Send result:", JSON.stringify(sendResult));
+
+    if (sendResult.success || sendResult.messageId || sendResult.message_id) {
+      return new Response(
+        JSON.stringify({ 
+          success: true,
+          message: `✅ Mensagem de teste enviada para ${phone_number}!`,
+          details: {
+            phone: phone_number,
+            instance: instance.name,
+            provider: providerType
+          }
+        }),
+        { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    } else {
+      return new Response(
+        JSON.stringify({ 
+          success: false,
+          error: sendResult.error || "Falha ao enviar mensagem de teste",
+          details: sendResult
+        }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+  } catch (error) {
+    console.error("Error sending test message:", error);
+    return new Response(
+      JSON.stringify({ error: error instanceof Error ? error.message : "Erro ao enviar mensagem de teste" }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+}
+
 // Handle reconfigure_connector action - Completely reconfigure connector with clean URLs
 async function handleReconfigureConnector(supabase: any, payload: any, supabaseUrl: string) {
   console.log("=== RECONFIGURE CONNECTOR (Full Reset) ===");
@@ -5652,6 +5872,16 @@ serve(async (req) => {
 
     if (action === "unregister_robot" || payload.action === "unregister_robot") {
       return await handleUnregisterRobot(supabase, payload);
+    }
+
+    // Handle list_robots action - list all registered automation robots
+    if (action === "list_robots" || payload.action === "list_robots") {
+      return await handleListRobots(supabase, payload);
+    }
+
+    // Handle test_robot action - send test WhatsApp message via robot
+    if (action === "test_robot" || payload.action === "test_robot") {
+      return await handleTestRobot(supabase, payload, supabaseUrl);
     }
 
     // Handle get_bound_events action - list all bound events
