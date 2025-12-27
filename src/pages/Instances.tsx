@@ -57,7 +57,7 @@ const statusConfig: Record<string, { label: string; color: string; icon: typeof 
   qr_pending: { label: "Aguardando QR", color: "bg-blue-500", icon: QrCode },
 };
 
-type ConnectionType = "waba" | "official" | "evolution";
+type ConnectionType = "waba" | "official" | "evolution" | "apibrasil";
 
 export default function Instances() {
   const [instances, setInstances] = useState<Instance[]>([]);
@@ -69,6 +69,10 @@ export default function Instances() {
   const [gupshupApiKey, setGupshupApiKey] = useState("");
   const [gupshupAppId, setGupshupAppId] = useState("");
   const [gupshupPhoneNumber, setGupshupPhoneNumber] = useState("");
+  const [apiBrasilSecretKey, setApiBrasilSecretKey] = useState("");
+  const [apiBrasilDeviceToken, setApiBrasilDeviceToken] = useState("");
+  const [apiBrasilPublicToken, setApiBrasilPublicToken] = useState("");
+  const [apiBrasilBearerToken, setApiBrasilBearerToken] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [qrDialogOpen, setQrDialogOpen] = useState(false);
   const [connectingInstance, setConnectingInstance] = useState<Instance | null>(null);
@@ -139,6 +143,10 @@ export default function Instances() {
     setGupshupApiKey("");
     setGupshupAppId("");
     setGupshupPhoneNumber("");
+    setApiBrasilSecretKey("");
+    setApiBrasilDeviceToken("");
+    setApiBrasilPublicToken("");
+    setApiBrasilBearerToken("");
   };
 
   const createInstance = async () => {
@@ -161,11 +169,20 @@ export default function Instances() {
       }
     }
 
+    if (connectionType === "apibrasil") {
+      if (!apiBrasilSecretKey.trim() || !apiBrasilDeviceToken.trim() || !apiBrasilPublicToken.trim() || !apiBrasilBearerToken.trim()) {
+        toast.error("Preencha todas as credenciais da APIBrasil");
+        return;
+      }
+    }
+
     setCreating(true);
     try {
       // Determine provider_type and initial status
-      const providerType = connectionType === "evolution" ? "evolution" : connectionType === "official" ? "gupshup" : "wapi";
-      const initialStatus = connectionType === "official" ? "connecting" : "disconnected";
+      const providerType = connectionType === "evolution" ? "evolution" : 
+                          connectionType === "official" ? "gupshup" : 
+                          connectionType === "apibrasil" ? "apibrasil" : "wapi";
+      const initialStatus = connectionType === "official" || connectionType === "apibrasil" ? "connecting" : "disconnected";
 
       // Create instance in database
       const { data: newInstance, error } = await supabase.from("instances").insert({
@@ -173,9 +190,13 @@ export default function Instances() {
         workspace_id: workspace?.id,
         name: newInstanceName.trim(),
         status: initialStatus,
-        connection_type: connectionType === "evolution" ? "waba" : connectionType,
+        connection_type: connectionType === "evolution" || connectionType === "apibrasil" ? "waba" : connectionType,
         provider_type: providerType,
         evolution_instance_name: connectionType === "evolution" ? evolutionInstanceName.trim() : null,
+        apibrasil_secret_key: connectionType === "apibrasil" ? apiBrasilSecretKey.trim() : null,
+        apibrasil_device_token: connectionType === "apibrasil" ? apiBrasilDeviceToken.trim() : null,
+        apibrasil_public_token: connectionType === "apibrasil" ? apiBrasilPublicToken.trim() : null,
+        apibrasil_bearer_token: connectionType === "apibrasil" ? apiBrasilBearerToken.trim() : null,
       }).select().single();
 
       if (error) throw error;
@@ -222,6 +243,29 @@ export default function Instances() {
         }
 
         toast.success("Instância Evolution criada! Clique em Conectar para escanear o QR Code.");
+      } else if (connectionType === "apibrasil" && newInstance) {
+        // APIBrasil connection - setup and connect
+        const response = await supabase.functions.invoke("apibrasil-connect", {
+          body: {
+            instanceId: newInstance.id,
+            workspaceId: workspace?.id,
+            action: "setup",
+            secretKey: apiBrasilSecretKey.trim(),
+            deviceToken: apiBrasilDeviceToken.trim(),
+            publicToken: apiBrasilPublicToken.trim(),
+            bearerToken: apiBrasilBearerToken.trim(),
+          },
+        });
+
+        if (response.error) {
+          throw new Error(response.error.message || "Erro ao conectar APIBrasil");
+        }
+
+        if (response.data?.error) {
+          throw new Error(response.data.error);
+        }
+
+        toast.success("Credenciais salvas! Clique em Conectar para escanear o QR Code.");
       } else {
         toast.success("Instância criada! Clique em Conectar para escanear o QR Code.");
       }
@@ -346,7 +390,12 @@ export default function Instances() {
       
       // Determine which connect function to use based on provider_type
       const providerType = instance.provider_type || "wapi";
-      const connectFunction = providerType === "evolution" ? "evolution-connect" : "wapi-connect";
+      let connectFunction = "wapi-connect";
+      if (providerType === "evolution") {
+        connectFunction = "evolution-connect";
+      } else if (providerType === "apibrasil") {
+        connectFunction = "apibrasil-connect";
+      }
       
       const response = await supabase.functions.invoke(connectFunction, {
         body: {
@@ -425,6 +474,14 @@ const getConnectionTypeBadge = (connectionType?: string, providerType?: string) 
         <Badge variant="outline" className="gap-1 text-emerald-600 border-emerald-200 bg-emerald-50">
           <MessageSquare className="h-3 w-3" />
           Evolution
+        </Badge>
+      );
+    }
+    if (providerType === "apibrasil") {
+      return (
+        <Badge variant="outline" className="gap-1 text-orange-600 border-orange-200 bg-orange-50">
+          <Smartphone className="h-3 w-3" />
+          APIBrasil
         </Badge>
       );
     }

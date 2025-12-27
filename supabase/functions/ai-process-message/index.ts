@@ -553,6 +553,8 @@ serve(async (req) => {
         sendFunction = "evolution-send-message";
       } else if (providerType === "gupshup") {
         sendFunction = "gupshup-send-message";
+      } else if (providerType === "apibrasil") {
+        sendFunction = "apibrasil-send-message";
       }
 
       console.log(`Provider factory: Using ${sendFunction} for provider_type=${providerType}`);

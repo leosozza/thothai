@@ -155,3 +155,12 @@ verify_jwt = false
 
 [functions.bitrix24-data]
 verify_jwt = false
+
+[functions.apibrasil-connect]
+verify_jwt = true
+
+[functions.apibrasil-webhook]
+verify_jwt = false
+
+[functions.apibrasil-send-message]
+verify_jwt = false
