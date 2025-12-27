@@ -29,7 +29,7 @@ serve(async (req) => {
     }
 
     const body = await req.json();
-    console.log("APIBrasil Webhook received:", JSON.stringify(body).substring(0, 500));
+    console.log("APIBrasil Webhook received:", JSON.stringify(body).substring(0, 1000));
 
     // Get instance details
     const { data: instance, error: instanceError } = await supabase
@@ -46,24 +46,50 @@ serve(async (req) => {
       });
     }
 
-    // Determine event type based on webhook payload
-    const eventType = body.event || body.type || "message";
+    // Determine event type (formato Evolution API via APIBrasil)
+    const eventType = body.event || body.type || "messages.upsert";
 
-    // Handle connection status updates
-    if (eventType === "connection" || body.status) {
-      const status = body.status || body.state;
-      console.log("Connection status update:", status);
+    // Handle QRCODE_UPDATED event
+    if (eventType === "QRCODE_UPDATED" || eventType === "qrcode.updated" || body.qrcode) {
+      const qrCode = body.qrcode?.base64 || body.base64 || body.qr;
+      
+      if (qrCode) {
+        await supabase
+          .from("instances")
+          .update({
+            status: "qr_pending",
+            qr_code: qrCode,
+          })
+          .eq("id", instanceId);
+        
+        console.log("QR Code updated for instance:", instanceId);
+      }
 
-      if (status === "CONNECTED" || status === "open" || status === "connected") {
+      return new Response(JSON.stringify({ success: true, event: "qrcode" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    // Handle CONNECTION_UPDATE event
+    if (eventType === "CONNECTION_UPDATE" || eventType === "connection.update" || body.state) {
+      const state = body.state || body.instance?.state || body.status;
+      console.log("Connection update:", state);
+
+      if (state === "open" || state === "connected" || state === "CONNECTED") {
+        const owner = body.instance?.owner || body.owner || body.wid;
+        const phoneNumber = owner?.split("@")[0] || body.phone || body.number;
+        
         await supabase
           .from("instances")
           .update({
             status: "connected",
-            phone_number: body.phone || body.number || body.wid?.replace("@s.whatsapp.net", ""),
+            phone_number: phoneNumber || null,
             qr_code: null,
           })
           .eq("id", instanceId);
-      } else if (status === "DISCONNECTED" || status === "close") {
+        
+        console.log("Instance connected:", instanceId, phoneNumber);
+      } else if (state === "close" || state === "disconnected" || state === "DISCONNECTED") {
         await supabase
           .from("instances")
           .update({
@@ -71,88 +97,109 @@ serve(async (req) => {
             qr_code: null,
           })
           .eq("id", instanceId);
-      } else if (status === "QRCODE" || body.qrcode) {
+        
+        console.log("Instance disconnected:", instanceId);
+      } else if (state === "connecting") {
         await supabase
           .from("instances")
           .update({
-            status: "qr_pending",
-            qr_code: body.qrcode || body.qr,
+            status: "connecting",
           })
           .eq("id", instanceId);
       }
 
-      return new Response(JSON.stringify({ success: true }), {
+      return new Response(JSON.stringify({ success: true, event: "connection" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Handle message events
-    if (eventType === "message" || body.message || body.data?.message) {
-      const message = body.message || body.data?.message || body;
+    // Handle MESSAGES_UPSERT event (mensagens recebidas)
+    if (eventType === "MESSAGES_UPSERT" || eventType === "messages.upsert" || body.data?.message || body.message) {
+      // Extract message data (formato Evolution API)
+      const messageData = body.data || body;
+      const message = messageData.message || messageData;
+      const key = messageData.key || message.key || {};
       
-      // Skip outgoing messages (from us)
-      if (message.fromMe === true || message.isFromMe === true) {
+      // Skip outgoing messages (fromMe = true)
+      if (key.fromMe === true || message.fromMe === true) {
         console.log("Skipping outgoing message");
-        return new Response(JSON.stringify({ success: true, skipped: true }), {
+        return new Response(JSON.stringify({ success: true, skipped: "outgoing" }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
 
-      // Extract message details
-      const senderPhone = (message.from || message.remoteJid || message.phone || "")
+      // Extract sender phone
+      const remoteJid = key.remoteJid || message.from || message.remoteJid || "";
+      const senderPhone = remoteJid
         .replace("@s.whatsapp.net", "")
         .replace("@c.us", "")
         .replace(/\D/g, "");
 
       if (!senderPhone) {
-        console.error("Could not extract sender phone");
+        console.error("Could not extract sender phone from:", remoteJid);
         return new Response(JSON.stringify({ error: "Invalid sender" }), {
           status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
 
-      // Extract message content
+      // Extract message content (formato Evolution API)
       let messageContent = "";
       let messageType = "text";
-      let mediaUrl = null;
-      let mediaBase64 = null;
+      let mediaUrl: string | null = null;
+      let mediaMimeType: string | null = null;
 
-      // Handle different message types
-      if (message.body || message.text || message.conversation) {
-        messageContent = message.body || message.text || message.conversation;
+      // Check message types
+      const msgContent = message.message || message;
+      
+      if (msgContent.conversation || msgContent.extendedTextMessage?.text) {
         messageType = "text";
-      } else if (message.imageMessage || message.type === "image") {
+        messageContent = msgContent.conversation || msgContent.extendedTextMessage?.text || "";
+      } else if (msgContent.imageMessage) {
         messageType = "image";
-        mediaUrl = message.imageMessage?.url || message.mediaUrl || message.url;
-        mediaBase64 = message.imageMessage?.base64 || message.base64;
-        messageContent = message.imageMessage?.caption || message.caption || "[Imagem]";
-      } else if (message.audioMessage || message.type === "audio" || message.type === "ptt") {
+        mediaUrl = msgContent.imageMessage.url || null;
+        mediaMimeType = msgContent.imageMessage.mimetype || "image/jpeg";
+        messageContent = msgContent.imageMessage.caption || "[Imagem]";
+      } else if (msgContent.audioMessage) {
         messageType = "audio";
-        mediaUrl = message.audioMessage?.url || message.mediaUrl || message.url;
-        mediaBase64 = message.audioMessage?.base64 || message.base64;
+        mediaUrl = msgContent.audioMessage.url || null;
+        mediaMimeType = msgContent.audioMessage.mimetype || "audio/ogg";
         messageContent = "[Áudio]";
-      } else if (message.videoMessage || message.type === "video") {
+      } else if (msgContent.videoMessage) {
         messageType = "video";
-        mediaUrl = message.videoMessage?.url || message.mediaUrl || message.url;
-        messageContent = message.videoMessage?.caption || message.caption || "[Vídeo]";
-      } else if (message.documentMessage || message.type === "document") {
+        mediaUrl = msgContent.videoMessage.url || null;
+        mediaMimeType = msgContent.videoMessage.mimetype || "video/mp4";
+        messageContent = msgContent.videoMessage.caption || "[Vídeo]";
+      } else if (msgContent.documentMessage) {
         messageType = "document";
-        mediaUrl = message.documentMessage?.url || message.mediaUrl || message.url;
-        messageContent = message.documentMessage?.fileName || message.fileName || "[Documento]";
-      } else if (message.buttonResponse || message.listResponse || message.selectedButtonId) {
-        // Handle interactive button/list responses
+        mediaUrl = msgContent.documentMessage.url || null;
+        mediaMimeType = msgContent.documentMessage.mimetype;
+        messageContent = msgContent.documentMessage.fileName || "[Documento]";
+      } else if (msgContent.stickerMessage) {
+        messageType = "sticker";
+        mediaUrl = msgContent.stickerMessage.url || null;
+        messageContent = "[Sticker]";
+      } else if (msgContent.locationMessage) {
+        messageType = "location";
+        messageContent = `[Localização: ${msgContent.locationMessage.degreesLatitude}, ${msgContent.locationMessage.degreesLongitude}]`;
+      } else if (msgContent.contactMessage || msgContent.contactsArrayMessage) {
+        messageType = "contact";
+        messageContent = "[Contato]";
+      } else if (msgContent.buttonsResponseMessage || msgContent.listResponseMessage) {
+        // Interactive button/list response
         messageType = "text";
-        messageContent = message.buttonResponse?.selectedButtonId || 
-                        message.listResponse?.title ||
-                        message.selectedButtonId ||
-                        message.listResponse?.rowId ||
-                        message.text ||
+        messageContent = msgContent.buttonsResponseMessage?.selectedButtonId ||
+                        msgContent.buttonsResponseMessage?.selectedDisplayText ||
+                        msgContent.listResponseMessage?.title ||
+                        msgContent.listResponseMessage?.singleSelectReply?.selectedRowId ||
                         "[Resposta interativa]";
-        console.log("Interactive response:", messageContent);
+      } else if (msgContent.body || msgContent.text) {
+        // Fallback for simple format
+        messageType = "text";
+        messageContent = msgContent.body || msgContent.text || "";
       }
 
-      console.log("Processing message from:", senderPhone, "type:", messageType, "content:", messageContent?.substring(0, 50));
+      console.log("Processing message from:", senderPhone, "type:", messageType, "content:", messageContent?.substring(0, 100));
 
       // Find or create contact
       let { data: contact } = await supabase
@@ -163,7 +210,7 @@ serve(async (req) => {
         .maybeSingle();
 
       if (!contact) {
-        const pushName = message.pushName || message.notifyName || message.senderName;
+        const pushName = messageData.pushName || message.pushName || message.notifyName;
         const { data: newContact, error: contactError } = await supabase
           .from("contacts")
           .insert({
@@ -183,11 +230,10 @@ serve(async (req) => {
           });
         }
         contact = newContact;
-      } else if (message.pushName && !contact.name) {
-        // Update contact name if we got a push name
+      } else if (messageData.pushName && !contact.name) {
         await supabase
           .from("contacts")
-          .update({ name: message.pushName, push_name: message.pushName })
+          .update({ name: messageData.pushName, push_name: messageData.pushName })
           .eq("id", contact.id);
       }
 
@@ -225,7 +271,6 @@ serve(async (req) => {
         }
         conversation = newConversation;
       } else {
-        // Update conversation
         await supabase
           .from("conversations")
           .update({
@@ -236,7 +281,7 @@ serve(async (req) => {
       }
 
       // Save message
-      const whatsappMessageId = message.id || message.messageId || message.key?.id || `apibrasil_${Date.now()}`;
+      const whatsappMessageId = key.id || message.id || message.messageId || `apibrasil_${Date.now()}`;
 
       const { data: savedMessage, error: msgError } = await supabase
         .from("messages")
@@ -249,6 +294,7 @@ serve(async (req) => {
           message_type: messageType,
           content: messageContent,
           media_url: mediaUrl,
+          media_mime_type: mediaMimeType,
           status: "received",
           is_from_bot: false,
           metadata: { 
@@ -272,12 +318,11 @@ serve(async (req) => {
         console.log("Triggering flow-engine for AI processing");
         
         try {
-          // Handle audio transcription if needed
           let processContent = messageContent;
-          let imageUrl = null;
+          let imageUrl: string | null = null;
 
-          if (messageType === "audio" && (mediaUrl || mediaBase64)) {
-            // Transcribe audio
+          // Handle audio transcription
+          if (messageType === "audio" && mediaUrl) {
             try {
               const sttResponse = await fetch(`${supabaseUrl}/functions/v1/elevenlabs-stt`, {
                 method: "POST",
@@ -287,7 +332,6 @@ serve(async (req) => {
                 },
                 body: JSON.stringify({
                   audio_url: mediaUrl,
-                  audio_base64: mediaBase64,
                 }),
               });
 
@@ -295,7 +339,6 @@ serve(async (req) => {
                 const sttResult = await sttResponse.json();
                 if (sttResult.text) {
                   processContent = sttResult.text;
-                  // Update message with transcription
                   await supabase
                     .from("messages")
                     .update({ audio_transcription: sttResult.text })
@@ -339,6 +382,7 @@ serve(async (req) => {
 
       return new Response(JSON.stringify({ 
         success: true, 
+        event: "message",
         message_id: savedMessage.id,
         contact_id: contact.id,
         conversation_id: conversation.id
@@ -347,29 +391,50 @@ serve(async (req) => {
       });
     }
 
-    // Handle message status updates
-    if (eventType === "message_status" || eventType === "ack" || body.ack !== undefined) {
-      const messageId = body.messageId || body.id || body.key?.id;
-      const ack = body.ack ?? body.status;
+    // Handle MESSAGES_UPDATE (status updates)
+    if (eventType === "MESSAGES_UPDATE" || eventType === "messages.update" || body.ack !== undefined) {
+      const messages = body.data || [body];
       
-      let status = "sent";
-      if (ack === 2 || ack === "delivered") status = "delivered";
-      if (ack === 3 || ack === "read") status = "read";
-      if (ack === -1 || ack === "failed") status = "failed";
+      for (const msg of Array.isArray(messages) ? messages : [messages]) {
+        const messageId = msg.key?.id || msg.messageId || msg.id;
+        const status = msg.status || msg.update?.status;
+        
+        let dbStatus = "sent";
+        if (status === "DELIVERY_ACK" || status === 2) dbStatus = "delivered";
+        if (status === "READ" || status === 3) dbStatus = "read";
+        if (status === "PLAYED" || status === 4) dbStatus = "read";
+        if (status === "FAILED" || status === -1) dbStatus = "failed";
 
-      if (messageId) {
-        await supabase
-          .from("messages")
-          .update({ status })
-          .eq("whatsapp_message_id", messageId);
+        if (messageId) {
+          await supabase
+            .from("messages")
+            .update({ status: dbStatus })
+            .eq("whatsapp_message_id", messageId);
+        }
       }
 
-      return new Response(JSON.stringify({ success: true }), {
+      return new Response(JSON.stringify({ success: true, event: "status" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    return new Response(JSON.stringify({ success: true, handled: false }), {
+    // Handle SEND_MESSAGE event (confirmação de envio)
+    if (eventType === "SEND_MESSAGE" || eventType === "send.message") {
+      const messageId = body.key?.id || body.messageId;
+      if (messageId) {
+        await supabase
+          .from("messages")
+          .update({ status: "sent" })
+          .eq("whatsapp_message_id", messageId);
+      }
+
+      return new Response(JSON.stringify({ success: true, event: "send" }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    console.log("Unhandled event type:", eventType);
+    return new Response(JSON.stringify({ success: true, handled: false, event: eventType }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
 

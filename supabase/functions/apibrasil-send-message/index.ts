@@ -6,11 +6,22 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const APIBRASIL_BASE_URL = "https://gateway.apibrasil.io/api/v2";
+// Base URL da APIBrasil Evolution
+const APIBRASIL_BASE_URL = "https://gateway.apibrasil.io/api/v2/evolution";
 
-interface InteractiveButton {
-  id: string;
-  title: string;
+// Interfaces para botões (formato Evolution API via APIBrasil)
+interface EvolutionButton {
+  type: "reply" | "copy" | "url" | "call" | "pix";
+  displayText: string;
+  id?: string;
+  copyCode?: string;
+  url?: string;
+  phoneNumber?: string;
+  // PIX fields
+  currency?: string;
+  name?: string;
+  keyType?: string;
+  key?: string;
 }
 
 interface InteractiveListRow {
@@ -45,25 +56,41 @@ serve(async (req) => {
     const messageType = body.message_type || body.messageType || "text";
     const mediaUrl = body.media_url || body.mediaUrl;
     const mediaBase64 = body.media_base64 || body.mediaBase64;
+    const audioUrl = body.audio_url || body.audioUrl;
     const audioBase64 = body.audio_base64 || body.audioBase64;
     const fileName = body.file_name || body.fileName;
     const caption = body.caption;
+    const mimeType = body.mime_type || body.mimeType;
     const isInternal = body.internal === true || body.internal_call === true;
 
     // Interactive message fields
-    const buttons = body.buttons as InteractiveButton[] | undefined;
+    const buttons = body.buttons as EvolutionButton[] | undefined;
     const listSections = body.list_sections || body.listSections as InteractiveListSection[] | undefined;
     const listButtonText = body.list_button_text || body.listButtonText || "Ver opções";
     const footer = body.footer;
     const title = body.title;
+    const thumbnailUrl = body.thumbnail_url || body.thumbnailUrl;
 
-    // SMS fields
-    const isSms = body.is_sms === true || messageType === "sms";
+    // Location fields
+    const latitude = body.latitude;
+    const longitude = body.longitude;
+    const locationName = body.location_name || body.locationName;
+    const locationAddress = body.location_address || body.locationAddress;
+
+    // Contact fields
+    const contacts = body.contacts;
+
+    // Poll fields
+    const pollName = body.poll_name || body.pollName;
+    const pollOptions = body.poll_options || body.pollOptions;
+    const pollSelectableCount = body.poll_selectable_count || body.pollSelectableCount || 1;
+
+    // Phone number direct
     const phoneNumber = body.phone_number || body.phoneNumber;
 
-    if (!instanceId || (!contactId && !phoneNumber) || !messageContent) {
+    if (!instanceId || (!contactId && !phoneNumber)) {
       return new Response(JSON.stringify({ 
-        error: "Missing required parameters: instance_id, contact_id/phone_number, message" 
+        error: "Missing required parameters: instance_id, contact_id/phone_number" 
       }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -120,15 +147,13 @@ serve(async (req) => {
       });
     }
 
-    // Validate APIBrasil credentials
+    // Validate APIBrasil credentials (apenas 2 campos agora)
     const credentials = {
-      secretKey: instance.apibrasil_secret_key,
       deviceToken: instance.apibrasil_device_token,
-      publicToken: instance.apibrasil_public_token,
       bearerToken: instance.apibrasil_bearer_token,
     };
 
-    if (!credentials.secretKey || !credentials.deviceToken || !credentials.publicToken || !credentials.bearerToken) {
+    if (!credentials.deviceToken || !credentials.bearerToken) {
       return new Response(JSON.stringify({ 
         error: "Credenciais APIBrasil não configuradas" 
       }), {
@@ -137,11 +162,10 @@ serve(async (req) => {
       });
     }
 
+    // Headers corretos conforme documentação
     const apiHeaders = {
       "Content-Type": "application/json",
-      "SecretKey": credentials.secretKey,
       "DeviceToken": credentials.deviceToken,
-      "PublicToken": credentials.publicToken,
       "Authorization": `Bearer ${credentials.bearerToken}`,
     };
 
@@ -166,158 +190,197 @@ serve(async (req) => {
       recipientPhone = contactData.phone_number;
     }
 
-    // Format phone number
+    // Format phone number (remove non-digits)
     recipientPhone = recipientPhone.replace(/\D/g, "");
     console.log("Sending to:", recipientPhone, "type:", messageType);
 
     let endpoint = "";
-    let requestBody: any = {};
-    let apiResponse;
+    let requestBody: Record<string, unknown> = {};
 
-    // Handle SMS separately
-    if (isSms) {
-      endpoint = "/sms/send";
-      requestBody = {
-        number: recipientPhone,
-        message: messageContent,
-      };
-    } else {
-      // WhatsApp messages
-      switch (messageType) {
-        case "text":
-          // Check if we have interactive buttons
-          if (buttons && buttons.length > 0) {
-            endpoint = "/whatsapp/sendButtons";
-            requestBody = {
-              number: recipientPhone,
-              title: title || "",
-              message: messageContent,
-              footer: footer || "",
-              buttons: buttons.map(b => ({
-                buttonId: b.id,
-                buttonText: { displayText: b.title },
-                type: 1,
-              })),
-            };
-          } else if (listSections && listSections.length > 0) {
-            // Interactive list
-            endpoint = "/whatsapp/sendList";
-            requestBody = {
-              number: recipientPhone,
-              title: title || "",
-              description: messageContent,
-              buttonText: listButtonText,
+    // Construir request baseado no tipo de mensagem (formato Evolution API)
+    switch (messageType) {
+      case "text":
+        // Check for interactive buttons
+        if (buttons && buttons.length > 0) {
+          endpoint = "/message/sendButtons";
+          requestBody = {
+            number: recipientPhone,
+            title: title || "",
+            description: messageContent || "",
             footer: footer || "",
-            sections: listSections.map((s: InteractiveListSection) => ({
-              title: s.title,
-              rows: s.rows.map((r: InteractiveListRow) => ({
-                rowId: r.rowId,
-                title: r.title,
-                description: r.description || "",
-              })),
-            })),
+            thumbnailUrl: thumbnailUrl,
+            buttons: buttons.map(b => {
+              const btn: Record<string, unknown> = {
+                type: b.type,
+                displayText: b.displayText,
+              };
+              if (b.type === "reply" && b.id) btn.id = b.id;
+              if (b.type === "copy" && b.copyCode) btn.copyCode = b.copyCode;
+              if (b.type === "url" && b.url) btn.url = b.url;
+              if (b.type === "call" && b.phoneNumber) btn.phoneNumber = b.phoneNumber;
+              if (b.type === "pix") {
+                btn.currency = b.currency || "BRL";
+                btn.name = b.name;
+                btn.keyType = b.keyType;
+                btn.key = b.key;
+              }
+              return btn;
+            }),
+          };
+        } else if (listSections && listSections.length > 0) {
+          // Interactive list - não suportado diretamente
+          endpoint = "/message/sendText";
+          requestBody = {
+            number: recipientPhone,
+            text: messageContent,
+            options: { delay: 1, presence: "composing" },
           };
         } else {
-            // Simple text message
-            endpoint = "/whatsapp/sendText";
-            requestBody = {
-              number: recipientPhone,
-              message: messageContent,
+          // Simple text message
+          endpoint = "/message/sendText";
+          requestBody = {
+            number: recipientPhone,
+            text: messageContent,
+            options: { delay: 1, presence: "composing" },
+          };
+        }
+        break;
+
+      case "image":
+        endpoint = "/message/sendMedia";
+        requestBody = {
+          number: recipientPhone,
+          mediatype: "image",
+          mimetype: mimeType || "image/jpeg",
+          caption: caption || messageContent || "",
+          media: mediaUrl || mediaBase64,
+          fileName: fileName || "image.jpg",
+        };
+        break;
+
+      case "audio":
+      case "ptt":
+        // Áudio narrado (WhatsApp Audio)
+        endpoint = "/message/sendWhatsAppAudio";
+        requestBody = {
+          number: recipientPhone,
+          audio: audioUrl || audioBase64 || mediaUrl || mediaBase64,
+        };
+        break;
+
+      case "video":
+        endpoint = "/message/sendMedia";
+        requestBody = {
+          number: recipientPhone,
+          mediatype: "video",
+          mimetype: mimeType || "video/mp4",
+          caption: caption || messageContent || "",
+          media: mediaUrl || mediaBase64,
+          fileName: fileName || "video.mp4",
+        };
+        break;
+
+      case "document":
+        endpoint = "/message/sendMedia";
+        requestBody = {
+          number: recipientPhone,
+          mediatype: "document",
+          mimetype: mimeType || "application/pdf",
+          caption: caption || messageContent || "",
+          media: mediaUrl || mediaBase64,
+          fileName: fileName || "document.pdf",
+        };
+        break;
+
+      case "sticker":
+        endpoint = "/message/sendSticker";
+        requestBody = {
+          number: recipientPhone,
+          sticker: mediaUrl || mediaBase64,
+        };
+        break;
+
+      case "location":
+        endpoint = "/message/sendLocation";
+        requestBody = {
+          number: recipientPhone,
+          name: locationName || "Localização",
+          address: locationAddress || "",
+          latitude: latitude,
+          longitude: longitude,
+        };
+        break;
+
+      case "contact":
+        endpoint = "/message/sendContact";
+        requestBody = {
+          number: recipientPhone,
+          options: { delay: 1, presence: "composing" },
+          contactMessage: contacts || [],
+        };
+        break;
+
+      case "poll":
+        endpoint = "/message/sendPoll";
+        requestBody = {
+          number: recipientPhone,
+          options: { delay: 1, presence: "composing" },
+          name: pollName || messageContent,
+          selectableCount: pollSelectableCount,
+          values: pollOptions || [],
+        };
+        break;
+
+      case "buttons":
+        endpoint = "/message/sendButtons";
+        requestBody = {
+          number: recipientPhone,
+          title: title || "",
+          description: messageContent || "",
+          footer: footer || "",
+          thumbnailUrl: thumbnailUrl,
+          buttons: (buttons || []).map(b => {
+            const btn: Record<string, unknown> = {
+              type: b.type || "reply",
+              displayText: b.displayText,
             };
-          }
-          break;
+            if (b.id) btn.id = b.id;
+            if (b.copyCode) btn.copyCode = b.copyCode;
+            if (b.url) btn.url = b.url;
+            if (b.phoneNumber) btn.phoneNumber = b.phoneNumber;
+            return btn;
+          }),
+        };
+        break;
 
-        case "image":
-          endpoint = "/whatsapp/sendImage";
-          requestBody = {
-            number: recipientPhone,
-            image: mediaUrl || mediaBase64,
-            caption: caption || messageContent,
-          };
-          break;
+      case "reaction":
+        endpoint = "/message/sendReaction";
+        requestBody = {
+          number: recipientPhone,
+          // reaction needs key.id of message to react to
+          ...body.reaction_data,
+        };
+        break;
 
-        case "audio":
-        case "ptt":
-          endpoint = "/whatsapp/sendAudio";
-          requestBody = {
-            number: recipientPhone,
-            audio: mediaUrl || mediaBase64 || audioBase64,
-            ptt: true, // Send as voice message (PTT)
-          };
-          break;
-
-        case "video":
-          endpoint = "/whatsapp/sendVideo";
-          requestBody = {
-            number: recipientPhone,
-            video: mediaUrl || mediaBase64,
-            caption: caption || messageContent,
-          };
-          break;
-
-        case "document":
-          endpoint = "/whatsapp/sendFile";
-          requestBody = {
-            number: recipientPhone,
-            file: mediaUrl || mediaBase64,
-            fileName: fileName || "document",
-            caption: caption || messageContent,
-          };
-          break;
-
-        case "buttons":
-          endpoint = "/whatsapp/sendButtons";
-          requestBody = {
-            number: recipientPhone,
-            title: title || "",
-            message: messageContent,
-            footer: footer || "",
-            buttons: (buttons || []).map(b => ({
-              buttonId: b.id,
-              buttonText: { displayText: b.title },
-              type: 1,
-            })),
-          };
-          break;
-
-        case "list":
-          endpoint = "/whatsapp/sendList";
-          requestBody = {
-            number: recipientPhone,
-            title: title || "",
-            description: messageContent,
-            buttonText: listButtonText,
-            footer: footer || "",
-            sections: (listSections || []).map((s: InteractiveListSection) => ({
-              title: s.title,
-              rows: s.rows.map((r: InteractiveListRow) => ({
-                rowId: r.rowId,
-                title: r.title,
-                description: r.description || "",
-              })),
-            })),
-          };
-          break;
-
-        default:
-          endpoint = "/whatsapp/sendText";
-          requestBody = {
-            number: recipientPhone,
-            message: messageContent,
-          };
-      }
+      default:
+        endpoint = "/message/sendText";
+        requestBody = {
+          number: recipientPhone,
+          text: messageContent || "",
+          options: { delay: 1, presence: "composing" },
+        };
     }
 
-    console.log("APIBrasil API request:", endpoint, JSON.stringify(requestBody).substring(0, 300));
+    console.log("APIBrasil API request:", endpoint, JSON.stringify(requestBody).substring(0, 500));
 
-    apiResponse = await fetch(`${APIBRASIL_BASE_URL}${endpoint}`, {
+    const apiResponse = await fetch(`${APIBRASIL_BASE_URL}${endpoint}`, {
       method: "POST",
       headers: apiHeaders,
       body: JSON.stringify(requestBody),
     });
 
     const responseText = await apiResponse.text();
-    console.log("APIBrasil API response:", apiResponse.status, responseText.substring(0, 300));
+    console.log("APIBrasil API response:", apiResponse.status, responseText.substring(0, 500));
 
     if (!apiResponse.ok) {
       console.error("APIBrasil API error:", responseText);
@@ -349,12 +412,13 @@ serve(async (req) => {
       convId = conv?.id;
     }
 
-    // Save message to database
-    const waMessageId = responseData.key?.id || 
-                        responseData.messageId ||
-                        responseData.id ||
+    // Extract message ID from response
+    const waMessageId = responseData?.key?.id || 
+                        responseData?.messageId ||
+                        responseData?.id ||
                         `apibrasil_${Date.now()}`;
 
+    // Save message to database
     if (convId && contactId) {
       await supabase.from("messages").insert({
         instance_id: instanceId,
@@ -362,16 +426,15 @@ serve(async (req) => {
         conversation_id: convId,
         whatsapp_message_id: waMessageId,
         direction: "outgoing",
-        message_type: isSms ? "sms" : (buttons || listSections ? "interactive" : messageType),
-        content: messageContent,
+        message_type: buttons ? "interactive" : messageType,
+        content: messageContent || caption || `[${messageType}]`,
         media_url: mediaUrl,
         status: "sent",
         is_from_bot: body.is_from_bot ?? true,
         metadata: { 
           source: body.source || "apibrasil",
-          is_sms: isSms,
           has_buttons: !!buttons,
-          has_list: !!listSections,
+          has_poll: messageType === "poll",
           apibrasil_response: responseData
         }
       });
