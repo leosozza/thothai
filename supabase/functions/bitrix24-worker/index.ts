@@ -285,6 +285,10 @@ async function processEvent(
         await processAdminRebindPlacements(payload, supabase, supabaseUrl);
         break;
 
+      case "ONIMCONNECTORSTATUSDELETE":
+        await processConnectorStatusDelete(payload, supabase, supabaseUrl, supabaseServiceKey);
+        break;
+
       default:
         console.log(`Unknown event type: ${event.event_type}`);
     }
@@ -1511,5 +1515,184 @@ async function processAdminRebindPlacements(
   
   if (results.errors.length > 0) {
     console.log("Errors:", results.errors);
+  }
+}
+
+/**
+ * Process ONIMCONNECTORSTATUSDELETE - Connector was deactivated
+ * Auto-recovery: reactivate connector on the affected line
+ */
+async function processConnectorStatusDelete(
+  payload: any, 
+  supabase: any, 
+  supabaseUrl: string,
+  supabaseServiceKey: string
+) {
+  console.log("=== PROCESSING CONNECTOR STATUS DELETE (AUTO-RECOVERY) ===");
+  console.log("Payload:", JSON.stringify(payload, null, 2));
+
+  // Extract connector info from payload
+  const data = payload.data || {};
+  const connectorId = data.connector || data.CONNECTOR || "thoth_whatsapp";
+  const lineId = data.line || data.LINE || 2;
+  const memberId = payload.auth?.member_id || payload.member_id;
+  const domain = payload.auth?.domain || payload.DOMAIN;
+
+  console.log("Connector deactivated:", { connectorId, lineId, memberId, domain });
+
+  // Find the integration
+  let integration = null;
+
+  if (memberId) {
+    const { data: intData } = await supabase
+      .from("integrations")
+      .select("*")
+      .eq("type", "bitrix24")
+      .eq("config->>member_id", memberId)
+      .maybeSingle();
+    integration = intData;
+  }
+
+  if (!integration && domain) {
+    const { data: intData } = await supabase
+      .from("integrations")
+      .select("*")
+      .eq("type", "bitrix24")
+      .ilike("config->>domain", `%${domain}%`)
+      .maybeSingle();
+    integration = intData;
+  }
+
+  if (!integration) {
+    console.error("No integration found for auto-recovery");
+    return;
+  }
+
+  console.log("Found integration:", integration.id);
+
+  const config = integration.config || {};
+  
+  // IMPORTANT: Use config.domain for REST API calls
+  const clientEndpoint = config.domain ? `https://${config.domain}/rest/` : config.client_endpoint;
+  
+  // Get fresh access token
+  const accessToken = await refreshBitrixToken(integration, supabase);
+  
+  if (!accessToken) {
+    console.error("No access token available for auto-recovery");
+    // Update config to mark connector as inactive
+    await supabase
+      .from("integrations")
+      .update({
+        config: {
+          ...config,
+          connector_active: false,
+          connector_deactivated_at: new Date().toISOString(),
+          auto_recovery_failed: "no_access_token"
+        },
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", integration.id);
+    return;
+  }
+
+  const eventsUrl = `${supabaseUrl}/functions/v1/bitrix24-events`;
+
+  try {
+    console.log("=== AUTO-RECOVERY: Reactivating connector ===");
+    
+    // 1. Reactivate connector
+    const activateResponse = await fetch(`${clientEndpoint}imconnector.activate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        auth: accessToken,
+        CONNECTOR: connectorId,
+        LINE: lineId,
+        ACTIVE: 1
+      })
+    });
+    const activateResult = await activateResponse.json();
+    console.log("Reactivate result:", JSON.stringify(activateResult));
+
+    // 2. Set connector data
+    const dataSetResponse = await fetch(`${clientEndpoint}imconnector.connector.data.set`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        auth: accessToken,
+        CONNECTOR: connectorId,
+        LINE: lineId,
+        DATA: {
+          id: `${connectorId}_line_${lineId}`,
+          url: eventsUrl,
+          url_im: eventsUrl,
+          name: "Thoth WhatsApp"
+        }
+      })
+    });
+    const dataSetResult = await dataSetResponse.json();
+    console.log("Data set result:", JSON.stringify(dataSetResult));
+
+    // 3. Rebind events
+    const eventsToRebind = [
+      "OnImConnectorMessageAdd",
+      "OnImConnectorDialogStart", 
+      "OnImConnectorDialogFinish",
+      "OnImConnectorStatusDelete"
+    ];
+
+    for (const eventName of eventsToRebind) {
+      try {
+        await fetch(`${clientEndpoint}event.bind`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            auth: accessToken,
+            event: eventName,
+            handler: eventsUrl,
+            auth_type: 0,
+            event_type: "online"
+          })
+        });
+      } catch (e) {
+        console.error(`Error rebinding ${eventName}:`, e);
+      }
+    }
+
+    // 4. Update config with recovery status
+    const reactivationSuccess = !!activateResult.result || activateResult.error === "CONNECTOR_ALREADY_EXISTS";
+    
+    await supabase
+      .from("integrations")
+      .update({
+        config: {
+          ...config,
+          connector_active: reactivationSuccess,
+          connector_recovered_at: new Date().toISOString(),
+          auto_recovery_count: (config.auto_recovery_count || 0) + 1,
+          last_auto_recovery_result: reactivationSuccess ? "success" : "failed"
+        },
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", integration.id);
+
+    console.log("Auto-recovery completed:", reactivationSuccess ? "SUCCESS" : "FAILED");
+
+  } catch (error) {
+    console.error("Error in auto-recovery:", error);
+    
+    await supabase
+      .from("integrations")
+      .update({
+        config: {
+          ...config,
+          connector_active: false,
+          auto_recovery_failed_at: new Date().toISOString(),
+          auto_recovery_error: error instanceof Error ? error.message : "Unknown error"
+        },
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", integration.id);
   }
 }

@@ -73,6 +73,7 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
   const [registeringRobot, setRegisteringRobot] = useState(false);
   const [registeringSmsProvider, setRegisteringSmsProvider] = useState(false);
   const [testingSmsProvider, setTestingSmsProvider] = useState(false);
+  const [reactivatingConnector, setReactivatingConnector] = useState(false);
   const [verification, setVerification] = useState<VerificationResult | null>(null);
   const [isHealthy, setIsHealthy] = useState<boolean | null>(null);
   const [summary, setSummary] = useState<string>("");
@@ -87,6 +88,7 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
   const robotScopeMissing = config.robot_scope_missing as boolean || false;
   const smsProviderRegistered = config.sms_provider_registered as boolean || false;
   const smsProviderScopeMissing = config.sms_provider_scope_missing as boolean || false;
+  const connectorActive = config.connector_active as boolean ?? true; // Default to true if not set
   const memberId = config.member_id as string || "";
   
   const linkedInstance = instances.find(i => i.id === instanceId);
@@ -366,6 +368,38 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
     }
   };
 
+  // Reactivate connector when deactivated
+  const handleReactivateConnector = async () => {
+    if (!integration?.id) {
+      toast.error("Integração não encontrada");
+      return;
+    }
+
+    setReactivatingConnector(true);
+    
+    try {
+      const response = await supabase.functions.invoke("bitrix24-webhook", {
+        body: {
+          action: "reactivate_connector",
+          integration_id: integration.id,
+        }
+      });
+
+      if (response.data?.success) {
+        toast.success(response.data.message || "Conector reativado com sucesso!");
+        await handleVerifyAndFix(true);
+        onRefresh();
+      } else {
+        toast.error(response.data?.error || "Erro ao reativar conector");
+      }
+    } catch (error) {
+      console.error("Error reactivating connector:", error);
+      toast.error("Erro ao reativar conector");
+    } finally {
+      setReactivatingConnector(false);
+    }
+  };
+
   // Determine status badge
   const getStatusBadge = () => {
     if (verifying) {
@@ -461,6 +495,32 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
               </div>
             )}
           </div>
+
+          {/* Connector Inactive Warning with Reactivate Button */}
+          {!connectorActive && (
+            <Alert className="border-red-500/30 bg-red-500/5">
+              <XCircle className="h-4 w-4 text-red-500" />
+              <AlertDescription className="flex items-center justify-between">
+                <span className="text-sm">
+                  <strong>Conector desativado:</strong> O chatbot não aparece no Bitrix24.
+                </span>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={handleReactivateConnector}
+                  disabled={reactivatingConnector}
+                  className="ml-4"
+                >
+                  {reactivatingConnector ? (
+                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-3 w-3 mr-1" />
+                  )}
+                  Reativar Conector
+                </Button>
+              </AlertDescription>
+            </Alert>
+          )}
 
           {/* Verification Results - Only show if we have issues or warnings */}
           {verification && (criticalIssues.length > 0 || warnings.length > 0) && (
