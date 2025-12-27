@@ -1923,6 +1923,166 @@ async function handleActivateConnectorForLine(supabase: any, payload: any, supab
   }
 }
 
+// Handle reactivate_connector action - Reactivate connector when it was deactivated
+async function handleReactivateConnector(supabase: any, payload: any, supabaseUrl: string) {
+  console.log("=== REACTIVATE CONNECTOR ===");
+  const { integration_id } = payload;
+
+  if (!integration_id) {
+    return new Response(
+      JSON.stringify({ error: "integration_id é obrigatório" }),
+      { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const { data: integration, error: integrationError } = await supabase
+    .from("integrations")
+    .select("*")
+    .eq("id", integration_id)
+    .single();
+
+  if (integrationError || !integration) {
+    return new Response(
+      JSON.stringify({ error: "Integração não encontrada" }),
+      { status: 404, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const config = integration.config || {};
+  const connectorId = config.connector_id || "thoth_whatsapp";
+  const lineId = config.line_id || config.activated_line_id || 2;
+  const eventsUrl = `${supabaseUrl}/functions/v1/bitrix24-events`;
+
+  // IMPORTANT: Use config.domain for REST API calls
+  const clientEndpoint = config.domain ? `https://${config.domain}/rest/` : config.client_endpoint;
+  const accessToken = await refreshBitrixToken(integration, supabase);
+
+  if (!accessToken) {
+    return new Response(
+      JSON.stringify({ success: false, error: "Token de acesso não disponível" }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+
+  const results = {
+    connector_activated: false,
+    data_set: false,
+    events_bound: 0,
+    errors: [] as string[]
+  };
+
+  try {
+    // 1. Activate connector
+    console.log("Activating connector on line", lineId);
+    const activateResponse = await fetch(`${clientEndpoint}imconnector.activate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        auth: accessToken,
+        CONNECTOR: connectorId,
+        LINE: lineId,
+        ACTIVE: 1
+      })
+    });
+    const activateResult = await activateResponse.json();
+    console.log("Activate result:", JSON.stringify(activateResult));
+    results.connector_activated = !!activateResult.result || activateResult.error === "CONNECTOR_ALREADY_EXISTS";
+
+    // 2. Set connector data
+    console.log("Setting connector data...");
+    const dataSetResponse = await fetch(`${clientEndpoint}imconnector.connector.data.set`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        auth: accessToken,
+        CONNECTOR: connectorId,
+        LINE: lineId,
+        DATA: {
+          id: `${connectorId}_line_${lineId}`,
+          url: eventsUrl,
+          url_im: eventsUrl,
+          name: "Thoth WhatsApp"
+        }
+      })
+    });
+    const dataSetResult = await dataSetResponse.json();
+    console.log("Data set result:", JSON.stringify(dataSetResult));
+    results.data_set = !dataSetResult.error;
+
+    // 3. Rebind events
+    console.log("Rebinding events...");
+    const eventsToRebind = [
+      "OnImConnectorMessageAdd",
+      "OnImConnectorDialogStart", 
+      "OnImConnectorDialogFinish",
+      "OnImConnectorStatusDelete"
+    ];
+
+    for (const eventName of eventsToRebind) {
+      try {
+        const bindResponse = await fetch(`${clientEndpoint}event.bind`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            auth: accessToken,
+            event: eventName,
+            handler: eventsUrl,
+            auth_type: 0,
+            event_type: "online"
+          })
+        });
+        const bindResult = await bindResponse.json();
+        if (bindResult.result || bindResult.error === "HANDLER_ALREADY_BINDED") {
+          results.events_bound++;
+        }
+      } catch (e) {
+        results.errors.push(`Bind ${eventName}: ${e}`);
+      }
+    }
+
+    // 4. Update integration config
+    await supabase
+      .from("integrations")
+      .update({
+        config: {
+          ...config,
+          connector_active: results.connector_activated,
+          connector_reactivated_at: new Date().toISOString(),
+          manual_reactivation_count: (config.manual_reactivation_count || 0) + 1
+        },
+        updated_at: new Date().toISOString()
+      })
+      .eq("id", integration_id);
+
+    const success = results.connector_activated && results.events_bound >= 3;
+
+    return new Response(
+      JSON.stringify({ 
+        success,
+        message: success 
+          ? "Conector reativado com sucesso!" 
+          : "Reativação parcial - verifique o diagnóstico",
+        connector_activated: results.connector_activated,
+        data_set: results.data_set,
+        events_bound: results.events_bound,
+        errors: results.errors
+      }),
+      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+
+  } catch (error) {
+    console.error("Error reactivating connector:", error);
+    return new Response(
+      JSON.stringify({ 
+        success: false, 
+        error: error instanceof Error ? error.message : "Erro desconhecido",
+        results
+      }),
+      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+    );
+  }
+}
+
 // Handle create_channel action - Create a new Open Channel in Bitrix24
 async function handleCreateChannel(supabase: any, payload: any) {
   console.log("=== CREATE CHANNEL ===");
@@ -5524,6 +5684,11 @@ serve(async (req) => {
       return await handleForceReinstallEvents(supabase, payload, supabaseUrl);
     }
 
+    // Handle reactivate_connector action - reactivate connector when deactivated
+    if (action === "reactivate_connector" || payload.action === "reactivate_connector") {
+      return await handleReactivateConnector(supabase, payload, supabaseUrl);
+    }
+
     // Check if this is a robot execution call (bizproc.robot handler)
     if (payload.event_token || payload.EVENT_TOKEN || 
         (payload.properties && (payload.properties.phone || payload.properties.message)) ||
@@ -5628,7 +5793,8 @@ serve(async (req) => {
           "list_channels", "diagnose", "auto_setup", "cleanup", "reconfigure_connector",
           "list_bot_events", "get_bound_events", "cleanup_duplicate_events", "register_robot",
           "get_connector_lines", "activate_line", "sync_contacts", "complete_setup",
-          "rebind_events_to_new_url", "rebind_placements", "check_app_installed", "force_reinstall_events"
+          "rebind_events_to_new_url", "rebind_placements", "check_app_installed", "force_reinstall_events",
+          "reactivate_connector"
         ]
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
