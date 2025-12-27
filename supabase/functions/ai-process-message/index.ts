@@ -223,12 +223,23 @@ serve(async (req) => {
         }
       }
 
-      // Check conversation attendance_mode
+      // Check conversation attendance_mode and processing_blocked
       const { data: conversation } = await supabase
         .from("conversations")
-        .select("attendance_mode, bot_state, assigned_to")
+        .select("attendance_mode, bot_state, assigned_to, processing_blocked")
         .eq("id", conversation_id)
         .single();
+
+      // ANTI-LOOP: Skip if processing is blocked (human took over)
+      if (conversation?.processing_blocked === true) {
+        console.log("SKIP: Conversation processing_blocked is true, human took over");
+        return new Response(JSON.stringify({ 
+          skipped: true, 
+          reason: "Processing blocked - human takeover" 
+        }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
 
       if (conversation?.attendance_mode === "human") {
         console.log("SKIP: Conversation is in human mode, bot should not respond");
@@ -505,6 +516,25 @@ serve(async (req) => {
         } catch (ttsErr) {
           console.error("TTS error, falling back to text:", ttsErr);
         }
+      }
+
+      // === CRITICAL: Double-check before sending message ===
+      // Re-fetch conversation state to prevent race condition where human took over during AI processing
+      const { data: finalConvCheck } = await supabase
+        .from("conversations")
+        .select("attendance_mode, processing_blocked")
+        .eq("id", conversation_id)
+        .single();
+
+      if (finalConvCheck?.processing_blocked === true || finalConvCheck?.attendance_mode === "human") {
+        console.log("ABORT: Conversation transferred to human during AI processing - NOT sending message");
+        return new Response(JSON.stringify({ 
+          skipped: true, 
+          reason: "Human took over during AI processing",
+          ai_content_generated: true
+        }), {
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
       }
 
       // Send message via WhatsApp (audio or text)
