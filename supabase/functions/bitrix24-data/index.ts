@@ -323,6 +323,63 @@ Deno.serve(async (req) => {
         break;
       }
 
+      // ============ BOT PUBLISHING ============
+      case "publish_persona_bot": {
+        console.log(`[bitrix24-data] Publishing persona ${data.persona_id} as bot`);
+        
+        // Call bitrix24-bot-register to register the persona as a bot
+        const response = await fetch(`${supabaseUrl}/functions/v1/bitrix24-bot-register`, {
+          method: "POST",
+          headers: { 
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${supabaseServiceKey}`
+          },
+          body: JSON.stringify({
+            action: "register_persona",
+            workspace_id: workspaceId,
+            persona_id: data.persona_id
+          })
+        });
+
+        const botResult = await response.json();
+        
+        if (!response.ok || botResult.error) {
+          throw new Error(botResult.error || `Failed to register bot: HTTP ${response.status}`);
+        }
+
+        console.log(`[bitrix24-data] Bot registered:`, botResult);
+        result = botResult;
+        break;
+      }
+
+      case "unpublish_persona_bot": {
+        console.log(`[bitrix24-data] Unpublishing persona ${data.persona_id} as bot`);
+        
+        // Call bitrix24-bot-register to unregister the persona as a bot
+        const response = await fetch(`${supabaseUrl}/functions/v1/bitrix24-bot-register`, {
+          method: "POST",
+          headers: { 
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${supabaseServiceKey}`
+          },
+          body: JSON.stringify({
+            action: "unregister_persona",
+            workspace_id: workspaceId,
+            persona_id: data.persona_id
+          })
+        });
+
+        const botResult = await response.json();
+        
+        if (!response.ok || botResult.error) {
+          throw new Error(botResult.error || `Failed to unregister bot: HTTP ${response.status}`);
+        }
+
+        console.log(`[bitrix24-data] Bot unregistered:`, botResult);
+        result = botResult;
+        break;
+      }
+
       default:
         return new Response(
           JSON.stringify({ error: `Unknown action: ${action}` }),

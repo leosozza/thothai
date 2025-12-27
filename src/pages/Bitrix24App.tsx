@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Loader2, Bot, BookOpen, Settings, Phone, LayoutDashboard, AlertCircle, ExternalLink, RefreshCw, RotateCcw, Search, Stethoscope, CheckCircle, XCircle, Info, GitBranch, Plus, Trash2, Power } from "lucide-react";
+import { Loader2, Bot, BookOpen, Settings, Phone, LayoutDashboard, AlertCircle, ExternalLink, RefreshCw, RotateCcw, Search, Stethoscope, CheckCircle, XCircle, Info, GitBranch, Plus, Trash2, Power, MessageSquare } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -1015,6 +1015,7 @@ function PersonasView({ memberId }: { memberId: string | null }) {
   const [loading, setLoading] = useState(true);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [editingPersona, setEditingPersona] = useState<any>(null);
+  const [publishingBot, setPublishingBot] = useState<string | null>(null);
   const [newPersona, setNewPersona] = useState({ 
     name: "", 
     description: "", 
@@ -1156,6 +1157,45 @@ function PersonasView({ memberId }: { memberId: string | null }) {
       temperature: persona.temperature || 0.7
     });
     setCreateDialogOpen(true);
+  };
+
+  const handlePublishBot = async (personaId: string) => {
+    if (!memberId) return;
+    
+    try {
+      setPublishingBot(personaId);
+      const result = await callBitrixData("publish_persona_bot", memberId, { persona_id: personaId });
+      
+      if (result.error) throw new Error(result.error);
+      
+      toast.success("Bot publicado no Bitrix24!");
+      fetchPersonas();
+    } catch (err: any) {
+      console.error("Error publishing bot:", err);
+      toast.error("Erro ao publicar bot: " + err.message);
+    } finally {
+      setPublishingBot(null);
+    }
+  };
+
+  const handleUnpublishBot = async (personaId: string) => {
+    if (!memberId) return;
+    if (!confirm("Tem certeza que deseja remover este bot do Bitrix24?")) return;
+    
+    try {
+      setPublishingBot(personaId);
+      const result = await callBitrixData("unpublish_persona_bot", memberId, { persona_id: personaId });
+      
+      if (result.error) throw new Error(result.error);
+      
+      toast.success("Bot removido do Bitrix24");
+      fetchPersonas();
+    } catch (err: any) {
+      console.error("Error unpublishing bot:", err);
+      toast.error("Erro ao remover bot: " + err.message);
+    } finally {
+      setPublishingBot(null);
+    }
   };
 
   if (!memberId) {
@@ -1330,6 +1370,12 @@ function PersonasView({ memberId }: { memberId: string | null }) {
                         {persona.is_default && (
                           <Badge variant="default" className="text-xs">Padrão</Badge>
                         )}
+                        {persona.bitrix_bot_id && (
+                          <Badge variant="outline" className="text-xs bg-green-100 text-green-700 border-green-300">
+                            <MessageSquare className="h-3 w-3 mr-1" />
+                            Bot Ativo
+                          </Badge>
+                        )}
                       </div>
                       <p className="text-sm text-muted-foreground">
                         {persona.description || "Sem descrição"}
@@ -1348,6 +1394,37 @@ function PersonasView({ memberId }: { memberId: string | null }) {
                         onClick={() => handleSetDefault(persona.id)}
                       >
                         Definir Padrão
+                      </Button>
+                    )}
+                    {persona.bitrix_bot_id ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleUnpublishBot(persona.id)}
+                        disabled={publishingBot === persona.id}
+                        className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                      >
+                        {publishingBot === persona.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                        ) : (
+                          <XCircle className="h-4 w-4 mr-1" />
+                        )}
+                        Remover Bot
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handlePublishBot(persona.id)}
+                        disabled={publishingBot === persona.id}
+                        className="text-green-600 hover:text-green-700 hover:bg-green-50"
+                      >
+                        {publishingBot === persona.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                        ) : (
+                          <MessageSquare className="h-4 w-4 mr-1" />
+                        )}
+                        Publicar Bot
                       </Button>
                     )}
                     <Button
