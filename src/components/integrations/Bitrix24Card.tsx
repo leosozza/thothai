@@ -72,6 +72,7 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
   const [reconfiguring, setReconfiguring] = useState(false);
   const [registeringRobot, setRegisteringRobot] = useState(false);
   const [registeringSmsProvider, setRegisteringSmsProvider] = useState(false);
+  const [testingSmsProvider, setTestingSmsProvider] = useState(false);
   const [verification, setVerification] = useState<VerificationResult | null>(null);
   const [isHealthy, setIsHealthy] = useState<boolean | null>(null);
   const [summary, setSummary] = useState<string>("");
@@ -329,6 +330,39 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
       toast.error("Erro ao registrar provedor SMS");
     } finally {
       setRegisteringSmsProvider(false);
+    }
+  };
+
+  // Test SMS Provider
+  const handleTestSmsProvider = async () => {
+    if (!integration?.id) {
+      toast.error("Integração não encontrada");
+      return;
+    }
+
+    setTestingSmsProvider(true);
+    
+    try {
+      const response = await supabase.functions.invoke("bitrix24-webhook", {
+        body: {
+          action: "test_sms_provider",
+          integration_id: integration.id,
+        }
+      });
+
+      if (response.data?.success) {
+        toast.success(response.data.message);
+        if (response.data.how_to_use) {
+          toast.info(response.data.how_to_use, { duration: 8000 });
+        }
+      } else {
+        toast.warning(response.data?.message || response.data?.error || "Provedor não encontrado");
+      }
+    } catch (error) {
+      console.error("Error testing SMS provider:", error);
+      toast.error("Erro ao testar provedor SMS");
+    } finally {
+      setTestingSmsProvider(false);
     }
   };
 
@@ -592,6 +626,20 @@ export function Bitrix24Card({ integration, instances, workspaceId, onRefresh }:
                     Registrar SMS
                   </Button>
                 )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={handleTestSmsProvider}
+                  disabled={testingSmsProvider}
+                  className="text-xs"
+                  title="Testar provedor SMS"
+                >
+                  {testingSmsProvider ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <CheckCircle2 className="h-3 w-3" />
+                  )}
+                </Button>
                 <Badge 
                   variant="outline" 
                   className={smsProviderRegistered 
