@@ -237,6 +237,7 @@ serve(async (req) => {
             JSON.stringify({
               found: true,
               integration_id: integration.id,
+              workspace_id: integration.workspace_id || null, // NEW: Return workspace_id for CRUD operations
               domain: integration.config?.domain,
               registered: integration.config?.registered || false,
               instance_id: integration.config?.instance_id,

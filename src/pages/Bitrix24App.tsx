@@ -21,6 +21,7 @@ type AppView = "loading" | "pending" | "dashboard" | "instances" | "training" | 
 interface BitrixStatus {
   found: boolean;
   integration_id?: string;
+  workspace_id?: string; // NEW: workspace_id for CRUD operations
   domain?: string;
   is_active?: boolean;
   has_access_token?: boolean;
@@ -293,10 +294,10 @@ export default function Bitrix24App() {
       {/* Main content */}
       <main className="flex-1 p-6 overflow-auto">
         {view === "dashboard" && <DashboardView status={status} />}
-        {view === "instances" && <InstancesView status={status} />}
-        {view === "flows" && <FlowsView status={status} />}
-        {view === "training" && <TrainingView />}
-        {view === "personas" && <PersonasView />}
+        {view === "instances" && <InstancesView status={status} workspaceId={status?.workspace_id} />}
+        {view === "flows" && <FlowsView status={status} workspaceId={status?.workspace_id} />}
+        {view === "training" && <TrainingView workspaceId={status?.workspace_id} />}
+        {view === "personas" && <PersonasView workspaceId={status?.workspace_id} />}
         {view === "settings" && <SettingsView domain={domain} status={status} memberId={memberId} onReload={loadData} />}
       </main>
     </div>
@@ -382,49 +383,641 @@ function DashboardView({ status }: { status: BitrixStatus | null }) {
   );
 }
 
-// Instances View
-function InstancesView({ status }: { status: BitrixStatus | null }) {
-  const instances = status?.instances || [];
+// Instances View - Full CRUD
+function InstancesView({ status, workspaceId }: { status: BitrixStatus | null; workspaceId?: string }) {
+  const [instances, setInstances] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [qrDialogOpen, setQrDialogOpen] = useState(false);
+  const [selectedInstance, setSelectedInstance] = useState<any>(null);
+  const [connecting, setConnecting] = useState(false);
+  const [newInstance, setNewInstance] = useState({ 
+    name: "", 
+    connection_type: "waba",
+    gupshup_api_key: "",
+    gupshup_app_id: ""
+  });
 
-  return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Instâncias WhatsApp</h1>
-        <p className="text-muted-foreground">Gerencie suas conexões WhatsApp</p>
-      </div>
+  useEffect(() => {
+    if (workspaceId) {
+      fetchInstances();
+    } else {
+      setLoading(false);
+    }
+  }, [workspaceId]);
 
-      {instances.length === 0 ? (
+  const fetchInstances = async () => {
+    if (!workspaceId) return;
+    
+    try {
+      const { data, error } = await supabase
+        .from("instances")
+        .select("*")
+        .eq("workspace_id", workspaceId)
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+      setInstances(data || []);
+    } catch (err) {
+      console.error("Error fetching instances:", err);
+      toast.error("Erro ao carregar instâncias");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCreateInstance = async () => {
+    if (!newInstance.name.trim()) {
+      toast.error("Nome da instância é obrigatório");
+      return;
+    }
+
+    if (!workspaceId) {
+      toast.error("Workspace não encontrado. Vincule seu Bitrix24 a um workspace primeiro.");
+      return;
+    }
+
+    try {
+      // Get current user
+      const { data: { user } } = await supabase.auth.getUser();
+      const userId = user?.id;
+
+      // For Bitrix24 context, we may not have a logged user, so we get owner from workspace
+      let effectiveUserId = userId;
+      if (!effectiveUserId) {
+        const { data: workspace } = await supabase
+          .from("workspaces")
+          .select("owner_id")
+          .eq("id", workspaceId)
+          .single();
+        effectiveUserId = workspace?.owner_id;
+      }
+
+      if (!effectiveUserId) {
+        toast.error("Não foi possível identificar o usuário");
+        return;
+      }
+
+      const { data: instance, error } = await supabase
+        .from("instances")
+        .insert({
+          name: newInstance.name,
+          workspace_id: workspaceId,
+          user_id: effectiveUserId,
+          connection_type: newInstance.connection_type,
+          status: "disconnected",
+          ...(newInstance.connection_type === "oficial" && {
+            gupshup_api_key: newInstance.gupshup_api_key,
+            gupshup_app_id: newInstance.gupshup_app_id,
+          })
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      toast.success("Instância criada! Clique em Conectar para vincular seu WhatsApp.");
+      setCreateDialogOpen(false);
+      setNewInstance({ name: "", connection_type: "waba", gupshup_api_key: "", gupshup_app_id: "" });
+      fetchInstances();
+      
+      // Auto open connection dialog for WABA
+      if (newInstance.connection_type === "waba" && instance) {
+        setSelectedInstance(instance);
+        handleConnectInstance(instance);
+      }
+    } catch (err: any) {
+      toast.error("Erro ao criar instância: " + err.message);
+    }
+  };
+
+  const handleConnectInstance = async (instance: any) => {
+    try {
+      setConnecting(true);
+      setSelectedInstance(instance);
+
+      const { data, error } = await supabase.functions.invoke("wapi-connect", {
+        body: { instance_id: instance.id }
+      });
+
+      if (error) throw error;
+
+      if (data?.qr_code) {
+        // Update instance with QR code
+        await supabase
+          .from("instances")
+          .update({ qr_code: data.qr_code })
+          .eq("id", instance.id);
+        
+        setSelectedInstance({ ...instance, qr_code: data.qr_code });
+        setQrDialogOpen(true);
+      } else if (data?.status === "connected") {
+        toast.success("WhatsApp já está conectado!");
+        fetchInstances();
+      } else {
+        toast.info("Gerando QR Code...");
+        setQrDialogOpen(true);
+      }
+    } catch (err: any) {
+      toast.error("Erro ao conectar: " + err.message);
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  const handleDeleteInstance = async (instanceId: string) => {
+    if (!confirm("Tem certeza que deseja excluir esta instância?")) return;
+
+    try {
+      const { error } = await supabase
+        .from("instances")
+        .delete()
+        .eq("id", instanceId);
+
+      if (error) throw error;
+
+      toast.success("Instância excluída");
+      fetchInstances();
+    } catch (err: any) {
+      toast.error("Erro: " + err.message);
+    }
+  };
+
+  const statusConfig: Record<string, { label: string; color: string }> = {
+    connected: { label: "Conectado", color: "bg-green-500" },
+    disconnected: { label: "Desconectado", color: "bg-red-500" },
+    connecting: { label: "Conectando...", color: "bg-yellow-500" },
+  };
+
+  if (!workspaceId) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold">Instâncias WhatsApp</h1>
+          <p className="text-muted-foreground">Gerencie suas conexões WhatsApp</p>
+        </div>
         <Card>
           <CardContent className="py-12 text-center">
-            <Phone className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-            <h3 className="font-medium mb-2">Nenhuma instância encontrada</h3>
+            <AlertCircle className="h-12 w-12 text-amber-500 mx-auto mb-4" />
+            <h3 className="font-medium mb-2">Workspace não vinculado</h3>
             <p className="text-sm text-muted-foreground mb-4">
-              Acesse o painel completo em chat.thoth24.com para criar instâncias
+              Para gerenciar instâncias, primeiro vincule seu Bitrix24 a um workspace Thoth.
             </p>
             <Button asChild>
               <a href="https://chat.thoth24.com/instances" target="_blank" rel="noopener noreferrer">
-                Abrir Painel Completo
+                <ExternalLink className="h-4 w-4 mr-2" />
+                Acessar Painel Principal
               </a>
             </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Instâncias WhatsApp</h1>
+          <p className="text-muted-foreground">Gerencie suas conexões WhatsApp</p>
+        </div>
+        <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+          <DialogTrigger asChild>
+            <Button>
+              <Plus className="h-4 w-4 mr-2" />
+              Nova Instância
+            </Button>
+          </DialogTrigger>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Criar Nova Instância</DialogTitle>
+              <DialogDescription>
+                Conecte um novo número WhatsApp
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label>Nome da Instância</Label>
+                <Input
+                  value={newInstance.name}
+                  onChange={(e) => setNewInstance({ ...newInstance, name: e.target.value })}
+                  placeholder="Ex: WhatsApp Comercial"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Tipo de Conexão</Label>
+                <Select
+                  value={newInstance.connection_type}
+                  onValueChange={(v) => setNewInstance({ ...newInstance, connection_type: v })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="waba">WhatsApp WABA (QR Code)</SelectItem>
+                    <SelectItem value="oficial">WhatsApp Oficial (Gupshup)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {newInstance.connection_type === "oficial" && (
+                <>
+                  <div className="space-y-2">
+                    <Label>Gupshup API Key</Label>
+                    <Input
+                      value={newInstance.gupshup_api_key}
+                      onChange={(e) => setNewInstance({ ...newInstance, gupshup_api_key: e.target.value })}
+                      placeholder="Sua API Key do Gupshup"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Gupshup App ID</Label>
+                    <Input
+                      value={newInstance.gupshup_app_id}
+                      onChange={(e) => setNewInstance({ ...newInstance, gupshup_app_id: e.target.value })}
+                      placeholder="ID do App no Gupshup"
+                    />
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setCreateDialogOpen(false)}>
+                Cancelar
+              </Button>
+              <Button onClick={handleCreateInstance}>
+                Criar Instância
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      {/* QR Code Dialog */}
+      <Dialog open={qrDialogOpen} onOpenChange={setQrDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Conectar WhatsApp</DialogTitle>
+            <DialogDescription>
+              Escaneie o QR Code com seu WhatsApp
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col items-center py-4">
+            {selectedInstance?.qr_code ? (
+              <img 
+                src={selectedInstance.qr_code.startsWith("data:") 
+                  ? selectedInstance.qr_code 
+                  : `data:image/png;base64,${selectedInstance.qr_code}`
+                } 
+                alt="QR Code" 
+                className="w-64 h-64"
+              />
+            ) : (
+              <div className="w-64 h-64 flex items-center justify-center bg-muted rounded">
+                <Loader2 className="h-8 w-8 animate-spin" />
+              </div>
+            )}
+            <p className="text-sm text-muted-foreground mt-4 text-center">
+              1. Abra o WhatsApp no seu celular<br/>
+              2. Vá em Configurações → Aparelhos conectados<br/>
+              3. Toque em "Conectar um aparelho"<br/>
+              4. Escaneie este QR Code
+            </p>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setQrDialogOpen(false)}>
+              Fechar
+            </Button>
+            <Button onClick={() => handleConnectInstance(selectedInstance)} disabled={connecting}>
+              {connecting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+              Atualizar QR Code
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {loading ? (
+        <div className="flex justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      ) : instances.length === 0 ? (
+        <Card>
+          <CardContent className="py-12 text-center">
+            <Phone className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+            <h3 className="font-medium mb-2">Nenhuma instância criada</h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              Clique em "Nova Instância" para conectar seu primeiro WhatsApp
+            </p>
           </CardContent>
         </Card>
       ) : (
         <div className="grid gap-4">
           {instances.map((instance) => (
             <Card key={instance.id}>
-              <CardContent className="flex items-center justify-between py-4">
-                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-full bg-green-500/10 flex items-center justify-center">
-                    <Phone className="h-5 w-5 text-green-500" />
+              <CardContent className="py-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className={cn(
+                      "w-10 h-10 rounded-full flex items-center justify-center",
+                      instance.status === "connected" ? "bg-green-500/10" : "bg-muted"
+                    )}>
+                      <Phone className={cn(
+                        "h-5 w-5",
+                        instance.status === "connected" ? "text-green-500" : "text-muted-foreground"
+                      )} />
+                    </div>
+                    <div>
+                      <h4 className="font-medium">{instance.name}</h4>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-muted-foreground">
+                          {instance.phone_number || "Não conectado"}
+                        </span>
+                        <Badge variant="secondary" className="text-xs">
+                          {instance.connection_type === "oficial" ? "Oficial" : "WABA"}
+                        </Badge>
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <h4 className="font-medium">{instance.name}</h4>
-                    <p className="text-sm text-muted-foreground">{instance.phone_number || "Sem número"}</p>
+                  <div className="flex items-center gap-2">
+                    <Badge 
+                      variant={instance.status === "connected" ? "default" : "secondary"}
+                      className={instance.status === "connected" ? "bg-green-500" : ""}
+                    >
+                      {statusConfig[instance.status]?.label || instance.status}
+                    </Badge>
+                    {instance.status !== "connected" && instance.connection_type === "waba" && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleConnectInstance(instance)}
+                        disabled={connecting}
+                      >
+                        {connecting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Conectar"}
+                      </Button>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleDeleteInstance(instance.id)}
+                    >
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
                   </div>
                 </div>
-                <Badge variant={instance.status === "connected" ? "default" : "secondary"}>
-                  {instance.status === "connected" ? "Conectado" : instance.status}
-                </Badge>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Training View - Full CRUD
+function TrainingView({ workspaceId }: { workspaceId?: string }) {
+  const [documents, setDocuments] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [newDoc, setNewDoc] = useState({ title: "", content: "", source_type: "text" });
+
+  useEffect(() => {
+    if (workspaceId) {
+      fetchDocuments();
+    } else {
+      setLoading(false);
+    }
+  }, [workspaceId]);
+
+  const fetchDocuments = async () => {
+    if (!workspaceId) return;
+    
+    try {
+      const { data, error } = await supabase
+        .from("knowledge_documents")
+        .select("*")
+        .eq("workspace_id", workspaceId)
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+      setDocuments(data || []);
+    } catch (err) {
+      console.error("Error fetching documents:", err);
+      toast.error("Erro ao carregar documentos");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCreateDocument = async () => {
+    if (!newDoc.title.trim()) {
+      toast.error("Título é obrigatório");
+      return;
+    }
+
+    if (!workspaceId) {
+      toast.error("Workspace não encontrado");
+      return;
+    }
+
+    try {
+      setUploading(true);
+
+      const { error } = await supabase
+        .from("knowledge_documents")
+        .insert({
+          title: newDoc.title,
+          content: newDoc.content,
+          source_type: newDoc.source_type,
+          workspace_id: workspaceId,
+          status: "ready"
+        });
+
+      if (error) throw error;
+
+      toast.success("Documento criado com sucesso!");
+      setCreateDialogOpen(false);
+      setNewDoc({ title: "", content: "", source_type: "text" });
+      fetchDocuments();
+    } catch (err: any) {
+      toast.error("Erro ao criar documento: " + err.message);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDeleteDocument = async (docId: string) => {
+    if (!confirm("Tem certeza que deseja excluir este documento?")) return;
+
+    try {
+      const { error } = await supabase
+        .from("knowledge_documents")
+        .delete()
+        .eq("id", docId);
+
+      if (error) throw error;
+
+      toast.success("Documento excluído");
+      fetchDocuments();
+    } catch (err: any) {
+      toast.error("Erro: " + err.message);
+    }
+  };
+
+  const statusLabels: Record<string, { label: string; color: string }> = {
+    pending: { label: "Processando", color: "bg-yellow-500" },
+    processing: { label: "Processando", color: "bg-yellow-500" },
+    ready: { label: "Pronto", color: "bg-green-500" },
+    error: { label: "Erro", color: "bg-red-500" }
+  };
+
+  if (!workspaceId) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold">Treinamento do Bot</h1>
+          <p className="text-muted-foreground">Configure como seu bot deve responder</p>
+        </div>
+        <Card>
+          <CardContent className="py-12 text-center">
+            <AlertCircle className="h-12 w-12 text-amber-500 mx-auto mb-4" />
+            <h3 className="font-medium mb-2">Workspace não vinculado</h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              Para adicionar documentos de treinamento, primeiro vincule seu Bitrix24 a um workspace Thoth.
+            </p>
+            <Button asChild>
+              <a href="https://chat.thoth24.com/training" target="_blank" rel="noopener noreferrer">
+                <ExternalLink className="h-4 w-4 mr-2" />
+                Acessar Painel Principal
+              </a>
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Treinamento do Bot</h1>
+          <p className="text-muted-foreground">Adicione documentos para treinar seu bot</p>
+        </div>
+        <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+          <DialogTrigger asChild>
+            <Button>
+              <Plus className="h-4 w-4 mr-2" />
+              Novo Documento
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Adicionar Documento de Treinamento</DialogTitle>
+              <DialogDescription>
+                Adicione informações que o bot deve usar para responder
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label>Título</Label>
+                <Input
+                  value={newDoc.title}
+                  onChange={(e) => setNewDoc({ ...newDoc, title: e.target.value })}
+                  placeholder="Ex: FAQ - Perguntas Frequentes"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Tipo</Label>
+                <Select
+                  value={newDoc.source_type}
+                  onValueChange={(v) => setNewDoc({ ...newDoc, source_type: v })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="text">Texto</SelectItem>
+                    <SelectItem value="faq">FAQ</SelectItem>
+                    <SelectItem value="manual">Manual</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Conteúdo</Label>
+                <Textarea
+                  value={newDoc.content}
+                  onChange={(e) => setNewDoc({ ...newDoc, content: e.target.value })}
+                  placeholder="Cole aqui as informações que o bot deve conhecer..."
+                  className="min-h-[200px]"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setCreateDialogOpen(false)}>
+                Cancelar
+              </Button>
+              <Button onClick={handleCreateDocument} disabled={uploading}>
+                {uploading && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+                Adicionar
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      {loading ? (
+        <div className="flex justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      ) : documents.length === 0 ? (
+        <Card>
+          <CardContent className="py-12 text-center">
+            <BookOpen className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+            <h3 className="font-medium mb-2">Nenhum documento de treinamento</h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              Adicione documentos com informações sobre sua empresa para treinar o bot
+            </p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid gap-4">
+          {documents.map((doc) => (
+            <Card key={doc.id}>
+              <CardContent className="py-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                      <BookOpen className="h-5 w-5 text-primary" />
+                    </div>
+                    <div>
+                      <h4 className="font-medium">{doc.title}</h4>
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Badge variant="secondary" className="text-xs">
+                          {doc.source_type}
+                        </Badge>
+                        {doc.chunks_count > 0 && (
+                          <span className="text-xs">{doc.chunks_count} chunks</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge 
+                      variant="secondary"
+                      className={statusLabels[doc.status]?.color || ""}
+                    >
+                      {statusLabels[doc.status]?.label || doc.status}
+                    </Badge>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleDeleteDocument(doc.id)}
+                    >
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
+                  </div>
+                </div>
               </CardContent>
             </Card>
           ))}
@@ -434,14 +1027,14 @@ function InstancesView({ status }: { status: BitrixStatus | null }) {
       <Card>
         <CardContent className="py-4">
           <p className="text-sm text-muted-foreground">
-            Para gerenciamento completo das instâncias (criar, editar, reconectar), acesse{" "}
+            Para upload de arquivos PDF, Word e outros formatos, acesse{" "}
             <a 
-              href="https://chat.thoth24.com/instances" 
+              href="https://chat.thoth24.com/training" 
               target="_blank" 
               rel="noopener noreferrer"
               className="text-primary hover:underline"
             >
-              chat.thoth24.com
+              chat.thoth24.com/training
             </a>
           </p>
         </CardContent>
@@ -450,62 +1043,395 @@ function InstancesView({ status }: { status: BitrixStatus | null }) {
   );
 }
 
-// Training View
-function TrainingView() {
+// Personas View - Full CRUD
+function PersonasView({ workspaceId }: { workspaceId?: string }) {
+  const [personas, setPersonas] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [editingPersona, setEditingPersona] = useState<any>(null);
+  const [newPersona, setNewPersona] = useState({ 
+    name: "", 
+    description: "", 
+    system_prompt: "",
+    welcome_message: "",
+    fallback_message: "",
+    temperature: 0.7
+  });
+
+  useEffect(() => {
+    if (workspaceId) {
+      fetchPersonas();
+    } else {
+      setLoading(false);
+    }
+  }, [workspaceId]);
+
+  const fetchPersonas = async () => {
+    if (!workspaceId) return;
+    
+    try {
+      const { data, error } = await supabase
+        .from("personas")
+        .select("*")
+        .eq("workspace_id", workspaceId)
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+      setPersonas(data || []);
+    } catch (err) {
+      console.error("Error fetching personas:", err);
+      toast.error("Erro ao carregar personas");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSavePersona = async () => {
+    const data = editingPersona || newPersona;
+    
+    if (!data.name.trim()) {
+      toast.error("Nome é obrigatório");
+      return;
+    }
+
+    if (!data.system_prompt.trim()) {
+      toast.error("Prompt do sistema é obrigatório");
+      return;
+    }
+
+    if (!workspaceId) {
+      toast.error("Workspace não encontrado");
+      return;
+    }
+
+    try {
+      if (editingPersona?.id) {
+        // Update existing
+        const { error } = await supabase
+          .from("personas")
+          .update({
+            name: data.name,
+            description: data.description,
+            system_prompt: data.system_prompt,
+            welcome_message: data.welcome_message,
+            fallback_message: data.fallback_message,
+            temperature: data.temperature
+          })
+          .eq("id", editingPersona.id);
+
+        if (error) throw error;
+        toast.success("Persona atualizada!");
+      } else {
+        // Create new
+        const { error } = await supabase
+          .from("personas")
+          .insert({
+            name: data.name,
+            description: data.description,
+            system_prompt: data.system_prompt,
+            welcome_message: data.welcome_message,
+            fallback_message: data.fallback_message,
+            temperature: data.temperature,
+            workspace_id: workspaceId,
+            is_active: true
+          });
+
+        if (error) throw error;
+        toast.success("Persona criada!");
+      }
+
+      setCreateDialogOpen(false);
+      setEditingPersona(null);
+      setNewPersona({ name: "", description: "", system_prompt: "", welcome_message: "", fallback_message: "", temperature: 0.7 });
+      fetchPersonas();
+    } catch (err: any) {
+      toast.error("Erro: " + err.message);
+    }
+  };
+
+  const handleToggleActive = async (personaId: string, isActive: boolean) => {
+    try {
+      const { error } = await supabase
+        .from("personas")
+        .update({ is_active: !isActive })
+        .eq("id", personaId);
+
+      if (error) throw error;
+      toast.success(isActive ? "Persona desativada" : "Persona ativada");
+      fetchPersonas();
+    } catch (err: any) {
+      toast.error("Erro: " + err.message);
+    }
+  };
+
+  const handleSetDefault = async (personaId: string) => {
+    try {
+      // Remove default from all
+      await supabase
+        .from("personas")
+        .update({ is_default: false })
+        .eq("workspace_id", workspaceId);
+
+      // Set this one as default
+      const { error } = await supabase
+        .from("personas")
+        .update({ is_default: true })
+        .eq("id", personaId);
+
+      if (error) throw error;
+      toast.success("Persona definida como padrão");
+      fetchPersonas();
+    } catch (err: any) {
+      toast.error("Erro: " + err.message);
+    }
+  };
+
+  const handleDeletePersona = async (personaId: string) => {
+    if (!confirm("Tem certeza que deseja excluir esta persona?")) return;
+
+    try {
+      const { error } = await supabase
+        .from("personas")
+        .delete()
+        .eq("id", personaId);
+
+      if (error) throw error;
+      toast.success("Persona excluída");
+      fetchPersonas();
+    } catch (err: any) {
+      toast.error("Erro: " + err.message);
+    }
+  };
+
+  const openEditDialog = (persona: any) => {
+    setEditingPersona({
+      ...persona,
+      temperature: persona.temperature || 0.7
+    });
+    setCreateDialogOpen(true);
+  };
+
+  if (!workspaceId) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-bold">Personas</h1>
+          <p className="text-muted-foreground">Configure a personalidade do seu bot</p>
+        </div>
+        <Card>
+          <CardContent className="py-12 text-center">
+            <AlertCircle className="h-12 w-12 text-amber-500 mx-auto mb-4" />
+            <h3 className="font-medium mb-2">Workspace não vinculado</h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              Para gerenciar personas, primeiro vincule seu Bitrix24 a um workspace Thoth.
+            </p>
+            <Button asChild>
+              <a href="https://chat.thoth24.com/personas" target="_blank" rel="noopener noreferrer">
+                <ExternalLink className="h-4 w-4 mr-2" />
+                Acessar Painel Principal
+              </a>
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  const currentData = editingPersona || newPersona;
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Treinamento do Bot</h1>
-        <p className="text-muted-foreground">Configure como seu bot deve responder</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Personas</h1>
+          <p className="text-muted-foreground">Configure a personalidade do seu bot</p>
+        </div>
+        <Dialog open={createDialogOpen} onOpenChange={(open) => {
+          setCreateDialogOpen(open);
+          if (!open) setEditingPersona(null);
+        }}>
+          <DialogTrigger asChild>
+            <Button onClick={() => setEditingPersona(null)}>
+              <Plus className="h-4 w-4 mr-2" />
+              Nova Persona
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>{editingPersona ? "Editar Persona" : "Criar Nova Persona"}</DialogTitle>
+              <DialogDescription>
+                Configure como o bot deve se comportar e responder
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Nome</Label>
+                  <Input
+                    value={currentData.name}
+                    onChange={(e) => editingPersona 
+                      ? setEditingPersona({ ...editingPersona, name: e.target.value })
+                      : setNewPersona({ ...newPersona, name: e.target.value })
+                    }
+                    placeholder="Ex: Assistente de Vendas"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Temperatura (Criatividade)</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    max="1"
+                    step="0.1"
+                    value={currentData.temperature}
+                    onChange={(e) => editingPersona 
+                      ? setEditingPersona({ ...editingPersona, temperature: parseFloat(e.target.value) })
+                      : setNewPersona({ ...newPersona, temperature: parseFloat(e.target.value) })
+                    }
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Descrição</Label>
+                <Input
+                  value={currentData.description || ""}
+                  onChange={(e) => editingPersona 
+                    ? setEditingPersona({ ...editingPersona, description: e.target.value })
+                    : setNewPersona({ ...newPersona, description: e.target.value })
+                  }
+                  placeholder="Breve descrição desta persona"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Prompt do Sistema *</Label>
+                <Textarea
+                  value={currentData.system_prompt}
+                  onChange={(e) => editingPersona 
+                    ? setEditingPersona({ ...editingPersona, system_prompt: e.target.value })
+                    : setNewPersona({ ...newPersona, system_prompt: e.target.value })
+                  }
+                  placeholder="Você é um assistente de vendas especializado em..."
+                  className="min-h-[150px]"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Mensagem de Boas-vindas</Label>
+                <Textarea
+                  value={currentData.welcome_message || ""}
+                  onChange={(e) => editingPersona 
+                    ? setEditingPersona({ ...editingPersona, welcome_message: e.target.value })
+                    : setNewPersona({ ...newPersona, welcome_message: e.target.value })
+                  }
+                  placeholder="Olá! Sou o assistente virtual. Como posso ajudar?"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Mensagem de Fallback</Label>
+                <Textarea
+                  value={currentData.fallback_message || ""}
+                  onChange={(e) => editingPersona 
+                    ? setEditingPersona({ ...editingPersona, fallback_message: e.target.value })
+                    : setNewPersona({ ...newPersona, fallback_message: e.target.value })
+                  }
+                  placeholder="Desculpe, não entendi. Pode reformular?"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setCreateDialogOpen(false)}>
+                Cancelar
+              </Button>
+              <Button onClick={handleSavePersona}>
+                {editingPersona ? "Salvar" : "Criar"}
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
 
-      <Card>
-        <CardContent className="py-12 text-center">
-          <BookOpen className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-          <h3 className="font-medium mb-2">Treinamento Avançado</h3>
-          <p className="text-sm text-muted-foreground mb-4">
-            Acesse o painel completo para adicionar documentos, FAQs e configurar o treinamento do bot
-          </p>
-          <Button asChild>
-            <a href="https://chat.thoth24.com/training" target="_blank" rel="noopener noreferrer">
-              Abrir Treinamento
-            </a>
-          </Button>
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
-// Personas View
-function PersonasView() {
-  return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">Personas</h1>
-        <p className="text-muted-foreground">Configure a personalidade do seu bot</p>
-      </div>
-
-      <Card>
-        <CardContent className="py-12 text-center">
-          <Bot className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-          <h3 className="font-medium mb-2">Gerenciar Personas</h3>
-          <p className="text-sm text-muted-foreground mb-4">
-            Acesse o painel completo para criar e editar personas com diferentes personalidades
-          </p>
-          <Button asChild>
-            <a href="https://chat.thoth24.com/personas" target="_blank" rel="noopener noreferrer">
-              Abrir Personas
-            </a>
-          </Button>
-        </CardContent>
-      </Card>
+      {loading ? (
+        <div className="flex justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      ) : personas.length === 0 ? (
+        <Card>
+          <CardContent className="py-12 text-center">
+            <Bot className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+            <h3 className="font-medium mb-2">Nenhuma persona criada</h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              Crie uma persona para definir como o bot deve se comportar
+            </p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid gap-4">
+          {personas.map((persona) => (
+            <Card key={persona.id}>
+              <CardContent className="py-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className={cn(
+                      "w-10 h-10 rounded-full flex items-center justify-center",
+                      persona.is_active ? "bg-primary/10" : "bg-muted"
+                    )}>
+                      <Bot className={cn(
+                        "h-5 w-5",
+                        persona.is_active ? "text-primary" : "text-muted-foreground"
+                      )} />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-medium">{persona.name}</h4>
+                        {persona.is_default && (
+                          <Badge variant="default" className="text-xs">Padrão</Badge>
+                        )}
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        {persona.description || "Sem descrição"}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      checked={persona.is_active}
+                      onCheckedChange={() => handleToggleActive(persona.id, persona.is_active)}
+                    />
+                    {!persona.is_default && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleSetDefault(persona.id)}
+                      >
+                        Definir Padrão
+                      </Button>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => openEditDialog(persona)}
+                    >
+                      <Settings className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => handleDeletePersona(persona.id)}
+                    >
+                      <Trash2 className="h-4 w-4 text-destructive" />
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
 // Flows View - Manage automation flows
-function FlowsView({ status }: { status: BitrixStatus | null }) {
+function FlowsView({ status, workspaceId }: { status: BitrixStatus | null; workspaceId?: string }) {
   const [flows, setFlows] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
@@ -538,18 +1464,24 @@ function FlowsView({ status }: { status: BitrixStatus | null }) {
       return;
     }
 
-    try {
+    // Use workspaceId from props if available, otherwise try to get from workspace_members
+    let effectiveWorkspaceId = workspaceId;
+    
+    if (!effectiveWorkspaceId) {
       const { data: workspaces } = await supabase
         .from("workspace_members")
         .select("workspace_id")
         .limit(1)
         .single();
+      effectiveWorkspaceId = workspaces?.workspace_id;
+    }
 
-      if (!workspaces?.workspace_id) {
-        toast.error("Workspace não encontrado");
-        return;
-      }
+    if (!effectiveWorkspaceId) {
+      toast.error("Workspace não encontrado");
+      return;
+    }
 
+    try {
       const intentTriggers = newFlow.intent_triggers
         ? newFlow.intent_triggers.split(",").map(t => t.trim()).filter(Boolean)
         : [];
@@ -562,7 +1494,7 @@ function FlowsView({ status }: { status: BitrixStatus | null }) {
           trigger_type: newFlow.trigger_type,
           trigger_value: newFlow.trigger_value || null,
           intent_triggers: intentTriggers,
-          workspace_id: workspaces.workspace_id,
+          workspace_id: effectiveWorkspaceId,
           nodes: [],
           edges: [],
           is_active: false
